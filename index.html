@@ -1,0 +1,2523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+<title>DevOps Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg-0:      #060c0d;
+    --bg-1:      #0a1416;
+    --surface:   rgba(255,255,255,0.04);
+    --surface-2: rgba(255,255,255,0.07);
+    --border:    rgba(255,255,255,0.09);
+    --border-2:  rgba(255,255,255,0.16);
+    --text:      #eef3f3;
+    --muted:     #7e9494;
+    --muted-2:   #54696a;
+    --accent:    #36d1ff;
+    --accent-2:  #6ee7ff;
+    --green:     #3ddc97;
+    --red:       #ff6b6b;
+    --yellow:    #ffc857;
+    --font-sans: 'Inter', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --radius-lg: 22px;
+    --radius-md: 16px;
+    --radius-sm: 10px;
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg-0);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── AMBIENT BACKGROUND ── */
+  #ambient {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 600px 500px at 50% 18%, rgba(54,209,255,0.10), transparent 65%),
+      radial-gradient(ellipse 800px 600px at 50% 100%, rgba(20,60,70,0.35), transparent 60%),
+      linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 45%, #050909 100%);
+  }
+
+  #app {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 10px;
+    flex-shrink: 0;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 0.3px;
+  }
+
+  .brand .mark {
+    width: 18px; height: 18px;
+    color: var(--accent);
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--muted-2);
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px rgba(61,220,151,0.7);
+    animation: pulse 2.2s infinite;
+  }
+
+  .clear-chat-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    margin-left: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border-2);
+    background: transparent;
+    color: var(--muted-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .clear-chat-btn svg { width: 14px; height: 14px; }
+  .clear-chat-btn:active { color: var(--accent-2); border-color: var(--accent-2); background: rgba(54,209,255,0.08); }
+
+  /* ── USER BADGE + MENU (OAuth identity) ── */
+  .user-badge {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1.5px solid var(--border-2);
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .user-avatar { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .user-menu {
+    display: none;
+    position: fixed;
+    top: 54px; right: 16px;
+    z-index: 50;
+    min-width: 190px;
+    padding: 6px;
+    background: rgba(15,26,28,0.95);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+  }
+  .user-menu.show { display: block; }
+  .user-menu-name {
+    padding: 8px 10px 6px;
+    font-size: 12.5px; font-weight: 600; color: var(--text);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .user-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-size: 12.5px; color: var(--red);
+    cursor: pointer;
+    transition: background .12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .user-menu-item:active { background: rgba(255,107,107,0.1); }
+  .user-menu-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+  /* ── LOGIN GATE ── */
+  #login-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: radial-gradient(ellipse 600px 500px at 50% 30%, rgba(54,209,255,0.08), transparent 65%), var(--bg-0);
+  }
+  #login-gate.show { display: flex; }
+  .login-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    max-width: 340px;
+    text-align: center;
+  }
+  .login-card h1 { font-size: 22px; font-weight: 600; color: var(--text); }
+  .login-card p { font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+  .github-connect-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 13px 26px;
+    background: var(--text);
+    color: #04181c;
+    border-radius: 100px;
+    font-size: 14.5px; font-weight: 600;
+    text-decoration: none;
+    transition: transform .12s, opacity .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .github-connect-btn:active { transform: scale(0.96); opacity: 0.9; }
+  .github-connect-btn svg { width: 19px; height: 19px; }
+  .login-scope-note {
+    font-size: 11px; color: var(--muted-2); line-height: 1.6;
+    max-width: 300px;
+  }
+  .login-scope-note code {
+    font-family: var(--font-mono);
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px; border-radius: 4px;
+    color: var(--accent-2);
+  }
+  .login-error-banner {
+    display: none;
+    margin-top: 14px;
+    padding: 9px 14px;
+    background: rgba(255,107,107,0.1);
+    border: 1px solid rgba(255,107,107,0.3);
+    border-radius: 10px;
+    font-size: 12px; color: var(--red);
+    max-width: 300px;
+  }
+  .login-error-banner.show { display: block; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+  }
+
+  /* ── SCROLL AREA ── */
+  #scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    scrollbar-width: none;
+  }
+  #scroll-area::-webkit-scrollbar { display: none; }
+
+  /* ── EMPTY STATE ── */
+  #empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+    padding: 24px 28px 12px;
+    text-align: center;
+    min-height: 0;
+  }
+
+  .emblem-ring {
+    width: 108px; height: 108px;
+    border-radius: 50%;
+    border: 1px solid rgba(54,209,255,0.22);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    animation: ring-breathe 4.5s ease-in-out infinite;
+  }
+
+  .emblem-ring::before {
+    content: '';
+    position: absolute;
+    inset: -22px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(54,209,255,0.16), transparent 70%);
+    filter: blur(4px);
+  }
+
+  @keyframes ring-breathe {
+    0%, 100% { transform: scale(1);    border-color: rgba(54,209,255,0.22); }
+    50%      { transform: scale(1.04); border-color: rgba(54,209,255,0.4); }
+  }
+
+  .emblem-star {
+    width: 38px; height: 38px;
+    color: var(--accent-2);
+    filter: drop-shadow(0 0 14px rgba(110,231,255,0.65));
+    animation: star-pulse 4.5s ease-in-out infinite;
+  }
+
+  @keyframes star-pulse {
+    0%, 100% { filter: drop-shadow(0 0 10px rgba(110,231,255,0.5)); }
+    50%      { filter: drop-shadow(0 0 20px rgba(110,231,255,0.85)); }
+  }
+
+  #empty-state h1 {
+    font-size: 21px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+
+  #empty-state p {
+    max-width: 290px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    max-width: 340px;
+    margin-top: 4px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 16px;
+    background: var(--surface);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.12s;
+  }
+
+  .chip:active {
+    transform: scale(0.96);
+    background: var(--surface-2);
+    border-color: rgba(54,209,255,0.4);
+    color: var(--accent-2);
+  }
+
+  /* ── MESSAGES ── */
+  #messages {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px 18px 18px;
+  }
+
+  .msg-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    animation: fadeUp 0.25s ease;
+    max-width: 100%;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg-wrap.user  { align-items: flex-end; align-self: flex-end; }
+  .msg-wrap.agent { align-items: flex-start; align-self: flex-start; }
+
+  .msg-label {
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--muted-2);
+    padding: 0 6px;
+    letter-spacing: 0.3px;
+  }
+
+  .msg-bubble {
+    max-width: 86vw;
+    padding: 13px 16px;
+    border-radius: 18px;
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: break-word;
+  }
+
+  .msg-wrap.user .msg-bubble {
+    background: linear-gradient(135deg, var(--accent) 0%, #1a9fd6 100%);
+    color: #04181c;
+    font-weight: 500;
+    border-bottom-right-radius: 5px;
+  }
+
+  .msg-wrap.agent .msg-bubble {
+    background: var(--surface);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-bottom-left-radius: 5px;
+  }
+
+  .msg-bubble.success { border-color: rgba(61,220,151,0.4); }
+  .msg-bubble.error   { border-color: rgba(255,107,107,0.4); }
+  .msg-bubble.warning { border-color: rgba(255,200,87,0.4); }
+  .msg-bubble.info    { border-color: rgba(54,209,255,0.4); }
+
+  .confirm-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .confirm-btn {
+    flex: 1;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s, transform .1s;
+  }
+  .confirm-btn:active { opacity: .8; transform: scale(.97); }
+  .confirm-btn.danger {
+    background: rgba(255,107,107,0.12);
+    border-color: rgba(255,107,107,0.5);
+    color: #ff6b6b;
+  }
+  .confirm-btn.cancel {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+    color: var(--text-dim, #9aa4b2);
+  }
+  .confirm-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .prompt-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .prompt-form input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-2);
+    background: rgba(0,0,0,0.25);
+    color: var(--text, #eaf2f2);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .prompt-form input:focus { border-color: var(--accent); }
+  .prompt-form .prompt-hint {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .prompt-form .prompt-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .prompt-btn {
+    flex: 1;
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s, transform .1s;
+  }
+  .prompt-btn:active { opacity: .8; transform: scale(.97); }
+  .prompt-btn.go {
+    background: rgba(54,209,255,0.14);
+    border-color: rgba(54,209,255,0.5);
+    color: var(--accent-2);
+  }
+  .prompt-btn.cancel {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+    color: var(--muted);
+  }
+  .prompt-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .msg-bubble strong { font-weight: 600; color: var(--accent-2); }
+  .msg-bubble code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: rgba(255,255,255,0.08);
+    padding: 1px 6px;
+    border-radius: 5px;
+    color: var(--green);
+  }
+  .msg-bubble pre {
+    margin-top: 8px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px;
+    overflow-x: auto;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text);
+    white-space: pre-wrap;
+  }
+  .msg-bubble a {
+    color: var(--accent-2);
+    text-decoration: none;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border-bottom: 1px solid rgba(110,231,255,0.3);
+  }
+
+  /* ── TYPING ── */
+  #typing-indicator {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 24px 8px;
+  }
+  #typing-indicator.show { display: flex; }
+
+  .typing-dots { display: flex; gap: 4px; }
+  .typing-dots span {
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+    40%           { transform: scale(1);   opacity: 1; }
+  }
+
+  /* ── COMMAND AUTOFILL SUGGESTIONS ── */
+  #suggest-panel {
+    display: none;
+    flex-direction: column;
+    max-height: 240px;
+    overflow-y: auto;
+    margin: 0 14px 8px;
+    background: rgba(15,26,28,0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+    -webkit-overflow-scrolling: touch;
+  }
+  #suggest-panel.show { display: flex; }
+
+  .suggest-group-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    color: var(--muted-2);
+    padding: 8px 14px 4px;
+    text-transform: uppercase;
+  }
+
+  .suggest-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 14px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .suggest-item:active,
+  .suggest-item.active {
+    background: rgba(54,209,255,0.09);
+    border-left-color: var(--accent);
+  }
+
+  .suggest-item .tpl {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .suggest-item .tpl::-webkit-scrollbar { display: none; }
+  .suggest-item .tpl .ph {
+    color: var(--accent-2);
+    background: rgba(54,209,255,0.12);
+    border-radius: 4px;
+    padding: 0 3px;
+  }
+  .suggest-item .tpl .hl {
+    color: var(--yellow);
+    font-weight: 700;
+  }
+
+  .suggest-item .desc {
+    font-size: 10.5px;
+    color: var(--muted);
+  }
+
+  .suggest-empty {
+    padding: 14px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted-2);
+  }
+
+  /* ── DOCKED INPUT BAR ── */
+  #dock {
+    flex-shrink: 0;
+    padding: 10px 14px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  #chatbar {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px 8px 8px 16px;
+    background: rgba(255,255,255,0.055);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+    transition: border-color 0.18s, box-shadow 0.18s;
+  }
+
+  #chatbar:focus-within {
+    border-color: rgba(54,209,255,0.45);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 0 0 3px rgba(54,209,255,0.08), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+
+  .clip-btn {
+    width: 32px; height: 36px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .clip-btn:active { color: var(--accent-2); }
+  .clip-btn svg { width: 19px; height: 19px; }
+
+  /* ── ATTACH MENU (popover above the chatbar) ── */
+  .attach-menu {
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0 14px 8px;
+    padding: 6px;
+    background: rgba(15,26,28,0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+  }
+  .attach-menu.show { display: flex; }
+  .attach-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .attach-menu-item:active { background: rgba(54,209,255,0.1); }
+  .attach-menu-item svg { width: 20px; height: 20px; color: var(--accent-2); flex-shrink: 0; }
+  .attach-menu-label { font-size: 13.5px; font-weight: 500; color: var(--text); }
+  .attach-menu-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  #userInput {
+    flex: 1;
+    min-height: 24px;
+    max-height: 120px;
+    padding: 7px 2px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.45;
+    resize: none;
+    outline: none;
+  }
+  #userInput::placeholder { color: var(--muted-2); }
+
+  #sendBtn {
+    width: 38px; height: 38px;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.15s, transform 0.1s;
+    box-shadow: 0 2px 12px rgba(54,209,255,0.35);
+  }
+  #sendBtn:active { transform: scale(0.92); }
+  #sendBtn:disabled { opacity: 0.35; box-shadow: none; }
+  #sendBtn svg { width: 16px; height: 16px; fill: #04181c; margin-left: 1px; }
+
+  .footnote {
+    text-align: center;
+    font-size: 10.5px;
+    color: var(--muted-2);
+    padding-top: 9px;
+    letter-spacing: 0.2px;
+  }
+
+  /* ── FILE-ROW DOWNLOAD BUTTONS (list_files reply) ── */
+  .file-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .file-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 7px 10px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 9px;
+  }
+  .file-row-name {
+    font-family: var(--font-mono); font-size: 12.5px;
+    color: var(--text); display: flex; align-items: center; gap: 7px;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .file-row-name svg { width: 13px; height: 13px; flex-shrink: 0; color: var(--muted); }
+  .file-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .file-dl-btn {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px;
+    background: rgba(54,209,255,0.10);
+    border: 1px solid rgba(54,209,255,0.28);
+    border-radius: 6px;
+    color: var(--accent); font-family: var(--font-mono);
+    font-size: 11px; font-weight: 500; cursor: pointer;
+    text-decoration: none;
+    transition: background .15s, border-color .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .file-dl-btn:active { background: rgba(54,209,255,0.2); transform: scale(.96); }
+  .file-dl-btn svg { width: 11px; height: 11px; }
+  .file-del-btn {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px;
+    background: rgba(255,107,107,0.10);
+    border: 1px solid rgba(255,107,107,0.28);
+    border-radius: 6px;
+    color: var(--red); cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .file-del-btn:active { background: rgba(255,107,107,0.22); transform: scale(.94); }
+  .file-del-btn svg { width: 12px; height: 12px; }
+  .file-del-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ── FILE-LIST HEADER (repo name + download-zip button) ── */
+  .file-list-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 8px; font-size: 13px;
+  }
+  .repo-zip-btn {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 11px;
+    background: rgba(61,220,151,0.10);
+    border: 1px solid rgba(61,220,151,0.32);
+    border-radius: 7px;
+    color: var(--green); font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    text-decoration: none;
+    transition: background .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .repo-zip-btn:active { background: rgba(61,220,151,0.2); transform: scale(.96); }
+  .repo-zip-btn svg { width: 12px; height: 12px; }
+
+  /* ── INLINE DOWNLOAD BUTTON (read_file reply) ── */
+  .read-dl-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px; padding: 7px 14px;
+    background: rgba(54,209,255,0.10);
+    border: 1px solid rgba(54,209,255,0.30);
+    border-radius: 8px; color: var(--accent);
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    cursor: pointer; text-decoration: none;
+    transition: background .15s, border-color .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .read-dl-btn:active { background: rgba(54,209,255,0.2); transform: scale(.97); }
+  .read-dl-btn svg { width: 13px; height: 13px; }
+
+  /* ── ENV VAR FORM (interactive bubble) ── */
+  .env-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .env-rows { display: flex; flex-direction: column; gap: 8px; }
+  .env-row {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .env-row input {
+    flex: 1; padding: 9px 10px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border-2);
+    border-radius: 8px; color: var(--text);
+    font-family: var(--font-mono); font-size: 12.5px;
+    outline: none; min-width: 0;
+    transition: border-color .15s;
+  }
+  .env-row input:focus { border-color: var(--accent); }
+  .env-row input::placeholder { color: var(--muted-2); }
+  .env-eq { color: var(--muted); font-family: var(--font-mono); font-size: 13px; flex-shrink: 0; }
+  .env-del-btn {
+    flex-shrink: 0; width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.25);
+    border-radius: 6px; color: var(--red); cursor: pointer; font-size: 14px;
+    transition: background .15s; -webkit-tap-highlight-color: transparent;
+  }
+  .env-del-btn:active { background: rgba(255,107,107,0.22); }
+  .env-add-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 12px; width: fit-content;
+    background: rgba(255,255,255,0.04);
+    border: 1px dashed rgba(255,255,255,0.18);
+    border-radius: 8px; color: var(--muted);
+    font-size: 12px; font-family: var(--font-mono);
+    cursor: pointer; transition: border-color .15s, color .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .env-add-btn:active { border-color: var(--accent); color: var(--accent); }
+  .env-add-btn svg { width: 13px; height: 13px; }
+  .env-form-actions { display: flex; gap: 8px; margin-top: 2px; }
+  .env-save-btn {
+    flex: 1; padding: 10px 14px; border-radius: 10px;
+    background: rgba(54,209,255,0.14); border: 1px solid rgba(54,209,255,0.5);
+    color: var(--accent-2); font-size: 13px; font-weight: 600; font-family: inherit;
+    cursor: pointer; transition: opacity .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .env-save-btn:active { opacity: .8; transform: scale(.97); }
+  .env-save-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .env-cancel-btn {
+    padding: 10px 14px; border-radius: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+    color: var(--muted); font-size: 13px; font-weight: 600; font-family: inherit;
+    cursor: pointer; transition: opacity .15s; -webkit-tap-highlight-color: transparent;
+  }
+  .env-cancel-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .env-platform-label {
+    font-size: 11px; color: var(--muted); font-family: var(--font-mono);
+    margin-bottom: 2px;
+  }
+
+</style>
+</head>
+<body>
+<div id="ambient"></div>
+<div id="app">
+
+  <header>
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.2 9.2 21.5 11.5 14.2 13.8 12 21 9.8 13.8 2.5 11.5 9.8 9.2Z"/></svg>
+      DevOps Agent
+    </div>
+    <div class="status">
+      <span id="status-label">Online</span>
+      <div class="status-dot"></div>
+      <div id="user-badge" class="user-badge" style="display:none;" onclick="toggleUserMenu()">
+        <img id="user-avatar" class="user-avatar" src="" alt="" />
+      </div>
+      <button class="clear-chat-btn" title="Clear chat history" onclick="confirmClearChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="user-menu" class="user-menu">
+    <div class="user-menu-name" id="user-menu-name"></div>
+    <div class="user-menu-item" onclick="handleLogout()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      Disconnect GitHub
+    </div>
+  </div>
+
+  <!-- ═══ LOGIN GATE — shown until GitHub is connected ═══ -->
+  <div id="login-gate">
+    <div class="login-card">
+      <div class="emblem-ring" style="width:84px;height:84px;">
+        <svg class="emblem-star" style="width:30px;height:30px;" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.2 9.2 21.5 11.5 14.2 13.8 12 21 9.8 13.8 2.5 11.5 9.8 9.2Z"/></svg>
+      </div>
+      <h1>DevOps Agent</h1>
+      <p>Apna GitHub account connect karo — sab kuch tumhare khud ke account me hoga. Koi shared access nahi, koi tumhare tokens hamare server pe plaintext store nahi hote.</p>
+      <a class="github-connect-btn" href="/auth/github/login">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.5 0 12.3c0 5.43 3.44 10.03 8.2 11.66.6.11.82-.27.82-.6 0-.29-.01-1.06-.02-2.08-3.34.75-4.04-1.64-4.04-1.64-.55-1.42-1.33-1.8-1.33-1.8-1.09-.76.08-.75.08-.75 1.2.09 1.84 1.26 1.84 1.26 1.07 1.87 2.81 1.33 3.5 1.02.11-.79.42-1.33.76-1.64-2.66-.31-5.47-1.36-5.47-6.03 0-1.33.46-2.42 1.23-3.28-.12-.31-.53-1.55.12-3.24 0 0 1-.33 3.3 1.25a11.2 11.2 0 016 0c2.3-1.58 3.3-1.25 3.3-1.25.65 1.69.24 2.93.12 3.24.77.86 1.23 1.95 1.23 3.28 0 4.68-2.81 5.72-5.49 6.02.43.38.81 1.13.81 2.28 0 1.64-.02 2.97-.02 3.37 0 .33.22.72.83.6C20.57 22.32 24 17.72 24 12.3 24 5.5 18.63 0 12 0z"/></svg>
+        Connect GitHub
+      </a>
+      <div class="login-scope-note">Requested scopes: <code>repo</code>, <code>delete_repo</code> — repo read/write + repo deletion. Kabhi bhi Disconnect kar sakte ho.</div>
+      <div id="login-error-banner" class="login-error-banner"></div>
+    </div>
+  </div>
+
+  <div id="scroll-area">
+    <div id="empty-state">
+      <div class="emblem-ring">
+        <svg class="emblem-star" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.2 9.2 21.5 11.5 14.2 13.8 12 21 9.8 13.8 2.5 11.5 9.8 9.2Z"/></svg>
+      </div>
+      <div>
+        <h1>DevOps Agent se baatein karein</h1>
+        <p>Apne GitHub repos manage karo — banao, dekho, edit karo, delete karo. Sab tumhare khud ke account me.</p>
+      </div>
+      <div class="chip-row">
+        <div class="chip" onclick="fillInput('Saare GitHub repos list kar')">📁 List my repos</div>
+        <div class="chip" onclick="fillInput('Naya repo bana naam ke saath my-app')">➕ Create new repo</div>
+        <div class="chip" onclick="fillInput('list files in my-app')">📄 List files in a repo</div>
+        <div class="chip" onclick="fillInput('info about my-app')">ℹ️ Repo info</div>
+      </div>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="typing-indicator">
+      <div class="typing-dots"><span></span><span></span><span></span></div>
+    </div>
+  </div>
+
+  <div id="suggest-panel"></div>
+
+  <div id="dock">
+    <div id="attach-menu" class="attach-menu">
+      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('fileInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <div><div class="attach-menu-label">Upload files</div><div class="attach-menu-sub">Ek ya zyada files</div></div>
+      </div>
+      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('folderInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        <div><div class="attach-menu-label">Upload folder</div><div class="attach-menu-sub">Nested structure preserve hoga</div></div>
+      </div>
+      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('zipInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M9 7h1M9 11h1M9 15h1"/></svg>
+        <div><div class="attach-menu-label">Upload zip</div><div class="attach-menu-sub">Auto-extract ho jayegi</div></div>
+      </div>
+    </div>
+    <div id="chatbar">
+      <button class="clip-btn" title="Attach" onclick="toggleAttachMenu()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </button>
+      <input type="file" id="fileInput" multiple accept="*/*"
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onFilePicked(event)" />
+      <input type="file" id="folderInput" webkitdirectory directory multiple
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onFolderPicked(event)" />
+      <input type="file" id="zipInput" accept=".zip,application/zip,application/x-zip-compressed"
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onZipPicked(event)" />
+      <textarea id="userInput"
+        placeholder="Message DevOps Agent…"
+        rows="1"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this); onInputChange();"
+      ></textarea>
+      <button id="sendBtn" onclick="sendMsg()">
+        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+    <div class="footnote">DevOps Agent can make mistakes. Verify deployments before relying on them.</div>
+  </div>
+
+</div>
+
+<script>
+// ── STATE ──
+const history = [];
+let isLoading = false;
+
+// ══════════════════════════════════════════════════════════════════
+// AUTH — GitHub OAuth session check.
+// This app never stores its own credentials client-side; it only ever
+// asks the server "am I logged in right now?" via the session cookie
+// (httponly, so JS can't read/forge it) and reflects whatever the
+// server says. /api/me is the single source of truth.
+// ══════════════════════════════════════════════════════════════════
+let authedUser = null; // { login, avatar_url } | null
+
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    const data = await res.json();
+    if (data.logged_in) {
+      authedUser = { login: data.login, avatar_url: data.avatar_url };
+      hideLoginGate();
+      renderUserBadge();
+    } else {
+      authedUser = null;
+      showLoginGate();
+    }
+  } catch (e) {
+    // Network hiccup — don't hard-fail into the login gate on a transient
+    // error, but don't pretend we're logged in either.
+    showLoginGate();
+  }
+}
+
+function showLoginGate() {
+  document.getElementById('login-gate').classList.add('show');
+  document.getElementById('user-badge').style.display = 'none';
+  const params = new URLSearchParams(location.search);
+  const err = params.get('auth_error');
+  if (err) {
+    const banner = document.getElementById('login-error-banner');
+    const messages = {
+      state_mismatch: 'Login verify nahi hua (state mismatch). Dubara try karo.',
+      no_code: 'GitHub se code nahi mila. Dubara try karo.',
+      identity_fetch_failed: 'GitHub identity fetch nahi hui. Dubara try karo.',
+      access_denied: 'Tumne permission deny kar di. Connect karne ke liye access dena zaroori hai.',
+    };
+    banner.textContent = messages[err] || `Login error: ${err}`;
+    banner.classList.add('show');
+    history_replaceCleanUrl();
+  }
+}
+
+function history_replaceCleanUrl() {
+  // Strip ?auth_error=... from the URL bar without a reload, so a page
+  // refresh doesn't re-show the same stale error.
+  const url = new URL(location.href);
+  url.searchParams.delete('auth_error');
+  window.history.replaceState({}, '', url.pathname + url.search);
+}
+
+function hideLoginGate() {
+  document.getElementById('login-gate').classList.remove('show');
+}
+
+function renderUserBadge() {
+  if (!authedUser) return;
+  const badge = document.getElementById('user-badge');
+  const avatar = document.getElementById('user-avatar');
+  avatar.src = authedUser.avatar_url || '';
+  avatar.alt = authedUser.login;
+  badge.style.display = 'flex';
+  document.getElementById('user-menu-name').textContent = '@' + authedUser.login;
+}
+
+function toggleUserMenu() {
+  document.getElementById('user-menu').classList.toggle('show');
+}
+
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('user-menu');
+  const badge = document.getElementById('user-badge');
+  if (menu.classList.contains('show') && !menu.contains(e.target) && !badge.contains(e.target)) {
+    menu.classList.remove('show');
+  }
+});
+
+async function handleLogout() {
+  document.getElementById('user-menu').classList.remove('show');
+  try {
+    await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch (e) {
+    // Even if the network call fails, still clear local state and show
+    // the gate — worst case the server-side session lingers until it
+    // naturally expires, but the user isn't stuck looking logged-in.
+  }
+  authedUser = null;
+  clearSavedChat();
+  location.reload();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CHAT PERSISTENCE (localStorage)
+// Keeps the visible conversation across page reloads/app restarts —
+// this is per-device only (not synced across phones/browsers). Stores
+// {role, content, actionClass} per message; deliberately does NOT
+// persist confirm-action buttons (delete/destructive prompts) — those
+// are re-issued fresh by the server each time and should never be
+// resurrected from a stale save after a reload.
+// ══════════════════════════════════════════════════════════════════
+const CHAT_STORAGE_KEY = 'devops_agent_chat_v1';
+const CHAT_STORAGE_MAX = 200; // cap so localStorage doesn't grow unbounded
+
+function loadSavedChat() {
+  try {
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveChatEntry(entry) {
+  try {
+    const saved = loadSavedChat();
+    saved.push(entry);
+    if (saved.length > CHAT_STORAGE_MAX) saved.splice(0, saved.length - CHAT_STORAGE_MAX);
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(saved));
+  } catch (e) {
+    // Storage full or unavailable — chat still works, it just won't persist.
+  }
+}
+
+function clearSavedChat() {
+  try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch (e) {}
+}
+
+function restoreChatOnLoad() {
+  const saved = loadSavedChat();
+  if (!saved.length) return;
+
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  saved.forEach(entry => {
+    renderMessage(entry.role, entry.content, entry.actionClass || '');
+    history.push({ role: entry.role === 'user' ? 'user' : 'assistant', content: entry.content });
+  });
+  scrollToBottom();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// COMMAND AUTOFILL — mirrors server.py INTENT_RULES for this multi-tenant
+// build (GitHub-only in this first pass; Vercel/Render land in a later
+// pass once their OAuth flows are wired up too).
+// ══════════════════════════════════════════════════════════════════
+const COMMANDS = [
+  { id: 'LIST_FILES',   tpl: 'list files in {repo}',                          desc: 'GitHub · list files in a repo',        kw: ['list','files','file','sare','dikhao','repo'] },
+  { id: 'READ_FILE',    tpl: 'read file {path} from {repo}',                  desc: 'GitHub · read a file',                 kw: ['read','padho','file','open','kholo'] },
+  { id: 'DELETE_FILE',  tpl: 'delete file {path} from {repo}',                desc: 'GitHub · delete a file',               kw: ['delete','uda','hata','remove','file'] },
+  { id: 'EDIT_FILE',    tpl: 'edit file {path} in {repo}',                    desc: 'GitHub · edit/update a file (AI content)', kw: ['edit','update','change','badlo','file'] },
+  { id: 'CREATE_FILE',  tpl: 'create file {path} in {repo}',                  desc: 'GitHub · create a new file (AI content)',  kw: ['create','banao','naya','file','new'] },
+
+  { id: 'CREATE_REPO',  tpl: 'create repo {repo}',                            desc: 'GitHub · create a new repository',     kw: ['create','banao','naya','repo','repository'] },
+  { id: 'DELETE_REPO',  tpl: 'delete repo {repo}',                            desc: 'GitHub · delete a repository ⚠️',      kw: ['delete','uda','hata','remove','repo'] },
+  { id: 'LIST_REPOS',   tpl: 'list all my repos',                             desc: 'GitHub · list all repositories',       kw: ['list','sare','mere','repos','show'] },
+  { id: 'GET_REPO_INFO', tpl: 'info about {repo}',                            desc: 'GitHub · get repo details',            kw: ['info','information','details','repo'] },
+];
+
+// ── AUTOFILL STATE ──
+
+// ── AUTOFILL STATE ──
+let suggestIndex = -1;   // currently highlighted suggestion (keyboard nav)
+let activeSuggestions = [];
+
+function onInputChange() {
+  const input = document.getElementById('userInput');
+  renderSuggestions(input.value);
+}
+
+// Lightweight fuzzy match: scores by how many typed words appear as a
+// substring in the template text or its keyword list. No network calls,
+// no build step — just string scanning against the static COMMANDS list.
+function scoreCommand(cmd, queryWords) {
+  const haystack = ((cmd.tpl || '') + ' ' + cmd.desc + ' ' + cmd.kw.join(' ')).toLowerCase();
+  let score = 0;
+  for (const w of queryWords) {
+    if (!w) continue;
+    if (haystack.includes(w)) score += w.length >= 3 ? 2 : 1;
+  }
+  return score;
+}
+
+function renderSuggestions(rawValue) {
+  const panel = document.getElementById('suggest-panel');
+  const value = rawValue.trim();
+
+  if (!value) {
+    panel.classList.remove('show');
+    panel.innerHTML = '';
+    activeSuggestions = [];
+    suggestIndex = -1;
+    return;
+  }
+
+  const queryWords = value.toLowerCase().split(/\s+/).filter(Boolean);
+  const scored = COMMANDS
+    .map(cmd => ({ cmd, score: scoreCommand(cmd, queryWords) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+
+  activeSuggestions = scored.map(x => x.cmd);
+  suggestIndex = -1;
+
+  if (activeSuggestions.length === 0) {
+    panel.classList.remove('show');
+    panel.innerHTML = '';
+    return;
+  }
+
+  panel.innerHTML = '';
+  const label = document.createElement('div');
+  label.className = 'suggest-group-label';
+  label.textContent = 'Commands';
+  panel.appendChild(label);
+
+  activeSuggestions.forEach((cmd, i) => {
+    const item = document.createElement('div');
+    item.className = 'suggest-item';
+    item.dataset.index = i;
+
+    const tplEl = document.createElement('div');
+    tplEl.className = 'tpl';
+    tplEl.innerHTML = highlightTemplate(cmd.tpl, queryWords);
+
+    const descEl = document.createElement('div');
+    descEl.className = 'desc';
+    descEl.textContent = cmd.desc;
+
+    item.appendChild(tplEl);
+    item.appendChild(descEl);
+    item.onclick = () => applySuggestion(cmd);
+
+    panel.appendChild(item);
+  });
+
+  panel.classList.add('show');
+}
+
+// Renders the template with {placeholders} styled distinctly, and any
+// matched query words underlined so the user sees why it matched.
+function highlightTemplate(tpl, queryWords) {
+  let out = escHtml(tpl);
+  out = out.replace(/\{([a-zA-Z_]+)\}/g, '<span class="ph">$1</span>');
+  queryWords.forEach(w => {
+    if (w.length < 2) return;
+    const safe = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`(${safe})(?![^<]*>)`, 'gi'), '<span class="hl">$1</span>');
+  });
+  return out;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STRUCTURED COMMAND FORMS
+// Selecting a suggestion no longer dumps a raw "{repo}" text template
+// into the input for manual typing. Instead it opens an in-chat form
+// bubble (same visual pattern as the file-upload flow) with one field
+// per placeholder. Fields with a known live data source — repo, path,
+// vercel project, render service — render as a searchable dropdown
+// pre-filled from the backend; everything else stays a plain text
+// input. On submit, the template placeholders are substituted and the
+// resulting sentence is sent through the normal sendMsg() pipeline —
+// the backend's regex intent parser is untouched.
+// ══════════════════════════════════════════════════════════════════
+
+// Maps a {placeholder} name (+ the owning command id, for the few cases
+// that need to disambiguate) to a field "kind". Add new mappings here as
+// new live sources appear.
+function placeholderKind(name, cmdId) {
+  if (name === 'repo') return 'repo';
+  if (name === 'path') {
+    // CREATE_FILE's {path} is a brand-new file that doesn't exist yet —
+    // showing existing files as suggestions would be misleading, so it
+    // stays a plain text field. READ/EDIT/DELETE FILE genuinely pick from
+    // what's already in the repo.
+    return cmdId === 'CREATE_FILE' ? 'new_path' : 'path';
+  }
+  return 'text';
+}
+
+function placeholderLabel(name) {
+  const labels = { repo: 'Repository', path: 'File path', message: 'Message' };
+  return labels[name] || name.replace(/_/g, ' ');
+}
+
+// ── APPLY SUGGESTION: open a structured form bubble for this command ──
+function applySuggestion(cmd) {
+  hideSuggestions();
+  const input = document.getElementById('userInput');
+  input.value = '';
+  autoResize(input);
+
+  const placeholders = [...new Set((cmd.tpl.match(/\{([a-zA-Z_]+)\}/g) || []).map(p => p.slice(1, -1)))];
+
+  // No placeholders at all (e.g. "list all my repos") — just send it.
+  if (placeholders.length === 0) {
+    input.value = cmd.tpl;
+    autoResize(input);
+    input.focus();
+    return;
+  }
+
+  buildCommandFormBubble(cmd, placeholders);
+}
+
+// Builds the in-chat form bubble: one row per placeholder, a Run
+// button that substitutes values into cmd.tpl and sends it.
+function buildCommandFormBubble(cmd, placeholders) {
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  bubble.innerHTML = `<strong>${escHtml(cmd.desc)}</strong>`;
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+
+  // fieldRefs[name] = { input, kind, datalist? }
+  const fieldRefs = {};
+
+  placeholders.forEach(name => {
+    const kind = placeholderKind(name, cmd.id);
+    const fieldWrap = document.createElement('div');
+
+    const fieldLabel = document.createElement('div');
+    fieldLabel.className = 'prompt-hint';
+    fieldLabel.textContent = placeholderLabel(name);
+    fieldWrap.appendChild(fieldLabel);
+
+    const listId = `field-list-${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const datalist = document.createElement('datalist');
+    datalist.id = listId;
+
+    const inputEl = document.createElement('input');
+    inputEl.type = 'text';
+    inputEl.placeholder = placeholderLabel(name);
+    inputEl.autocomplete = 'off';
+
+    if (kind === 'repo') {
+      inputEl.setAttribute('list', listId);
+      getRepoNames().then(names => fillDatalist(datalist, names));
+    } else if (kind === 'path') {
+      inputEl.setAttribute('list', listId);
+      inputEl.placeholder = 'file path (pick a repo first)';
+    } else if (kind === 'new_path') {
+      inputEl.placeholder = 'e.g. src/newfile.js';
+    }
+
+    fieldWrap.appendChild(inputEl);
+    fieldWrap.appendChild(datalist);
+    form.appendChild(fieldWrap);
+    fieldRefs[name] = { input: inputEl, kind, datalist };
+  });
+
+  // If both a repo field and a real (existing-file) path field exist,
+  // refresh the path datalist whenever the repo field changes — same
+  // live-lookup pattern as the upload flow's askUploadPath step. Skipped
+  // for CREATE_FILE's 'new_path' kind, which has no datalist to refresh.
+  if (fieldRefs.repo && fieldRefs.path && fieldRefs.path.kind === 'path') {
+    fieldRefs.repo.input.addEventListener('change', () => {
+      const repo = fieldRefs.repo.input.value.trim();
+      if (!repo) return;
+      fetch(`/api/repo-files?repo=${encodeURIComponent(repo)}`)
+        .then(r => r.json())
+        .then(data => fillDatalist(fieldRefs.path.datalist, data.files || []))
+        .catch(() => {});
+    });
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = 'Run →';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const submit = () => {
+    let sentence = cmd.tpl;
+    for (const name of placeholders) {
+      let val = fieldRefs[name].input.value.trim();
+      if (!val) { fieldRefs[name].input.focus(); return; }
+      // Render service dropdown shows "name (id)" — extract just the id.
+      if (fieldRefs[name].kind === 'render_service') {
+        const idMatch = val.match(/\(([^)]+)\)\s*$/);
+        if (idMatch) val = idMatch[1];
+      }
+      sentence = sentence.replace(`{${name}}`, val);
+    }
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    Object.values(fieldRefs).forEach(f => { f.input.disabled = true; });
+    const input = document.getElementById('userInput');
+    input.value = sentence;
+    autoResize(input);
+    sendMsg();
+  };
+
+  goBtn.onclick = submit;
+  cancelBtn.onclick = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    Object.values(fieldRefs).forEach(f => { f.input.disabled = true; });
+    addMessage('agent', 'Theek hai, cancel kar diya.', '');
+  };
+
+  actions.appendChild(goBtn);
+  actions.appendChild(cancelBtn);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+
+  const firstInput = form.querySelector('input');
+  if (firstInput) firstInput.focus();
+}
+
+function hideSuggestions() {
+  const panel = document.getElementById('suggest-panel');
+  panel.classList.remove('show');
+  panel.innerHTML = '';
+  activeSuggestions = [];
+  suggestIndex = -1;
+}
+
+// Finds the next {placeholder} at/after `fromPos` and selects its inner
+// text (including braces removed) so typing immediately replaces it —
+// snippet-editor style. Returns true if a placeholder was found.
+function selectNextPlaceholder(input, fromPos) {
+  const val = input.value;
+  const re = /\{[a-zA-Z_]+\}/g;
+  re.lastIndex = fromPos;
+  const match = re.exec(val);
+  if (!match) return false;
+
+  const start = match.index;
+  const end = start + match[0].length;
+  // Replace "{repo}" with "repo" (strip braces) and select it in place.
+  const inner = match[0].slice(1, -1);
+  input.value = val.slice(0, start) + inner + val.slice(end);
+  input.setSelectionRange(start, start + inner.length);
+  autoResize(input);
+  return true;
+}
+
+function jumpToNextPlaceholder() {
+  const input = document.getElementById('userInput');
+  const found = selectNextPlaceholder(input, input.selectionEnd || 0);
+  if (!found) {
+    // No more placeholders — just place cursor at the end.
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('suggest-panel');
+  const input = document.getElementById('userInput');
+  if (!panel.contains(e.target) && e.target !== input) {
+    hideSuggestions();
+  }
+});
+
+// ── ATTACH MENU (files / folder / zip picker) ──
+function toggleAttachMenu() {
+  const menu = document.getElementById('attach-menu');
+  menu.classList.toggle('show');
+}
+function hideAttachMenu() {
+  document.getElementById('attach-menu').classList.remove('show');
+}
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('attach-menu');
+  const clipBtn = document.querySelector('.clip-btn');
+  if (menu.classList.contains('show') && !menu.contains(e.target) && e.target !== clipBtn && !clipBtn.contains(e.target)) {
+    hideAttachMenu();
+  }
+});
+
+// ── TEXTAREA AUTO RESIZE ──
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ── KEY HANDLER ──
+function handleKey(e) {
+  const panelOpen = document.getElementById('suggest-panel').classList.contains('show');
+
+  // Navigate suggestion list with arrow keys while panel is open.
+  if (panelOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    moveSuggestIndex(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+
+  // Enter selects the highlighted suggestion if one is active;
+  // otherwise falls through to normal send behavior.
+  if (panelOpen && e.key === 'Enter' && !e.shiftKey && suggestIndex >= 0) {
+    e.preventDefault();
+    applySuggestion(activeSuggestions[suggestIndex]);
+    return;
+  }
+
+  if (e.key === 'Escape' && panelOpen) {
+    e.preventDefault();
+    hideSuggestions();
+    return;
+  }
+
+  // Tab jumps to the next {placeholder} in the input instead of
+  // shifting focus away — makes filling multi-field commands fast.
+  if (e.key === 'Tab' && !panelOpen) {
+    const input = e.target;
+    if (/\{[a-zA-Z_]+\}/.test(input.value)) {
+      e.preventDefault();
+      jumpToNextPlaceholder();
+      return;
+    }
+  }
+
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMsg();
+  }
+}
+
+function moveSuggestIndex(delta) {
+  if (activeSuggestions.length === 0) return;
+  const items = document.querySelectorAll('#suggest-panel .suggest-item');
+  items.forEach(el => el.classList.remove('active'));
+
+  suggestIndex += delta;
+  if (suggestIndex < 0) suggestIndex = activeSuggestions.length - 1;
+  if (suggestIndex >= activeSuggestions.length) suggestIndex = 0;
+
+  const el = items[suggestIndex];
+  if (el) {
+    el.classList.add('active');
+    el.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function fillInput(text) {
+  const input = document.getElementById('userInput');
+  input.value = text;
+  input.focus();
+  autoResize(input);
+  hideSuggestions();
+}
+
+// ── FILE UPLOAD (attach button) ──
+// Remembers the last repo/path the user typed, so repeat uploads to the
+// same place don't re-prompt every time.
+let lastUploadRepo = '';
+let lastUploadDir = '';
+
+function onFilePicked(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = ''; // allow picking the same file(s) again later
+  if (!files.length) return;
+  askUploadRepo(files);
+}
+
+// Folder picker (webkitdirectory) — browser gives us every file inside the
+// chosen folder (recursively) with .webkitRelativePath set on each, so the
+// nested structure comes along for free. Reuses the exact same
+// askUploadRepo → askUploadPath → doUploadMany pipeline as regular
+// multi-file upload; askUploadPath's relPath() helper below does the work
+// of preserving subfolders instead of flattening everything to the root.
+function onFolderPicked(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = '';
+  if (!files.length) return;
+  askUploadRepo(files);
+}
+
+// Zip picker — routed to a separate flow since it needs its own /upload-zip
+// endpoint (server extracts it), not the per-file /upload endpoint.
+function onZipPicked(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = '';
+  if (!files.length) return;
+  const file = files[0];
+  if (!/\.zip$/i.test(file.name)) {
+    addMessage('agent', '❌ Ye zip file nahi lag rahi. `.zip` extension chahiye.', 'error');
+    return;
+  }
+  askZipUploadRepo(file);
+}
+
+// Cache repo names once per page load (refreshed lazily on each upload flow start).
+let cachedRepoNames = null;
+let repoNamesFetchPromise = null;
+
+function getRepoNames() {
+  if (cachedRepoNames) return Promise.resolve(cachedRepoNames);
+  if (repoNamesFetchPromise) return repoNamesFetchPromise;
+  repoNamesFetchPromise = fetch('/api/repos')
+    .then(r => r.json())
+    .then(data => { cachedRepoNames = data.repos || []; return cachedRepoNames; })
+    .catch(() => []);
+  return repoNamesFetchPromise;
+}
+
+function fillDatalist(datalistEl, items) {
+  datalistEl.innerHTML = '';
+  items.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    datalistEl.appendChild(opt);
+  });
+}
+
+// Step 1: ask which repo, as an in-chat form bubble (not a native prompt).
+function askUploadRepo(files) {
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  const filesDesc = files.length === 1
+    ? `<strong>${escHtml(files[0].name)}</strong>`
+    : `<strong>${files.length} files</strong> (${escHtml(files.map(f => f.name).join(', '))})`;
+  bubble.innerHTML = `📎 ${filesDesc} select hui hai${files.length > 1 ? 'n' : ''}. Kis repo me upload karni hai${files.length > 1 ? 'n' : ''}?`;
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+
+  const listId = 'repo-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'repo-name';
+  input.value = lastUploadRepo;
+  input.setAttribute('list', listId);
+  input.autocomplete = 'off';
+
+  getRepoNames().then(names => fillDatalist(datalist, names));
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = 'Next →';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const submit = () => {
+    const repo = input.value.trim();
+    if (!repo) { input.focus(); return; }
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    lastUploadRepo = repo;
+    askUploadPath(files, repo);
+  };
+
+  goBtn.onclick = submit;
+  input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  cancelBtn.onclick = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    addMessage('agent', 'Theek hai, upload cancel kar diya.', '');
+  };
+
+  actions.appendChild(goBtn);
+  actions.appendChild(cancelBtn);
+  form.appendChild(input);
+  form.appendChild(datalist);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+  input.focus();
+}
+
+// Step 2: ask which folder inside that repo (blank = repo root).
+function askUploadPath(files, repo) {
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  bubble.innerHTML = `<strong>${escHtml(repo)}</strong> me kis folder me daalni hai? Khaali chhodo root ke liye.`;
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+
+  const listId = 'folder-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'folder (optional)';
+  input.value = lastUploadDir;
+  input.setAttribute('list', listId);
+  input.autocomplete = 'off';
+
+  fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
+    .then(r => r.json())
+    .then(data => fillDatalist(datalist, data.folders || []))
+    .catch(() => {});
+
+  const hint = document.createElement('div');
+  hint.className = 'prompt-hint';
+  hint.id = 'upload-path-hint';
+
+  // For a folder-picker selection each File carries webkitRelativePath
+  // (e.g. "my-folder/src/index.js") which preserves the nested structure.
+  // We drop only the top-level picked-folder name — the destination
+  // folder the user types here replaces it — so subfolders inside stay intact.
+  const relPath = (f) => {
+    if (f.webkitRelativePath) {
+      const parts = f.webkitRelativePath.split('/');
+      return parts.slice(1).join('/') || f.name;
+    }
+    return f.name;
+  };
+  const buildDestList = (dir) => files.map(f => dir ? `${dir}/${relPath(f)}` : relPath(f));
+  const updateHint = () => {
+    const dir = input.value.trim().replace(/^\/+|\/+$/g, '');
+    const dests = buildDestList(dir);
+    if (dests.length === 1) {
+      hint.textContent = `Save hogi: ${dests[0]}`;
+    } else if (dests.length <= 8) {
+      hint.textContent = `${dests.length} files save hongi:\n${dests.join('\n')}`;
+    } else {
+      hint.textContent = `${dests.length} files save hongi (structure preserve hoga):\n${dests.slice(0, 6).join('\n')}\n… +${dests.length - 6} more`;
+    }
+    hint.style.whiteSpace = 'pre-line';
+  };
+  input.oninput = updateHint;
+  updateHint();
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = files.length === 1 ? 'Upload' : `Upload ${files.length} files`;
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const submit = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    const dir = input.value.trim().replace(/^\/+|\/+$/g, '');
+    lastUploadDir = dir;
+    const paths = buildDestList(dir);
+    doUploadMany(files, repo, paths);
+  };
+
+  goBtn.onclick = submit;
+  input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  cancelBtn.onclick = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    addMessage('agent', 'Theek hai, upload cancel kar diya.', '');
+  };
+
+  actions.appendChild(goBtn);
+  actions.appendChild(cancelBtn);
+  form.appendChild(input);
+  form.appendChild(datalist);
+  form.appendChild(hint);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+  input.focus();
+}
+
+// Step 3: actually send one file.
+async function doUpload(file, repo, path) {
+  addMessage('user', `📎 Uploading "${file.name}" → ${repo}/${path}`);
+
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  isLoading = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('repo', repo);
+    form.append('path', path);
+    form.append('message', `Upload ${path} via DevOps Agent`);
+
+    const res = await fetch('/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    typing.classList.remove('show');
+
+    const cls = actionColorFor(data.action);
+    addMessage('agent', data.reply, cls);
+    history.push({ role: 'assistant', content: data.reply });
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Upload fail ho gaya. Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+// Step 3 (multi-file): upload one at a time — sequential, so GitHub's API
+// isn't hit with a burst of concurrent PUTs, and a failure on one file
+// doesn't stop the rest from going through. Ends with a summary line.
+async function doUploadMany(files, repo, paths) {
+  if (files.length === 1) {
+    await doUpload(files[0], repo, paths[0]);
+    return;
+  }
+
+  addMessage('user', `📎 Uploading ${files.length} files → ${repo}${paths[0].includes('/') ? '/' + paths[0].split('/').slice(0, -1).join('/') : ''}`);
+
+  const typing = document.getElementById('typing-indicator');
+  isLoading = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  let okCount = 0;
+  const failed = [];
+
+  for (let i = 0; i < files.length; i++) {
+    typing.classList.add('show');
+    scrollToBottom();
+    try {
+      const form = new FormData();
+      form.append('file', files[i]);
+      form.append('repo', repo);
+      form.append('path', paths[i]);
+      form.append('message', `Upload ${paths[i]} via DevOps Agent`);
+
+      const res = await fetch('/upload', { method: 'POST', body: form });
+      const data = await res.json();
+      typing.classList.remove('show');
+
+      if (res.ok) {
+        okCount++;
+        addMessage('agent', data.reply, actionColorFor(data.action));
+      } else {
+        failed.push(files[i].name);
+        addMessage('agent', data.reply, 'error');
+      }
+      history.push({ role: 'assistant', content: data.reply });
+    } catch (err) {
+      typing.classList.remove('show');
+      failed.push(files[i].name);
+      addMessage('agent', `❌ "${files[i].name}" upload fail ho gaya. Server se connect nahi ho paya.`, 'error');
+    }
+  }
+
+  typing.classList.remove('show');
+  isLoading = false;
+  document.getElementById('sendBtn').disabled = false;
+
+  const summary = failed.length === 0
+    ? `✅ Saari ${okCount} files upload ho gayin!`
+    : `⚠️ ${okCount}/${files.length} files upload hui. Fail hui: ${failed.join(', ')}`;
+  addMessage('agent', summary, failed.length === 0 ? 'success' : 'warning');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ZIP UPLOAD FLOW — same two-step (repo → destination folder) pattern
+// as the regular file upload, but ends in a single /upload-zip POST
+// instead of per-file /upload calls. The server extracts the zip and
+// pushes everything as one commit.
+// ══════════════════════════════════════════════════════════════════
+function askZipUploadRepo(file) {
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  const sizeKb = (file.size / 1024).toFixed(1);
+  bubble.innerHTML = `🗜️ <strong>${escHtml(file.name)}</strong> (${sizeKb} KB) select hui hai. Kis repo me extract karni hai?`;
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+
+  const listId = 'zip-repo-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'repo-name';
+  input.value = lastUploadRepo;
+  input.setAttribute('list', listId);
+  input.autocomplete = 'off';
+
+  getRepoNames().then(names => fillDatalist(datalist, names));
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = 'Next →';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const submit = () => {
+    const repo = input.value.trim();
+    if (!repo) { input.focus(); return; }
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    lastUploadRepo = repo;
+    askZipUploadPath(file, repo);
+  };
+
+  goBtn.onclick = submit;
+  input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  cancelBtn.onclick = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    addMessage('agent', 'Theek hai, zip upload cancel kar diya.', '');
+  };
+
+  actions.appendChild(goBtn);
+  actions.appendChild(cancelBtn);
+  form.appendChild(input);
+  form.appendChild(datalist);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+  input.focus();
+}
+
+function askZipUploadPath(file, repo) {
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  bubble.innerHTML = `<strong>${escHtml(repo)}</strong> me kis folder me extract karni hai? Khaali chhodo root ke liye. Zip ke andar ki folder structure preserve rahegi.`;
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+
+  const listId = 'zip-folder-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'folder (optional)';
+  input.value = lastUploadDir;
+  input.setAttribute('list', listId);
+  input.autocomplete = 'off';
+
+  fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
+    .then(r => r.json())
+    .then(data => fillDatalist(datalist, data.folders || []))
+    .catch(() => {});
+
+  const hint = document.createElement('div');
+  hint.className = 'prompt-hint';
+  hint.textContent = 'Zip extract hoke iske andar push hogi.';
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = 'Extract & Upload';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const submit = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    const dir = input.value.trim().replace(/^\/+|\/+$/g, '');
+    lastUploadDir = dir;
+    doZipUpload(file, repo, dir);
+  };
+
+  goBtn.onclick = submit;
+  input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  cancelBtn.onclick = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    addMessage('agent', 'Theek hai, zip upload cancel kar diya.', '');
+  };
+
+  actions.appendChild(goBtn);
+  actions.appendChild(cancelBtn);
+  form.appendChild(input);
+  form.appendChild(datalist);
+  form.appendChild(hint);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+  input.focus();
+}
+
+async function doZipUpload(file, repo, dir) {
+  const dest = dir ? `${repo}/${dir}` : repo;
+  addMessage('user', `🗜️ Extracting "${file.name}" → ${dest}`);
+
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  isLoading = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('repo', repo);
+    form.append('path', dir);
+    form.append('message', `Extract ${file.name} via DevOps Agent`);
+
+    const res = await fetch('/upload-zip', { method: 'POST', body: form });
+    const data = await res.json();
+    typing.classList.remove('show');
+
+    const cls = actionColorFor(data.action);
+    addMessage('agent', data.reply, cls);
+    history.push({ role: 'assistant', content: data.reply });
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Zip upload fail ho gaya. Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+// ── MARKDOWN RENDERER (lightweight) ──
+function renderMarkdown(text) {
+  text = text.replace(/```([\s\S]*?)```/g, (_, code) => `<pre>${escHtml(code.trim())}</pre>`);
+  text = text.replace(/`([^`]+)`/g, (_, code) => `<code>${escHtml(code)}</code>`);
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  text = text.replace(/\n/g, '<br>');
+  return text;
+}
+
+// ── ICON HELPERS ──
+function iconFile() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+}
+function iconFolder() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>`;
+}
+function iconDl() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+}
+function iconTrash() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>`;
+}
+function iconZip() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M9 7h1M9 11h1M9 15h1"/></svg>`;
+}
+
+// ── BUILD FILE-LIST BUBBLE (for list_files action) ──
+// Returns a DOM element with each file on its own row + download button,
+// plus a delete button that routes through the same confirm-token flow
+// as chat-typed delete commands. Files that are type=dir get a folder
+// icon and no download/delete buttons (dir delete isn't a single API call).
+// Expects agentData.items = [{type, path, name}] from the server.
+function buildFileListBubble(repo, items) {
+  const wrap = document.createElement('div');
+
+  // Header line: repo name + a "download whole repo as zip" button.
+  const hdr = document.createElement('div');
+  hdr.className = 'file-list-hdr';
+
+  const hdrText = document.createElement('div');
+  const repoCode = document.createElement('code');
+  repoCode.textContent = repo + '/';
+  hdrText.appendChild(document.createTextNode('Files in '));
+  hdrText.appendChild(repoCode);
+  hdrText.appendChild(document.createTextNode(' :'));
+  hdr.appendChild(hdrText);
+
+  const zipBtn = document.createElement('a');
+  zipBtn.className = 'repo-zip-btn';
+  zipBtn.href = `/download-repo-zip?repo=${encodeURIComponent(repo)}`;
+  zipBtn.innerHTML = iconZip() + ' .zip';
+  zipBtn.title = `Download ${repo} as zip`;
+  hdr.appendChild(zipBtn);
+
+  wrap.appendChild(hdr);
+
+  const list = document.createElement('div');
+  list.className = 'file-list';
+
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'file-row-name';
+    nameEl.innerHTML = (item.type === 'dir' ? iconFolder() : iconFile()) + escHtml(item.path || item.name || '');
+    row.appendChild(nameEl);
+
+    if (item.type !== 'dir') {
+      const rowActions = document.createElement('div');
+      rowActions.className = 'file-row-actions';
+
+      const dlUrl = `/download?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(item.path)}`;
+      const dlBtn = document.createElement('a');
+      dlBtn.className = 'file-dl-btn';
+      dlBtn.href = dlUrl;
+      dlBtn.download = (item.path || '').split('/').pop();
+      dlBtn.innerHTML = iconDl() + '↓';
+      dlBtn.title = 'Download ' + (item.path || '');
+      rowActions.appendChild(dlBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'file-del-btn';
+      delBtn.innerHTML = iconTrash();
+      delBtn.title = 'Delete ' + (item.path || '');
+      delBtn.onclick = () => requestFileRowDelete(repo, item.path, delBtn);
+      rowActions.appendChild(delBtn);
+
+      row.appendChild(rowActions);
+    }
+
+    list.appendChild(row);
+  });
+
+  wrap.appendChild(list);
+  return wrap;
+}
+
+// ── DELETE BUTTON ON A FILE ROW (list_files bubble) ──
+// Fires the exact same "delete file X from Y" sentence a user could type
+// in chat, through the normal /chat endpoint — so it goes through the
+// regex parser → DESTRUCTIVE_COMMANDS check → confirm-token flow exactly
+// like a typed command would. The resulting confirm prompt (with its
+// Haan/Cancel buttons) is rendered as a normal new agent message via the
+// existing addMessage(..., confirmData) path — nothing about the
+// confirmation plumbing itself is duplicated here.
+async function requestFileRowDelete(repo, path, btnEl) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+
+  const msg = `delete file ${path} from ${repo}`;
+  addMessage('user', msg);
+  history.push({ role: 'user', content: msg });
+
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  isLoading = true;
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: history.slice(0, -1) })
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command,
+        pending_value: data.pending_value,
+        confirm_token: data.confirm_token
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
+}
+
+// ── BUILD READ-FILE BUBBLE with download button ──
+function buildReadFileBubble(repo, filePath, content) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = renderMarkdown(content);
+
+  const dlUrl = `/download?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(filePath)}`;
+  const fileName = filePath.split('/').pop();
+  const dlBtn = document.createElement('a');
+  dlBtn.className = 'read-dl-btn';
+  dlBtn.href = dlUrl;
+  dlBtn.download = fileName;
+  dlBtn.innerHTML = iconDl() + ' Download ' + escHtml(fileName);
+  dlBtn.title = 'Download ' + filePath;
+  wrap.appendChild(document.createElement('br'));
+  wrap.appendChild(dlBtn);
+  return wrap;
+}
+
+function escHtml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── ADD MESSAGE ──
+// Pure DOM rendering — no persistence, no confirm buttons. Used both for
+// live messages and for replaying saved history on page load.
+function renderMessage(role, content, actionClass = '') {
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const messages = document.getElementById('messages');
+
+  const wrap = document.createElement('div');
+  wrap.className = `msg-wrap ${role}`;
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = role === 'user' ? 'You' : 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = `msg-bubble ${actionClass}`;
+  bubble.innerHTML = role === 'user' ? escHtml(content) : renderMarkdown(content);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  return { wrap, bubble };
+}
+
+function addMessage(role, content, actionClass = '', confirmData = null) {
+  const { bubble } = renderMessage(role, content, actionClass);
+
+  // Confirm-action buttons are intentionally NOT saved to localStorage —
+  // see the note above CHAT_STORAGE_KEY. They only ever exist live.
+  if (confirmData) {
+    const actions = document.createElement('div');
+    actions.className = 'confirm-actions';
+
+    const yesBtn = document.createElement('button');
+    yesBtn.className = 'confirm-btn danger';
+    yesBtn.textContent = 'Haan, Delete Karo';
+    yesBtn.onclick = () => runConfirmedAction(confirmData, yesBtn, noBtn);
+
+    const noBtn = document.createElement('button');
+    noBtn.className = 'confirm-btn cancel';
+    noBtn.textContent = 'Cancel';
+    noBtn.onclick = () => {
+      yesBtn.disabled = true;
+      noBtn.disabled = true;
+      addMessage('agent', 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
+    };
+
+    actions.appendChild(yesBtn);
+    actions.appendChild(noBtn);
+    bubble.appendChild(actions);
+  } else {
+    // Only persist messages that aren't a live confirm-prompt — the prompt
+    // text itself ("Pakka delete karna hai?") is fine to keep, just not
+    // the still-clickable buttons.
+    saveChatEntry({ role, content, actionClass });
+  }
+
+  scrollToBottom();
+}
+
+// ── CONFIRMED DESTRUCTIVE ACTION ──
+async function runConfirmedAction(confirmData, yesBtn, noBtn) {
+  yesBtn.disabled = true;
+  noBtn.disabled = true;
+  yesBtn.textContent = 'Delete ho raha hai...';
+
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        confirmed: true,
+        pending_command: confirmData.pending_command,
+        pending_value: confirmData.pending_value,
+        confirm_token: confirmData.confirm_token
+      })
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+
+    const cls = actionColorFor(data.action);
+    addMessage('agent', data.reply, cls);
+    history.push({ role: 'assistant', content: data.reply });
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
+  }
+}
+
+function actionColorFor(action) {
+  const actionColors = {
+    create_repo: 'success', delete_repo: 'success',
+    create_file: 'success', update_file: 'success', delete_file: 'success',
+    list_repos: 'info', list_files: 'info', read_file: 'info', repo_info: 'info',
+    confirm_required: 'warning', auth_required: 'warning',
+    error: 'error', warning: 'warning', message: ''
+  };
+  return actionColors[action] || '';
+}
+
+function scrollToBottom() {
+  const area = document.getElementById('scroll-area');
+  requestAnimationFrame(() => { area.scrollTop = area.scrollHeight; });
+}
+
+// ── SEND ──
+async function sendMsg() {
+  if (isLoading) return;
+
+  const input = document.getElementById('userInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+
+  isLoading = true;
+  input.value = '';
+  autoResize(input);
+  hideSuggestions();
+  document.getElementById('sendBtn').disabled = true;
+
+  addMessage('user', msg);
+  history.push({ role: 'user', content: msg });
+
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: history.slice(0, -1) })
+    });
+
+    const data = await res.json();
+    typing.classList.remove('show');
+
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command,
+        pending_value: data.pending_value,
+        confirm_token: data.confirm_token
+      });
+      return;
+    }
+
+    // ── FEATURE 1: list_files → rich file rows with per-file download ──
+    if (data.action === 'list_files' && data.items && data.repo) {
+      const es = document.getElementById('empty-state');
+      if (es) es.style.display = 'none';
+      const messages = document.getElementById('messages');
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap agent';
+      const label = document.createElement('div');
+      label.className = 'msg-label';
+      label.textContent = 'Agent';
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble info';
+      bubble.appendChild(buildFileListBubble(data.repo, data.items));
+      wrap.appendChild(label);
+      wrap.appendChild(bubble);
+      messages.appendChild(wrap);
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info' });
+      history.push({ role: 'assistant', content: data.reply });
+      scrollToBottom();
+      return;
+    }
+
+    // ── FEATURE 2: read_file → content + inline download button ──
+    if (data.action === 'read_file' && data.repo && data.path) {
+      const es = document.getElementById('empty-state');
+      if (es) es.style.display = 'none';
+      const messages = document.getElementById('messages');
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap agent';
+      const label = document.createElement('div');
+      label.className = 'msg-label';
+      label.textContent = 'Agent';
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble info';
+      bubble.appendChild(buildReadFileBubble(data.repo, data.path, data.reply));
+      wrap.appendChild(label);
+      wrap.appendChild(bubble);
+      messages.appendChild(wrap);
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info' });
+      history.push({ role: 'assistant', content: data.reply });
+      scrollToBottom();
+      return;
+    }
+
+    // ── AUTH: session expired / not connected mid-conversation ──
+    if (data.action === 'auth_required') {
+      addMessage('agent', data.reply, 'warning');
+      showLoginGate();
+      return;
+    }
+
+    const cls = actionColorFor(data.action);
+    addMessage('agent', data.reply, cls);
+    history.push({ role: 'assistant', content: data.reply });
+
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
+  } finally {
+    isLoading = false;
+    document.getElementById('sendBtn').disabled = false;
+    input.focus();
+  }
+}
+
+// ── CLEAR CHAT ──
+function confirmClearChat() {
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble warning';
+  bubble.innerHTML = 'Poora chat history clear kar du? Ye sirf is device se hatega, GitHub/Vercel pe kuch nahi hoga.';
+
+  const actions = document.createElement('div');
+  actions.className = 'confirm-actions';
+
+  const yesBtn = document.createElement('button');
+  yesBtn.className = 'confirm-btn danger';
+  yesBtn.textContent = 'Haan, Clear Karo';
+  yesBtn.onclick = () => {
+    clearSavedChat();
+    location.reload();
+  };
+
+  const noBtn = document.createElement('button');
+  noBtn.className = 'confirm-btn cancel';
+  noBtn.textContent = 'Cancel';
+  noBtn.onclick = () => {
+    yesBtn.disabled = true;
+    noBtn.disabled = true;
+  };
+
+  actions.appendChild(yesBtn);
+  actions.appendChild(noBtn);
+  bubble.appendChild(actions);
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+}
+
+// ── RESTORE ON LOAD ──
+restoreChatOnLoad();
+checkAuth();
+</script>
+</body>
+</html>
