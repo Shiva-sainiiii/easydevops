@@ -8,5 +8,4 @@ venv/
 *.egg-info/
 dist/
 build/
-*.db
-*.db-journal
+.vercel

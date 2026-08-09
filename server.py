@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, redirect, session
+from flask import Flask, request, jsonify, send_from_directory, redirect, make_response
 from flask_cors import CORS
 import requests
 import os
@@ -8,9 +8,11 @@ import re
 import time
 import hashlib
 import secrets
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from contextlib import contextmanager
 from cryptography.fernet import Fernet, InvalidToken
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,15 +25,30 @@ CORS(app, supports_credentials=True)
 #  These are the ONLY secrets that live in this server's own env —
 #  they identify the *app itself* to GitHub's OAuth system, not any
 #  individual user. No user's GitHub/Vercel/Render token ever goes
-#  in an env var; those are per-user and stored encrypted in SQLite
+#  in an env var; those are per-user and stored encrypted in Postgres
 #  (see TOKEN STORE below).
+#
+#  WHY POSTGRES + SIGNED COOKIES INSTEAD OF SQLITE + SERVER SESSIONS:
+#  Vercel runs this app as serverless functions — every request gets a
+#  fresh, isolated filesystem with no shared memory or disk between
+#  invocations. A SQLite file written during one request is gone by
+#  the next; Flask's default server-side session (which also needs
+#  somewhere persistent to live) has the same problem. So:
+#    - Token storage moves to Neon (managed Postgres) — a real network
+#      database that persists independently of any single invocation.
+#    - The session itself becomes STATELESS: instead of storing
+#      "user_id" server-side and giving the browser an opaque pointer
+#      to it, we put the user_id directly in the cookie, signed with
+#      itsdangerous so it can't be forged or tampered with. No server
+#      lookup needed to know who's asking — just signature verification.
 # ════════════════════════════════════════════════════════════════
 FLASK_SECRET_KEY   = os.getenv("FLASK_SECRET_KEY")          # signs the session cookie
-FERNET_KEY         = os.getenv("FERNET_KEY")                # encrypts tokens at rest in sqlite
+FERNET_KEY         = os.getenv("FERNET_KEY")                # encrypts tokens at rest in postgres
 GITHUB_CLIENT_ID   = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 OPENROUTER_KEY     = os.getenv("OPENROUTER_KEY")            # still app-level: AI fallback is shared infra, not per-user
 APP_BASE_URL       = os.getenv("APP_BASE_URL", "http://localhost:5000")  # used to build the OAuth callback URL
+DATABASE_URL       = os.getenv("DATABASE_URL")              # Neon Postgres connection string
 
 if not FLASK_SECRET_KEY:
     raise RuntimeError("FLASK_SECRET_KEY env var missing — required to sign session cookies. Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
@@ -39,35 +56,95 @@ if not FERNET_KEY:
     raise RuntimeError("FERNET_KEY env var missing — required to encrypt stored tokens. Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
 if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
     raise RuntimeError("GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing — register a GitHub OAuth App and set these.")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL env var missing — set this to your Neon Postgres connection string.")
 
 app.secret_key = FLASK_SECRET_KEY
 fernet = Fernet(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
 
-# Session cookies: httponly + samesite=lax is a sane default for a same-site
-# app like this (OAuth redirect flow needs Lax, not Strict, or the callback
-# redirect back from github.com won't carry the cookie).
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.getenv("FLASK_ENV") != "development",
-)
+IS_PROD = os.getenv("FLASK_ENV") != "development"
+
+# ── Cookie signer for stateless sessions ──
+# Two separate "salts" keep the OAuth CSRF-state cookie and the login
+# session cookie cryptographically independent, even though both are
+# signed with the same underlying FLASK_SECRET_KEY.
+_session_signer = URLSafeTimedSerializer(FLASK_SECRET_KEY, salt="agent-session")
+_oauth_state_signer = URLSafeTimedSerializer(FLASK_SECRET_KEY, salt="agent-oauth-state")
+
+SESSION_COOKIE_NAME = "agent_session"
+OAUTH_STATE_COOKIE_NAME = "agent_oauth_state"
+SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30  # 30 days
+OAUTH_STATE_MAX_AGE_SECONDS = 60 * 10        # 10 minutes — just needs to survive the redirect round-trip
+
+
+def _cookie_kwargs(max_age):
+    return dict(
+        httponly=True,
+        samesite="Lax",   # Lax (not Strict) so the cookie rides along on GitHub's redirect back to us
+        secure=IS_PROD,
+        max_age=max_age,
+        path="/",
+    )
+
+
+def set_session_cookie(resp, user_id):
+    token = _session_signer.dumps({"user_id": user_id})
+    resp.set_cookie(SESSION_COOKIE_NAME, token, **_cookie_kwargs(SESSION_MAX_AGE_SECONDS))
+
+
+def clear_session_cookie(resp):
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+
+
+def read_session_user_id():
+    """Verifies the signed session cookie and returns the user_id inside it,
+    or None if missing/invalid/expired. Pure signature check — no DB hit."""
+    raw = request.cookies.get(SESSION_COOKIE_NAME)
+    if not raw:
+        return None
+    try:
+        data = _session_signer.loads(raw, max_age=SESSION_MAX_AGE_SECONDS)
+        return data.get("user_id")
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def set_oauth_state_cookie(resp, state):
+    token = _oauth_state_signer.dumps({"state": state})
+    resp.set_cookie(OAUTH_STATE_COOKIE_NAME, token, **_cookie_kwargs(OAUTH_STATE_MAX_AGE_SECONDS))
+
+
+def read_and_clear_oauth_state_cookie(resp):
+    """Reads the expected state from its signed cookie and schedules the
+    cookie for deletion on the given response (single-use, like the old
+    session.pop() did)."""
+    raw = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
+    resp.delete_cookie(OAUTH_STATE_COOKIE_NAME, path="/")
+    if not raw:
+        return None
+    try:
+        data = _oauth_state_signer.loads(raw, max_age=OAUTH_STATE_MAX_AGE_SECONDS)
+        return data.get("state")
+    except (BadSignature, SignatureExpired):
+        return None
 
 
 # ════════════════════════════════════════════════════════════════
-#  TOKEN STORE — SQLite, encrypted at rest
+#  TOKEN STORE — Neon Postgres, encrypted at rest
 #  One row per logged-in user: their GitHub identity + their
 #  ENCRYPTED GitHub access token. Nothing here is readable without
 #  FERNET_KEY, which lives only in this server's env — but the point
 #  of this whole rewrite is that even that key only decrypts *tokens
 #  users voluntarily connected*, never a shared credential of yours.
 # ════════════════════════════════════════════════════════════════
-DB_PATH = os.getenv("DB_PATH", "agent_users.db")
-
-
 @contextmanager
 def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    # A fresh connection per request is the right call in a serverless
+    # environment — there's no long-lived process to hold a pool across
+    # invocations. Neon's connection overhead is small and it's designed
+    # for exactly this pattern (it even offers a pooled connection string
+    # for high-concurrency cases — see README).
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         yield conn
         conn.commit()
@@ -77,17 +154,18 @@ def db():
 
 def init_db():
     with db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                github_id INTEGER UNIQUE NOT NULL,
-                github_login TEXT NOT NULL,
-                avatar_url TEXT,
-                github_token_encrypted BLOB NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    github_id BIGINT UNIQUE NOT NULL,
+                    github_login TEXT NOT NULL,
+                    avatar_url TEXT,
+                    github_token_encrypted BYTEA NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
 
 
 init_db()
@@ -99,7 +177,9 @@ def encrypt_token(raw_token):
 
 def decrypt_token(blob):
     try:
-        return fernet.decrypt(blob).decode()
+        # psycopg2 returns BYTEA as memoryview/bytes depending on driver version
+        raw_bytes = bytes(blob) if not isinstance(blob, bytes) else blob
+        return fernet.decrypt(raw_bytes).decode()
     except InvalidToken:
         return None
 
@@ -107,23 +187,27 @@ def decrypt_token(blob):
 def upsert_user(github_id, github_login, avatar_url, github_token):
     encrypted = encrypt_token(github_token)
     with db() as conn:
-        conn.execute("""
-            INSERT INTO users (github_id, github_login, avatar_url, github_token_encrypted)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(github_id) DO UPDATE SET
-                github_login = excluded.github_login,
-                avatar_url = excluded.avatar_url,
-                github_token_encrypted = excluded.github_token_encrypted,
-                updated_at = CURRENT_TIMESTAMP
-        """, (github_id, github_login, avatar_url, encrypted))
-        row = conn.execute("SELECT id FROM users WHERE github_id = ?", (github_id,)).fetchone()
-        return row["id"]
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO users (github_id, github_login, avatar_url, github_token_encrypted)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (github_id) DO UPDATE SET
+                    github_login = EXCLUDED.github_login,
+                    avatar_url = EXCLUDED.avatar_url,
+                    github_token_encrypted = EXCLUDED.github_token_encrypted,
+                    updated_at = NOW()
+                RETURNING id
+            """, (github_id, github_login, avatar_url, encrypted))
+            row = cur.fetchone()
+            return row["id"]
 
 
 def get_user_by_id(user_id):
     with db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        return dict(row) if row else None
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            return dict(row) if row else None
 
 
 def get_user_github_token(user_id):
@@ -135,7 +219,8 @@ def get_user_github_token(user_id):
 
 def delete_user(user_id):
     with db() as conn:
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
 
 
 # ════════════════════════════════════════════════════════════════
@@ -144,8 +229,8 @@ def delete_user(user_id):
 def current_user():
     """Returns the logged-in user's DB row (dict) or None. Reads from the
     signed session cookie — never trusts anything client-supplied beyond
-    that cookie, which Flask verifies against FLASK_SECRET_KEY."""
-    user_id = session.get("user_id")
+    that cookie's signature, which is verified against FLASK_SECRET_KEY."""
+    user_id = read_session_user_id()
     if not user_id:
         return None
     return get_user_by_id(user_id)
@@ -180,7 +265,7 @@ _SECRET_PATTERNS = [
     re.compile(r"rnd_[A-Za-z0-9]{20,}"),
 ]
 
-_APP_SECRETS = [s for s in [GITHUB_CLIENT_SECRET, OPENROUTER_KEY, FERNET_KEY, FLASK_SECRET_KEY] if s]
+_APP_SECRETS = [s for s in [GITHUB_CLIENT_SECRET, OPENROUTER_KEY, FERNET_KEY, FLASK_SECRET_KEY, DATABASE_URL] if s]
 
 
 def redact(text, extra_secrets=None):
@@ -232,7 +317,6 @@ GITHUB_OAUTH_SCOPES = "repo,delete_repo"
 @app.route("/auth/github/login")
 def github_login():
     state = secrets.token_urlsafe(24)
-    session["oauth_state"] = state
     redirect_uri = f"{APP_BASE_URL}/auth/github/callback"
     params = {
         "client_id": GITHUB_CLIENT_ID,
@@ -242,7 +326,9 @@ def github_login():
         "allow_signup": "true",
     }
     query = "&".join(f"{k}={requests.utils.quote(str(v))}" for k, v in params.items())
-    return redirect(f"{GITHUB_OAUTH_AUTHORIZE_URL}?{query}")
+    resp = make_response(redirect(f"{GITHUB_OAUTH_AUTHORIZE_URL}?{query}"))
+    set_oauth_state_cookie(resp, state)
+    return resp
 
 
 @app.route("/auth/github/callback")
@@ -251,8 +337,12 @@ def github_callback():
     if error:
         return redirect(f"/?auth_error={error}")
 
+    # Build the eventual redirect response up front so we can attach the
+    # (now-consumed) oauth-state cookie deletion to it regardless of which
+    # branch below we take.
+    redirect_resp = make_response(redirect("/"))
     returned_state = request.args.get("state")
-    expected_state = session.pop("oauth_state", None)
+    expected_state = read_and_clear_oauth_state_cookie(redirect_resp)
     if not returned_state or not expected_state or returned_state != expected_state:
         return redirect("/?auth_error=state_mismatch")
 
@@ -295,10 +385,8 @@ def github_callback():
         github_token=access_token,
     )
 
-    session.clear()
-    session["user_id"] = user_id
-    session.permanent = True
-    return redirect("/")
+    set_session_cookie(redirect_resp, user_id)
+    return redirect_resp
 
 
 @app.route("/auth/logout", methods=["POST"])
@@ -306,8 +394,10 @@ def logout():
     user = current_user()
     if user:
         delete_user(user["id"])
-    session.clear()
-    return safe_jsonify({"ok": True})
+    resp = safe_jsonify({"ok": True})
+    resp = make_response(resp)
+    clear_session_cookie(resp)
+    return resp
 
 
 @app.route("/api/me")
@@ -322,13 +412,6 @@ def api_me():
     })
 
 
-# ════════════════════════════════════════════════════════════════
-#  PER-USER GITHUB HTTP HELPER
-#  Every call now takes the caller's token explicitly — there is no
-#  module-level GH_HEADERS anymore, on purpose, so it's structurally
-#  impossible to accidentally use one user's token for another user's
-#  request. execute_command() below always threads `gh_token` through.
-# ════════════════════════════════════════════════════════════════
 def gh_api(method, endpoint, gh_token, **kwargs):
     url = f"https://api.github.com{endpoint}"
     headers = {
@@ -833,11 +916,13 @@ def chat():
         # Encrypted token failed to decrypt (e.g. FERNET_KEY rotated) — force re-login
         # rather than silently failing every subsequent call.
         delete_user(user["id"])
-        session.clear()
-        return safe_jsonify({
+        resp = safe_jsonify({
             "reply": "🔒 Session expire ho gayi, dubara connect karo.",
             "action": "auth_required", "source": "direct"
-        }), 401
+        })
+        resp = make_response(resp, 401)
+        clear_session_cookie(resp)
+        return resp
 
     owner = user["github_login"]
     body = request.json or {}

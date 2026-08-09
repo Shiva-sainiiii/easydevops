@@ -1,63 +1,75 @@
 <div align="center">
 
-# ⚡ DevOps Agent — Multi-Tenant
+# ⚡ DevOps Agent — Multi-Tenant (Vercel Edition)
 
-### Ek chat interface, jisme har user apna khud ka GitHub connect karta hai.
-
-*Portfolio/LinkedIn pe link share karne layak version — koi shared credential nahi, har visitor ka action unke hi GitHub account me hota hai.*
+### Har user apna khud ka GitHub connect karta hai — ab Vercel pe, bina cold start ke.
 
 </div>
 
 ---
 
-## 🧠 Ye Alag Kyun Hai
+## 🧠 Ye Version Kyun
 
-Ye [personal DevOps Agent](../devops-agent) ka standalone cousin hai — same Hinglish chat UI,
-lekin fundamentally different trust model:
+Ye [multi-tenant DevOps Agent](../multitenant-agent) ka Vercel-compatible rewrite hai.
+Same OAuth flow, same per-user isolation, same features — sirf storage aur session
+layer badli hai, kyunki Vercel serverless hai aur Render jaisa persistent process
+nahi chalata.
 
-| | Personal Agent | Ye (Multi-Tenant) |
+| | Render version | Ye (Vercel version) |
 |---|---|---|
-| GitHub access | Tumhara apna `.env` token | Har user apna OAuth se connect karta hai |
-| Kaun kya control karta hai | Sirf tum | Jo bhi login karta hai, apna hi account |
-| Link share kar sakte ho? | ❌ Nahi — tumhare account pe access | ✅ Haan — har user sirf apna khud dekhta/badalta hai |
-| Token storage | Env var (deploy-time secret) | Per-user, encrypted at rest (runtime data) |
+| Hosting model | Persistent process | Serverless functions |
+| Cold start | ~30-50s (free tier idle ke baad) | ~1-3s (function cold start) |
+| Token storage | SQLite (local file) | Neon Postgres (managed, network DB) |
+| Session | Flask server-side session | Stateless signed cookie (itsdangerous) |
 
-## 🔐 Auth Flow
+**Kyun badlaav zaroori tha:** Vercel har request ek fresh, isolated environment me
+chalata hai — koi shared disk ya memory nahi hoti do requests ke beech. SQLite file
+jo ek request me likhi jaati, agli request tak gayab ho jaati. Isliye:
+- Token store ab **Neon** (managed Postgres) me hai — asli network database jo
+  kisi bhi single function invocation se independent survive karta hai
+- Session ab **stateless** hai — `user_id` seedha ek signed cookie me hota hai
+  (tamper-proof, kyunki `itsdangerous` se cryptographically signed hai), server
+  ko kahi kuch lookup nahi karna padta ye jaanne ke liye ki request kiski hai
+
+## 🔐 Auth Flow (updated)
 
 ```
 User "Connect GitHub" dabata hai
         │
         ▼
-GitHub OAuth authorize page (state=random-token via session)
-        │  user apna GitHub login karke permission deta hai
+GitHub OAuth authorize page
+        │  state ek SIGNED COOKIE me set hota hai (session nahi)
         ▼
 /auth/github/callback?code=...&state=...
-        │  state verify → code ko access_token se exchange
+        │  cookie se state verify → code ko access_token se exchange
         │  GitHub se identity fetch (github_id, login, avatar)
         ▼
-SQLite: upsert user row, token Fernet-encrypted
+Neon Postgres: upsert user row, token Fernet-encrypted
         │
         ▼
-Session cookie set (httponly, signed) → user_id
+user_id ek SIGNED COOKIE me set (itsdangerous, 30-day expiry)
         │
         ▼
-Har /chat request → session se user_id → DB se decrypt token
+Har /chat request → cookie se user_id verify (DB lookup nahi, sirf
+                     signature check) → phir DB se decrypt token
                    → USER KE APNE GitHub account pe API call
 ```
 
-Koi bhi command kabhi bhi kisi aur user ke token se nahi chalta — `execute_command()`
-har call me explicitly `owner` (GitHub login) + `gh_token` leta hai, dono current
-session se aate hain, kabhi request body se nahi.
-
 ## ⚙️ Setup
 
-### 1. GitHub OAuth App banao
+### 1. Neon Postgres database banao
+1. [neon.tech](https://neon.tech) pe free account banao
+2. New Project → database create ho jayega
+3. **Connection string** copy karo (pooled connection string use karo agar option
+   mile — Vercel ke serverless pattern ke liye better hai)
+
+### 2. GitHub OAuth App banao
 1. GitHub → Settings → Developer settings → OAuth Apps → **New OAuth App**
-2. **Homepage URL**: tumhara deployed URL (e.g. `https://your-app.onrender.com`)
-3. **Authorization callback URL**: `https://your-app.onrender.com/auth/github/callback`
+2. **Homepage URL**: tumhara Vercel URL (e.g. `https://your-app.vercel.app`)
+3. **Authorization callback URL**: `https://your-app.vercel.app/auth/github/callback`
 4. Client ID aur Client Secret copy karo
 
-### 2. Env vars set karo
+### 3. Env vars set karo
 
 ```bash
 cp .env.example .env
@@ -72,57 +84,58 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 OPENROUTER_KEY=
 APP_BASE_URL=               # no trailing slash, must match GitHub OAuth App callback
+DATABASE_URL=                # Neon connection string
 ```
 
-### 3. Run
+### 4. Local test
 
 ```bash
 pip install -r requirements.txt
 python server.py
 ```
 
-Local testing: GitHub OAuth App ka callback URL `http://localhost:5000/auth/github/callback`
-rakho aur `APP_BASE_URL=http://localhost:5000` set karo (aur `FLASK_ENV=development` taaki
-cookie ka Secure flag na lage, jo plain HTTP pe login block kar deta).
+Local testing ke liye: GitHub OAuth App ka callback `http://localhost:5000/auth/github/callback`
+rakho, `APP_BASE_URL=http://localhost:5000` aur `FLASK_ENV=development` set karo
+(taaki cookie ka Secure flag na lage — wo plain HTTP pe login block kar deta).
 
-### 4. Deploy (Render/Vercel/etc.)
+### 5. Vercel pe deploy
 
-- Sab env vars production dashboard me set karo (same names)
-- `APP_BASE_URL` production URL pe update karo
-- GitHub OAuth App ka callback URL bhi production URL pe update karo
-- ⚠️ **SQLite persistence**: agar host ka filesystem ephemeral hai (jaise Render free
-  tier bina disk ke), to redeploy pe saare connected users ka token store reset ho
-  jayega — sab dubara login karenge. Real usage ke liye persistent disk mount karo,
-  ya SQLite ko Postgres se replace karo.
+1. Ye repo GitHub pe push karo
+2. Vercel dashboard → New Project → apna repo import karo
+3. **Environment Variables** section me upar wale saare vars add karo (production URL ke saath)
+4. Deploy
+5. GitHub OAuth App ka callback URL bhi ab production Vercel URL pe update karo
+6. `APP_BASE_URL` bhi Vercel dashboard me production URL pe update karo, phir redeploy
+
+`vercel.json` already isi repo me hai — Vercel ko batata hai ki `server.py` ek
+Python/Flask app hai aur saare routes usi pe jaayein.
 
 ## 🎯 Is Pass Me Kya Hai
 
-Pehla pass sirf **GitHub** commands cover karta hai (jitne single-user version me
-the, wahi subset): create/delete/list repos, list/read/create/edit/delete files,
-repo info, zip download, file upload. Vercel aur Render OAuth alag passes me aayenge —
-Render ka public OAuth abhi utna standard nahi hai, to uske liye shayad "apna API
-key khud paste karo" wala manual flow better rahega bajaye full OAuth ke.
+Same scope as Render version: sirf **GitHub** commands (create/delete/list repos,
+file CRUD, repo info, zip upload/download, folder upload). Vercel/Render OAuth
+alag passes me aayenge.
 
 ## 🔒 Security Notes
 
+- Session cookie **signed hai, encrypted nahi** — usme sirf `user_id` (ek number)
+  hota hai, koi sensitive data nahi, isliye signing (tamper-proofing) kaafi hai
+- GitHub tokens Postgres me Fernet-encrypted rehte hain, DB compromise pe bhi
+  plaintext nahi milega
+- OAuth CSRF-state bhi ab ek short-lived (10 min) signed cookie me hai, session
+  ki jagah — same security guarantee, bas stateless
 - Koi bhi user ka GitHub token kabhi doosre user ke request me use nahi hota —
-  `execute_command()` structurally isolated hai (owner + token dono current
-  session se aate hain)
-- Tokens SQLite me Fernet-encrypted rehte hain, plaintext nahi
-- Session cookies httponly + signed (Flask ka `secret_key`) — JS se access
-  nahi ho sakte, tamper-proof hain
-- Destructive actions (delete repo/file) ka confirm-token ab `user_id` se bhi
-  bound hai — ek user ka confirm token doosre ke against replay nahi ho sakta
-- Redaction layer ab request-time pe current user ka actual token bhi scrub
-  karta hai (fixed list ki jagah), kyunki tokens ab runtime data hain, startup
-  config nahi
-- Logout par: session clear + DB se us user ka row delete (token turant discard)
+  `execute_command()` ab bhi structurally isolated hai
+- Destructive-action confirm-tokens `user_id`-bound hain
+- Logout par: cookie clear + DB se us user ka row delete (token turant discard)
 
 ## 🛠️ Tech Stack
 
 ```
-Backend    →  Python · Flask · Flask-CORS · SQLite · cryptography (Fernet)
-Frontend   →  Vanilla HTML/CSS/JS (same UI as personal agent)
-Auth       →  GitHub OAuth Apps (authorization code flow)
-AI Layer   →  OpenRouter (shared infra, app-level key — never sees user tokens)
+Backend    →  Python · Flask · Flask-CORS · Neon (Postgres) · psycopg2
+Auth       →  GitHub OAuth Apps + itsdangerous (stateless signed cookies)
+Encryption →  cryptography (Fernet) — tokens at rest
+Frontend   →  Vanilla HTML/CSS/JS (same UI as other versions)
+Hosting    →  Vercel (Python serverless functions)
+AI Layer   →  OpenRouter (shared infra, app-level key)
 ```

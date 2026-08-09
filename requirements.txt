@@ -2,5 +2,6 @@ flask
 flask-cors
 requests
 python-dotenv
-gunicorn
 cryptography
+itsdangerous
+psycopg2-binary
