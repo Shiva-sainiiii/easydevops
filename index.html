@@ -163,6 +163,82 @@
   .user-menu-item:active { background: rgba(255,107,107,0.1); }
   .user-menu-item svg { width: 14px; height: 14px; flex-shrink: 0; }
 
+  /* Vercel menu item is neutral/accent, not destructive, until connected —
+     then it switches to a "connected" state (green check) vs red disconnect. */
+  .user-menu-item.vercel-item {
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .user-menu-item.vercel-item:active { background: rgba(255,255,255,0.06); }
+  .user-menu-item.vercel-item.connected {
+    color: var(--green);
+  }
+  .user-menu-item.vercel-item.connected:active { background: rgba(61,220,151,0.1); }
+
+  /* ── VERCEL TOKEN MODAL ── */
+  .vercel-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+  }
+  .vercel-modal-overlay.show { display: flex; }
+  .vercel-modal {
+    width: 100%;
+    max-width: 340px;
+    background: rgba(15,26,28,0.97);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  }
+  .vercel-modal-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .vercel-modal-header h2 { font-size: 16px; font-weight: 600; color: var(--text); }
+  .vercel-modal-desc { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
+  .vercel-modal-steps {
+    font-size: 12px; color: var(--muted); line-height: 1.8;
+    padding-left: 18px; margin-bottom: 10px;
+  }
+  .vercel-modal-steps strong { color: var(--text); font-weight: 600; }
+  .vercel-token-link {
+    display: inline-block;
+    font-size: 12px; color: var(--accent-2);
+    margin-bottom: 14px;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(110,231,255,0.3);
+  }
+  .vercel-token-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-2);
+    background: rgba(0,0,0,0.3);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    outline: none;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+  }
+  .vercel-token-input:focus { border-color: var(--accent); }
+  .vercel-modal-error {
+    display: none;
+    font-size: 12px; color: var(--red);
+    margin-bottom: 8px;
+  }
+  .vercel-modal-error.show { display: block; }
+  .vercel-modal-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .vercel-modal-actions .prompt-btn { flex: 1; }
+
   /* ── LOGIN GATE ── */
   #login-gate {
     position: fixed;
@@ -880,9 +956,36 @@
 
   <div id="user-menu" class="user-menu">
     <div class="user-menu-name" id="user-menu-name"></div>
+    <div class="user-menu-item vercel-item" id="vercel-menu-item" onclick="onVercelMenuClick()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L24 22H0L12 1Z"/></svg>
+      <span id="vercel-menu-label">Connect Vercel</span>
+    </div>
     <div class="user-menu-item" onclick="handleLogout()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
       Disconnect GitHub
+    </div>
+  </div>
+
+  <!-- ═══ VERCEL TOKEN PASTE MODAL ═══ -->
+  <div id="vercel-modal-overlay" class="vercel-modal-overlay">
+    <div class="vercel-modal">
+      <div class="vercel-modal-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 1L24 22H0L12 1Z"/></svg>
+        <h2>Connect Vercel</h2>
+      </div>
+      <p class="vercel-modal-desc">Apna Vercel Access Token paste karo. Token banane ke liye:</p>
+      <ol class="vercel-modal-steps">
+        <li>Vercel dashboard → <strong>Settings → Tokens</strong></li>
+        <li><strong>Create Token</strong> dabao, koi bhi naam do</li>
+        <li>Scope <strong>Full Account</strong> select karo, token copy karo</li>
+      </ol>
+      <a class="vercel-token-link" href="https://vercel.com/account/tokens" target="_blank" rel="noopener">vercel.com/account/tokens kholo →</a>
+      <input type="password" id="vercel-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" />
+      <div id="vercel-modal-error" class="vercel-modal-error"></div>
+      <div class="vercel-modal-actions">
+        <button class="prompt-btn go" id="vercel-connect-btn" onclick="submitVercelToken()">Connect</button>
+        <button class="prompt-btn cancel" onclick="hideVercelModal()">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -910,13 +1013,13 @@
       </div>
       <div>
         <h1>DevOps Agent se baatein karein</h1>
-        <p>Apne GitHub repos manage karo — banao, dekho, edit karo, delete karo. Sab tumhare khud ke account me.</p>
+        <p>Apne GitHub repos aur (agar connect kiya ho) Vercel projects manage karo — sab tumhare khud ke account me.</p>
       </div>
       <div class="chip-row">
         <div class="chip" onclick="fillInput('Saare GitHub repos list kar')">📁 List my repos</div>
         <div class="chip" onclick="fillInput('Naya repo bana naam ke saath my-app')">➕ Create new repo</div>
         <div class="chip" onclick="fillInput('list files in my-app')">📄 List files in a repo</div>
-        <div class="chip" onclick="fillInput('info about my-app')">ℹ️ Repo info</div>
+        <div class="chip" onclick="fillInput('list vercel projects')">▲ List Vercel projects</div>
       </div>
     </div>
 
@@ -986,14 +1089,19 @@ let isLoading = false;
 // (httponly, so JS can't read/forge it) and reflects whatever the
 // server says. /api/me is the single source of truth.
 // ══════════════════════════════════════════════════════════════════
-let authedUser = null; // { login, avatar_url } | null
+let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername } | null
 
 async function checkAuth() {
   try {
     const res = await fetch('/api/me', { credentials: 'same-origin' });
     const data = await res.json();
     if (data.logged_in) {
-      authedUser = { login: data.login, avatar_url: data.avatar_url };
+      authedUser = {
+        login: data.login,
+        avatar_url: data.avatar_url,
+        vercelConnected: !!data.vercel_connected,
+        vercelUsername: data.vercel_username || null,
+      };
       hideLoginGate();
       renderUserBadge();
     } else {
@@ -1046,6 +1154,20 @@ function renderUserBadge() {
   avatar.alt = authedUser.login;
   badge.style.display = 'flex';
   document.getElementById('user-menu-name').textContent = '@' + authedUser.login;
+  renderVercelMenuState();
+}
+
+function renderVercelMenuState() {
+  const item = document.getElementById('vercel-menu-item');
+  const label = document.getElementById('vercel-menu-label');
+  if (!authedUser) return;
+  if (authedUser.vercelConnected) {
+    item.classList.add('connected');
+    label.textContent = `Vercel: @${authedUser.vercelUsername || 'connected'} ✓`;
+  } else {
+    item.classList.remove('connected');
+    label.textContent = 'Connect Vercel';
+  }
 }
 
 function toggleUserMenu() {
@@ -1072,6 +1194,125 @@ async function handleLogout() {
   authedUser = null;
   clearSavedChat();
   location.reload();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VERCEL CONNECTION — manual token paste (see server.py comment near
+// /api/vercel/connect for why this is a paste flow, not OAuth).
+// Clicking the menu item either opens the paste modal (not connected yet)
+// or disconnects (already connected) — same click-to-toggle pattern as
+// a lot of "connected account" UIs.
+// ══════════════════════════════════════════════════════════════════
+function onVercelMenuClick() {
+  document.getElementById('user-menu').classList.remove('show');
+  if (authedUser && authedUser.vercelConnected) {
+    confirmDisconnectVercel();
+  } else {
+    showVercelModal();
+  }
+}
+
+function showVercelModal() {
+  document.getElementById('vercel-modal-overlay').classList.add('show');
+  document.getElementById('vercel-modal-error').classList.remove('show');
+  const input = document.getElementById('vercel-token-input');
+  input.value = '';
+  setTimeout(() => input.focus(), 50);
+}
+
+function hideVercelModal() {
+  document.getElementById('vercel-modal-overlay').classList.remove('show');
+}
+
+async function submitVercelToken() {
+  const input = document.getElementById('vercel-token-input');
+  const errBox = document.getElementById('vercel-modal-error');
+  const btn = document.getElementById('vercel-connect-btn');
+  const token = input.value.trim();
+
+  errBox.classList.remove('show');
+  if (!token) {
+    errBox.textContent = 'Token paste karo pehle.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+
+  try {
+    const res = await fetch('/api/vercel/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      errBox.textContent = data.reply || 'Connect nahi hua. Token check karke dubara try karo.';
+      errBox.classList.add('show');
+      btn.disabled = false;
+      btn.textContent = 'Connect';
+      return;
+    }
+
+    authedUser.vercelConnected = true;
+    authedUser.vercelUsername = data.vercel_username;
+    renderVercelMenuState();
+    hideVercelModal();
+    addMessage('agent', `✅ Vercel connect ho gaya! (@${data.vercel_username}) Ab tum apne repos Vercel pe deploy kar sakte ho.`, 'success');
+  } catch (e) {
+    errBox.textContent = 'Server se connect nahi ho paya. Dubara try karo.';
+    errBox.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect';
+  }
+}
+
+function confirmDisconnectVercel() {
+  const messages = document.getElementById('messages');
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble warning';
+  bubble.innerHTML = `Vercel disconnect kar du? (@${authedUser.vercelUsername || ''}) Vercel commands tab tak kaam nahi karenge jab tak dubara connect na karo.`;
+
+  const actions = document.createElement('div');
+  actions.className = 'confirm-actions';
+  const yesBtn = document.createElement('button');
+  yesBtn.className = 'confirm-btn danger';
+  yesBtn.textContent = 'Haan, Disconnect Karo';
+  yesBtn.onclick = async () => {
+    yesBtn.disabled = true;
+    noBtn.disabled = true;
+    try {
+      await fetch('/api/vercel/disconnect', { method: 'POST', credentials: 'same-origin' });
+    } catch (e) {}
+    authedUser.vercelConnected = false;
+    authedUser.vercelUsername = null;
+    renderVercelMenuState();
+    addMessage('agent', 'Vercel disconnect ho gaya.', '');
+  };
+  const noBtn = document.createElement('button');
+  noBtn.className = 'confirm-btn cancel';
+  noBtn.textContent = 'Cancel';
+  noBtn.onclick = () => { yesBtn.disabled = true; noBtn.disabled = true; };
+
+  actions.appendChild(yesBtn);
+  actions.appendChild(noBtn);
+  bubble.appendChild(actions);
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1126,8 +1367,8 @@ function restoreChatOnLoad() {
 
 // ══════════════════════════════════════════════════════════════════
 // COMMAND AUTOFILL — mirrors server.py INTENT_RULES for this multi-tenant
-// build (GitHub-only in this first pass; Vercel/Render land in a later
-// pass once their OAuth flows are wired up too).
+// build. GitHub commands always show; Vercel commands only show once the
+// user has connected Vercel (checked at render time via authedUser).
 // ══════════════════════════════════════════════════════════════════
 const COMMANDS = [
   { id: 'LIST_FILES',   tpl: 'list files in {repo}',                          desc: 'GitHub · list files in a repo',        kw: ['list','files','file','sare','dikhao','repo'] },
@@ -1140,9 +1381,16 @@ const COMMANDS = [
   { id: 'DELETE_REPO',  tpl: 'delete repo {repo}',                            desc: 'GitHub · delete a repository ⚠️',      kw: ['delete','uda','hata','remove','repo'] },
   { id: 'LIST_REPOS',   tpl: 'list all my repos',                             desc: 'GitHub · list all repositories',       kw: ['list','sare','mere','repos','show'] },
   { id: 'GET_REPO_INFO', tpl: 'info about {repo}',                            desc: 'GitHub · get repo details',            kw: ['info','information','details','repo'] },
-];
 
-// ── AUTOFILL STATE ──
+  // ── VERCEL (only surfaced in suggestions once connected — see
+  // renderSuggestions' filter below) ──
+  { id: 'VERCEL_LIST',  tpl: 'list vercel projects',                          desc: 'Vercel · list all projects',           kw: ['list','vercel','projects','sare','dikhao'], vercel: true },
+  { id: 'VERCEL_IMPORT', tpl: 'import {repo} to vercel',                      desc: 'Vercel · import a GitHub repo',        kw: ['import','connect','vercel','repo'], vercel: true },
+  { id: 'VERCEL_DEPLOY', tpl: 'deploy {project_name} to vercel',              desc: 'Vercel · deploy a project',            kw: ['deploy','vercel','project'], vercel: true },
+  { id: 'VERCEL_DELETE', tpl: 'delete vercel project {project_name}',         desc: 'Vercel · delete a project ⚠️',         kw: ['delete','uda','hata','vercel','project'], vercel: true },
+  { id: 'VERCEL_ENV_GET', tpl: 'get env for {project_name} vercel',           desc: 'Vercel · view environment variables',  kw: ['env','environment','vars','get','show','vercel'], vercel: true },
+  { id: 'VERCEL_ENV_SET', tpl: 'set vercel env {KEY}={value} for {project_name}', desc: 'Vercel · set an environment variable', kw: ['set','env','vercel','add','update'], vercel: true },
+];
 
 // ── AUTOFILL STATE ──
 let suggestIndex = -1;   // currently highlighted suggestion (keyboard nav)
@@ -1179,7 +1427,9 @@ function renderSuggestions(rawValue) {
   }
 
   const queryWords = value.toLowerCase().split(/\s+/).filter(Boolean);
+  const vercelReady = !!(authedUser && authedUser.vercelConnected);
   const scored = COMMANDS
+    .filter(cmd => !cmd.vercel || vercelReady)
     .map(cmd => ({ cmd, score: scoreCommand(cmd, queryWords) }))
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -1265,7 +1515,10 @@ function placeholderKind(name, cmdId) {
 }
 
 function placeholderLabel(name) {
-  const labels = { repo: 'Repository', path: 'File path', message: 'Message' };
+  const labels = {
+    repo: 'Repository', path: 'File path', message: 'Message',
+    project_name: 'Vercel project', KEY: 'Env key', value: 'Env value',
+  };
   return labels[name] || name.replace(/_/g, ' ');
 }
 
@@ -2357,7 +2610,10 @@ function actionColorFor(action) {
     create_repo: 'success', delete_repo: 'success',
     create_file: 'success', update_file: 'success', delete_file: 'success',
     list_repos: 'info', list_files: 'info', read_file: 'info', repo_info: 'info',
-    confirm_required: 'warning', auth_required: 'warning',
+    vercel_list: 'info', vercel_import: 'success', vercel_deploy: 'success',
+    vercel_deploy_pending: 'warning', vercel_delete_project: 'success',
+    vercel_env: 'info', vercel_env_set: 'success',
+    confirm_required: 'warning', auth_required: 'warning', vercel_auth_required: 'warning',
     error: 'error', warning: 'warning', message: ''
   };
   return actionColors[action] || '';
@@ -2456,6 +2712,13 @@ async function sendMsg() {
     if (data.action === 'auth_required') {
       addMessage('agent', data.reply, 'warning');
       showLoginGate();
+      return;
+    }
+
+    // ── VERCEL AUTH: not connected, or token expired/revoked ──
+    if (data.action === 'vercel_auth_required') {
+      addMessage('agent', data.reply, 'warning');
+      showVercelModal();
       return;
     }
 

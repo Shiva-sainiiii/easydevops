@@ -162,10 +162,17 @@ def init_db():
                     github_login TEXT NOT NULL,
                     avatar_url TEXT,
                     github_token_encrypted BYTEA NOT NULL,
+                    vercel_token_encrypted BYTEA,
+                    vercel_username TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # Migration-safe: if this table already existed from before Vercel
+            # support was added, ALTER it rather than relying on CREATE TABLE
+            # IF NOT EXISTS (which only applies to brand-new tables).
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vercel_token_encrypted BYTEA")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vercel_username TEXT")
 
 
 init_db()
@@ -221,6 +228,44 @@ def delete_user(user_id):
     with db() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+
+
+def set_vercel_token(user_id, vercel_token, vercel_username):
+    """Stores the user's pasted Vercel API token, encrypted, alongside their
+    GitHub identity row. Vercel connection is optional and independent of
+    GitHub login — a user can be logged in via GitHub with no Vercel token
+    set at all, in which case Vercel commands should prompt them to connect."""
+    encrypted = encrypt_token(vercel_token)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    vercel_token_encrypted = %s,
+                    vercel_username = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (encrypted, vercel_username, user_id))
+
+
+def clear_vercel_token(user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    vercel_token_encrypted = NULL,
+                    vercel_username = NULL,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (user_id,))
+
+
+def get_user_vercel_token(user):
+    """Given an already-fetched user row (dict), decrypts and returns their
+    Vercel token, or None if they haven't connected Vercel."""
+    blob = user.get("vercel_token_encrypted")
+    if not blob:
+        return None
+    return decrypt_token(blob)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -288,9 +333,12 @@ def safe_jsonify(payload):
     user = current_user()
     extra = []
     if user:
-        tok = decrypt_token(user["github_token_encrypted"])
-        if tok:
-            extra.append(tok)
+        gh_tok = decrypt_token(user["github_token_encrypted"])
+        if gh_tok:
+            extra.append(gh_tok)
+        vc_tok = get_user_vercel_token(user)
+        if vc_tok:
+            extra.append(vc_tok)
 
     def scrub(obj):
         if isinstance(obj, str):
@@ -409,7 +457,66 @@ def api_me():
         "logged_in": True,
         "login": user["github_login"],
         "avatar_url": user["avatar_url"],
+        "vercel_connected": bool(user.get("vercel_token_encrypted")),
+        "vercel_username": user.get("vercel_username"),
     })
+
+
+# ════════════════════════════════════════════════════════════════
+#  VERCEL CONNECTION — manual API token paste (not OAuth).
+#
+#  WHY MANUAL TOKEN INSTEAD OF OAUTH:
+#  Vercel's "Sign in with Vercel" OAuth flow is identity-focused (scopes:
+#  openid, email, profile, offline_access) and its documentation does not
+#  clearly cover deployment/project-management API access — as of writing,
+#  Vercel's own community forum has an open, unanswered thread from another
+#  developer asking exactly this question. Rather than build a PKCE +
+#  refresh-token OAuth flow on an assumption that might not hold, users
+#  paste a personal access token they generate themselves in their Vercel
+#  dashboard (Settings -> Tokens). This is guaranteed to have real API
+#  access since it's the same token type Vercel's own docs use for direct
+#  API calls, and the user can revoke it anytime from their own dashboard.
+# ════════════════════════════════════════════════════════════════
+@app.route("/api/vercel/connect", methods=["POST"])
+def vercel_connect():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Pehle GitHub se connect karo.", "action": "auth_required"}), 401
+
+    body = request.json or {}
+    token = (body.get("token") or "").strip()
+    if not token:
+        return safe_jsonify({"reply": "❌ Token khaali hai.", "action": "error"}), 400
+
+    # Validate the token actually works before saving it — a quick call to
+    # Vercel's own "who am I" endpoint. This also gives us the Vercel
+    # username to display, and catches typos/expired-token paste mistakes
+    # immediately instead of failing later on the first real command.
+    r = requests.get(
+        "https://api.vercel.com/v2/user",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        return safe_jsonify({
+            "reply": "❌ Ye token valid nahi hai. Vercel dashboard se dubara copy karke try karo.",
+            "action": "error"
+        }), 400
+
+    vercel_user = r.json().get("user", {})
+    vercel_username = vercel_user.get("username") or vercel_user.get("email") or "connected"
+
+    set_vercel_token(user["id"], token, vercel_username)
+    return safe_jsonify({"ok": True, "vercel_username": vercel_username})
+
+
+@app.route("/api/vercel/disconnect", methods=["POST"])
+def vercel_disconnect():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Pehle GitHub se connect karo.", "action": "auth_required"}), 401
+    clear_vercel_token(user["id"])
+    return safe_jsonify({"ok": True})
 
 
 def gh_api(method, endpoint, gh_token, **kwargs):
@@ -419,6 +526,62 @@ def gh_api(method, endpoint, gh_token, **kwargs):
         "Accept": "application/vnd.github+json",
     }
     return requests.request(method, url, headers=headers, timeout=20, **kwargs)
+
+
+def vc_api(method, endpoint, vc_token, **kwargs):
+    url = f"https://api.vercel.com{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {vc_token}",
+        "Content-Type": "application/json",
+    }
+    return requests.request(method, url, headers=headers, timeout=20, **kwargs)
+
+
+def vercel_find_project(project_name, vc_token):
+    r = vc_api("GET", "/v9/projects", vc_token)
+    if r.status_code != 200:
+        return None
+    for p in r.json().get("projects", []):
+        if p.get("name") == project_name:
+            return p
+    return None
+
+
+VERCEL_TERMINAL_STATES = {"READY", "ERROR", "CANCELED"}
+
+
+def vercel_poll_deployment(deployment_id, vc_token, max_wait_seconds=25, interval_seconds=3):
+    """Poll GET /v13/deployments/{id} until terminal readyState or timeout.
+    Short timeout since this runs synchronously inside one request — Vercel
+    serverless functions also have their own execution time limits, so this
+    deliberately doesn't try to wait indefinitely for a slow build."""
+    elapsed = 0
+    last_dep = {}
+    while elapsed <= max_wait_seconds:
+        r = vc_api("GET", f"/v13/deployments/{deployment_id}", vc_token)
+        if r.status_code != 200:
+            time.sleep(interval_seconds)
+            elapsed += interval_seconds
+            continue
+
+        dep = r.json()
+        last_dep = dep
+        state = dep.get("readyState", "UNKNOWN")
+
+        if state in VERCEL_TERMINAL_STATES:
+            live_url = None
+            if state == "READY":
+                raw_url = dep.get("url")
+                if raw_url:
+                    live_url = f"https://{raw_url}"
+                if dep.get("aliasAssigned") and dep.get("alias"):
+                    live_url = f"https://{dep['alias'][0]}"
+            return {"ok": state == "READY", "timed_out": False, "deployment": dep, "state": state, "live_url": live_url}
+
+        time.sleep(interval_seconds)
+        elapsed += interval_seconds
+
+    return {"ok": False, "timed_out": True, "deployment": last_dep, "state": last_dep.get("readyState", "UNKNOWN"), "live_url": None}
 
 
 def get_file_sha(repo, path, owner, gh_token):
@@ -435,7 +598,7 @@ def get_file_sha(repo, path, owner, gh_token):
 #  be replayed to execute a destructive action as a different user
 #  even if somehow leaked (e.g. logged, shared in a bug report).
 # ════════════════════════════════════════════════════════════════
-DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE"}
+DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT"}
 
 
 def confirm_token(cmd, value, user_id):
@@ -453,12 +616,15 @@ def build_confirmation(cmd, params, user_id):
     elif cmd == "DELETE_FILE":
         target_desc = f"`{params.get('path')}` in repo `{params.get('repo')}`"
         warn_text = "Ye file repo se permanently hat jayegi."
+    elif cmd == "VERCEL_DELETE_PROJECT":
+        target_desc = f"Vercel project `{params.get('project_name')}`"
+        warn_text = "Vercel project aur uski saari deployments delete ho jayengi (GitHub repo safe rahega)."
     else:
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."
 
     return {
-        "reply": f"⚠️ **Pakka?**\n\n{target_desc} delete karne wala hu (tumhare GitHub account se).\n\n{warn_text}",
+        "reply": f"⚠️ **Pakka?**\n\n{target_desc} delete karne wala hu.\n\n{warn_text}",
         "action": "confirm_required",
         "pending_command": cmd,
         "pending_value": value,
@@ -475,7 +641,7 @@ def build_confirmation(cmd, params, user_id):
 #  (GitHub would reject cross-account writes anyway, but this keeps
 #  reads scoped correctly too).
 # ════════════════════════════════════════════════════════════════
-def execute_command(cmd, params, owner, gh_token):
+def execute_command(cmd, params, owner, gh_token, vc_token=None):
     params = params or {}
 
     try:
@@ -604,6 +770,160 @@ def execute_command(cmd, params, owner, gh_token):
             else:
                 return {"reply": f"❌ Repo info fetch nahi hui: {r.json().get('message','')}", "action": "error"}
 
+        # ──────────────── VERCEL ────────────────
+        # Every Vercel branch below checks vc_token first and returns a
+        # friendly "connect Vercel" prompt if missing, rather than crashing
+        # on a None token — Vercel connection is optional, GitHub login is not.
+        elif cmd == "VERCEL_LIST_PROJECTS":
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            r = vc_api("GET", "/v9/projects", vc_token)
+            if r.status_code == 200:
+                projects = r.json().get("projects", [])
+                if not projects:
+                    return {"reply": "Koi Vercel project nahi mila.", "action": "vercel_list", "projects": []}
+                lines = []
+                for p in projects:
+                    live = f"https://{p['name']}.vercel.app"
+                    lines.append(f"▲ **{p['name']}** — `{p.get('framework') or 'static'}`\n🔗 {live}")
+                return {"reply": f"Tere {len(projects)} Vercel projects:\n\n" + "\n\n".join(lines),
+                        "action": "vercel_list", "projects": [{"name": p["name"], "id": p["id"]} for p in projects]}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+            else:
+                return {"reply": f"❌ Vercel projects fetch nahi hue: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "VERCEL_IMPORT_REPO":
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            repo = params["repo"]
+            project_name = params.get("project_name") or repo
+            payload = {
+                "name": project_name,
+                "gitRepository": {"type": "github", "repo": f"{owner}/{repo}"},
+            }
+            r = vc_api("POST", "/v11/projects", vc_token, json=payload)
+            if r.status_code in (200, 201):
+                proj = r.json()
+                latest = proj.get("latestDeployments") or []
+                dep_id = (latest[0].get("uid") or latest[0].get("id")) if latest else None
+                reply = (f"✅ `{repo}` Vercel se connect ho gaya!\n**Project: {proj['name']}**\n"
+                         f"Project ID: `{proj.get('id')}`\n\n")
+                if dep_id:
+                    reply += (f"⏳ Vercel ne automatically ek initial build queue kar diya hai (Deployment ID: `{dep_id}`).\n"
+                              f"Status check karne ke liye bol: 'check deployment status {dep_id}'.")
+                else:
+                    reply += f"Build abhi queue nahi hua. Deploy trigger karne ke liye bol: 'deploy {proj['name']} to vercel'."
+                return {"reply": reply, "action": "vercel_import", "project_name": proj["name"], "project_id": proj.get("id")}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+            else:
+                err = r.json().get("error", {}).get("message", r.text[:200])
+                return {"reply": f"❌ Vercel import Error: {err}", "action": "error"}
+
+        elif cmd == "VERCEL_DEPLOY":
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            project_name = params["project_name"]
+            proj = vercel_find_project(project_name, vc_token)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila. Pehle import kar.", "action": "error"}
+
+            git_repo = proj.get("link", {})
+            repo_id = git_repo.get("repoId")
+            git_branch = git_repo.get("productionBranch", "main")
+            if not repo_id:
+                return {"reply": f"❌ Project `{project_name}` GitHub se linked nahi hai. Pehle import kar.", "action": "error"}
+
+            payload = {
+                "name": project_name,
+                "target": "production",
+                "gitSource": {"type": "github", "repoId": repo_id, "ref": git_branch},
+                "projectSettings": {"framework": proj.get("framework")}
+            }
+            r = vc_api("POST", "/v13/deployments", vc_token, json=payload)
+            if r.status_code not in (200, 201):
+                if r.status_code in (401, 403):
+                    return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+                err = r.json().get("error", {}).get("message", r.text[:200])
+                return {"reply": f"❌ Vercel deploy trigger Error: {err}", "action": "error"}
+
+            dep = r.json()
+            dep_id = dep.get("id")
+            if not dep_id:
+                return {"reply": "❌ Vercel ne deployment ID nahi diya, kuch galat hua.", "action": "error"}
+
+            result = vercel_poll_deployment(dep_id, vc_token)
+            if result["ok"]:
+                return {"reply": f"✅ Deployment complete!\n**{project_name}**\n🔗 {result['live_url']}\n\nID: `{dep_id}`",
+                        "action": "vercel_deploy", "deployment_id": dep_id, "url": result["live_url"]}
+            elif result["timed_out"]:
+                return {"reply": (f"⏳ Deploy trigger ho gaya hai (ID: `{dep_id}`), lekin build abhi bhi chal raha hai.\n\n"
+                                   f"Status check karne ke liye thodi der baad bol: 'check deployment status {dep_id}'."),
+                        "action": "vercel_deploy_pending", "deployment_id": dep_id}
+            else:
+                error_detail = result["deployment"].get("errorMessage", "") or result["state"]
+                return {"reply": f"❌ Deployment fail ho gaya.\nStatus: **{result['state']}**\n{error_detail}\nID: `{dep_id}`",
+                        "action": "error", "deployment_id": dep_id}
+
+        elif cmd == "VERCEL_DELETE_PROJECT":
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            project_name = params["project_name"]
+            proj = vercel_find_project(project_name, vc_token)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila.", "action": "error"}
+            r = vc_api("DELETE", f"/v9/projects/{proj.get('id')}", vc_token)
+            if r.status_code in (200, 204):
+                return {"reply": f"✅ Vercel project `{project_name}` delete ho gaya.\n\n⚠️ GitHub repo abhi bhi waisa hi hai.",
+                        "action": "vercel_delete_project", "project_name": project_name}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+            else:
+                err = r.json().get("error", {}).get("message", r.text[:200]) if r.text else r.text[:200]
+                return {"reply": f"❌ Vercel project delete Error: {err}", "action": "error"}
+
+        elif cmd == "VERCEL_GET_ENV":
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            project_name = params["project_name"]
+            proj = vercel_find_project(project_name, vc_token)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila.", "action": "error"}
+            r = vc_api("GET", f"/v9/projects/{proj.get('id')}/env", vc_token)
+            if r.status_code == 200:
+                envs = r.json().get("envs", [])
+                if not envs:
+                    return {"reply": f"Project `{project_name}` me koi env vars nahi hai.", "action": "vercel_env"}
+                lines = [f"`{e['key']}` — targets: {', '.join(e.get('target', []))}" for e in envs]
+                return {"reply": f"Env vars for `{project_name}` (values encrypted, sirf keys dikha sakta hu):\n\n" + "\n".join(lines),
+                        "action": "vercel_env"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+            else:
+                return {"reply": f"❌ Env vars fetch nahi hue: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "VERCEL_SET_ENV":
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            project_name = params["project_name"]
+            key = params["key"]
+            value = params["value"]
+            target = params.get("target", ["production", "preview", "development"])
+            proj = vercel_find_project(project_name, vc_token)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila.", "action": "error"}
+            r = vc_api("POST", f"/v10/projects/{proj.get('id')}/env", vc_token,
+                       json={"key": key, "value": value, "type": "encrypted", "target": target})
+            if r.status_code in (200, 201):
+                return {"reply": f"✅ Env var `{key}` set ho gaya `{project_name}` me.\n⚠️ Naya deploy trigger karo change apply karne ke liye.",
+                        "action": "vercel_env_set"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+            else:
+                err = r.json().get("error", {}).get("message", r.text[:200])
+                return {"reply": f"❌ Env set Error: {err}", "action": "error"}
+
         else:
             return {"reply": f"❌ Unknown command: {cmd}", "action": "error"}
 
@@ -622,7 +942,7 @@ def execute_command(cmd, params, owner, gh_token):
 SLUG = r"[\w][\w.\-]*"
 PATH = r"[\w][\w./\-]*"
 
-NO_ARG_COMMANDS = {"LIST_REPOS"}
+NO_ARG_COMMANDS = {"LIST_REPOS", "VERCEL_LIST_PROJECTS"}
 
 
 def _g(m, i):
@@ -675,6 +995,34 @@ INTENT_RULES = [
         r"(?:list|sare|mere|show|dikhao|dikha)\s+.*\brepos?\b",
         r"^(?:repos?|my\s+repos?)$",
     ], lambda m: {}),
+
+    # ── VERCEL ──
+    ("VERCEL_LIST_PROJECTS", [
+        r"(?:list|sare|show|dikhao|dikha)\s+.*vercel.*projects?\b",
+        r"^vercel\s+projects?$",
+    ], lambda m: {}),
+
+    ("VERCEL_IMPORT_REPO", [
+        rf"(?:import|connect)\s+({SLUG})\s+(?:to|pe|on|with)\s+vercel",
+    ], lambda m: {"repo": _g(m, 1)}),
+
+    ("VERCEL_DEPLOY", [
+        rf"deploy\s+({SLUG})\s+(?:to|pe|on)\s+vercel",
+    ], lambda m: {"project_name": _g(m, 1)}),
+
+    ("VERCEL_DELETE_PROJECT", [
+        rf"(?:delete|uda|hata)\s+vercel\s+project\s+({SLUG})",
+    ], lambda m: {"project_name": _g(m, 1)}),
+
+    ("VERCEL_GET_ENV", [
+        rf"(?:get|show|dikhao|dikha)\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})\s+.*vercel",
+        rf"vercel\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})",
+    ], lambda m: {"project_name": _g(m, 1)}),
+
+    ("VERCEL_SET_ENV", [
+        rf"(?:set|add|update)\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})\s+.*vercel",
+        rf"(?:set|add|update)\s+vercel\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})",
+    ], lambda m: {"project_name": _g(m, 3), "key": _g(m, 1), "value": _g(m, 2)}),
 ]
 
 COMPLEX_KEYWORDS = [
@@ -696,9 +1044,18 @@ def parse_intent(message):
                     params = extractor(m)
                 except Exception:
                     continue
-                required_fields = {"repo"}
+                required_fields = {"repo", "project_name", "key"}
                 if any(params.get(f) in (None, "") for f in required_fields if f in params):
                     continue
+                # VERCEL_SET_ENV: env var keys are conventionally uppercase
+                # and case-sensitive on Vercel. The match above ran against
+                # the lowercased message, so recover the original casing for
+                # the key by re-matching the same span against the original
+                # (non-lowered) message.
+                if cmd == "VERCEL_SET_ENV":
+                    orig_m = re.search(pat, original, re.IGNORECASE)
+                    if orig_m:
+                        params["key"] = orig_m.group(1)
                 return cmd, params
     return None, None
 
@@ -713,7 +1070,7 @@ def parse_intent(message):
 OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 SYSTEM_PROMPT_TEMPLATE = """You are a DevOps Agent helping GitHub user: {login}.
-You control ONLY this user's own GitHub account. You act by outputting EXACTLY ONE command per response.
+You control ONLY this user's own GitHub account{vercel_clause}. You act by outputting EXACTLY ONE command per response.
 
 COMMANDS:
 1. CREATE_REPO: <repo-name>
@@ -725,12 +1082,20 @@ COMMANDS:
 7. DELETE_FILE: {{"repo":"repo-name","path":"file.html","message":"reason"}}
 8. LIST_FILES: {{"repo":"repo-name","path":""}}
 9. GET_REPO_INFO: {{"repo":"repo-name"}}
-
+{vercel_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
 - JSON must be valid. Escape quotes as \\" and newlines as \\n in content fields.
-- NEVER invent URLs, IDs, or data you don't have — only the 9 commands above give you real information.
+- NEVER invent URLs, IDs, or data you don't have — only the commands above give you real information.
 - NEVER output anything resembling a real token/secret, even as an example.
+{vercel_note}"""
+
+VERCEL_COMMANDS_BLOCK = """10. VERCEL_LIST_PROJECTS
+11. VERCEL_IMPORT_REPO: {"repo":"repo-name","project_name":"optional-custom-name"}
+12. VERCEL_DEPLOY: {"project_name":"project-name"}
+13. VERCEL_DELETE_PROJECT: {"project_name":"project-name"}
+14. VERCEL_GET_ENV: {"project_name":"project-name"}
+15. VERCEL_SET_ENV: {"project_name":"project-name","key":"KEY","value":"value"}
 """
 
 CODEGEN_SYSTEM_PROMPT = """You generate file content for a developer tool. Output ONLY the raw file content — no markdown fences, no explanation. Write complete, working code. Infer language from the file path."""
@@ -738,6 +1103,8 @@ CODEGEN_SYSTEM_PROMPT = """You generate file content for a developer tool. Outpu
 COMMANDS = [
     "CREATE_REPO:", "DELETE_REPO:", "LIST_REPOS", "CREATE_FILE:",
     "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
+    "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
+    "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_SET_ENV:",
 ]
 
 
@@ -772,8 +1139,17 @@ def extract_command(text):
     return (None, None)
 
 
-def call_openrouter_chat(user_message, history, github_login):
-    messages = [{"role": "system", "content": SYSTEM_PROMPT_TEMPLATE.format(login=github_login)}]
+def call_openrouter_chat(user_message, history, github_login, vercel_connected=False):
+    vercel_clause = " and their connected Vercel account" if vercel_connected else ""
+    vercel_commands = VERCEL_COMMANDS_BLOCK if vercel_connected else ""
+    vercel_note = ("" if vercel_connected else
+                   "\nNote: this user has NOT connected Vercel yet — do not emit any VERCEL_* command; "
+                   "if they ask for a Vercel action, tell them to connect Vercel first via the user menu.\n")
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        login=github_login, vercel_clause=vercel_clause,
+        vercel_commands=vercel_commands, vercel_note=vercel_note,
+    )
+    messages = [{"role": "system", "content": system_prompt}]
     for h in history[-10:]:
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_message})
@@ -925,6 +1301,7 @@ def chat():
         return resp
 
     owner = user["github_login"]
+    vc_token = get_user_vercel_token(user)
     body = request.json or {}
 
     # 1. CONFIRMED DESTRUCTIVE ACTION REPLAY
@@ -938,7 +1315,7 @@ def chat():
             params = json.loads(value) if value else {}
         except (json.JSONDecodeError, TypeError):
             params = {}
-        result = execute_command(cmd, params, owner, gh_token)
+        result = execute_command(cmd, params, owner, gh_token, vc_token)
         result["source"] = "direct"
         return safe_jsonify(result)
 
@@ -966,14 +1343,14 @@ def chat():
         if cmd in DESTRUCTIVE_COMMANDS:
             return safe_jsonify(build_confirmation(cmd, params, user["id"]))
 
-        result = execute_command(cmd, params, owner, gh_token)
+        result = execute_command(cmd, params, owner, gh_token, vc_token)
         result["source"] = "direct"
         result["action_command"] = cmd
         return safe_jsonify(result)
 
     # 3. AI FALLBACK
     try:
-        ai_text = call_openrouter_chat(user_message, conv_history, owner)
+        ai_text = call_openrouter_chat(user_message, conv_history, owner, vercel_connected=bool(vc_token))
     except RuntimeError as e:
         return safe_jsonify({"reply": f"AI Error: {str(e)}", "action": "error", "source": "ai"})
     except requests.Timeout:
@@ -1000,7 +1377,7 @@ def chat():
         if ai_cmd in DESTRUCTIVE_COMMANDS:
             return safe_jsonify(build_confirmation(ai_cmd, ai_params, user["id"]))
 
-        result = execute_command(ai_cmd, ai_params, owner, gh_token)
+        result = execute_command(ai_cmd, ai_params, owner, gh_token, vc_token)
         result["source"] = "ai"
         result["action_command"] = ai_cmd
         return safe_jsonify(result)

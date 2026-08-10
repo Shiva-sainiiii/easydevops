@@ -112,9 +112,18 @@ Python/Flask app hai aur saare routes usi pe jaayein.
 
 ## 🎯 Is Pass Me Kya Hai
 
-Same scope as Render version: sirf **GitHub** commands (create/delete/list repos,
-file CRUD, repo info, zip upload/download, folder upload). Vercel/Render OAuth
-alag passes me aayenge.
+**GitHub**: create/delete/list repos, file CRUD, repo info, zip upload/download,
+folder upload — sab GitHub OAuth se, tumhare khud ke account me.
+
+**Vercel**: list/import/deploy/delete projects, env vars get/set. GitHub jaisा
+OAuth nahi hai — Vercel **manual API token paste** se connect hota hai (user menu
+me "Connect Vercel"). Wajah: Vercel ka "Sign in with Vercel" OAuth flow
+identity-focused hai (login ke liye), deployment-management API access ke liye
+docs clear nahi hain — ek open community thread khud isी gap ko flag karta hai.
+Manual token guaranteed kaam karta hai aur user kabhi bhi apne Vercel dashboard
+se revoke kar sakta hai.
+
+**Render**: abhi tak nahi hai, future pass me aa sakta hai.
 
 ## 🔒 Security Notes
 
@@ -127,7 +136,9 @@ alag passes me aayenge.
 - Koi bhi user ka GitHub token kabhi doosre user ke request me use nahi hota —
   `execute_command()` ab bhi structurally isolated hai
 - Destructive-action confirm-tokens `user_id`-bound hain
-- Logout par: cookie clear + DB se us user ka row delete (token turant discard)
+- Logout par: cookie clear + DB se us user ka row delete (GitHub aur Vercel dono tokens turant discard)
+- Vercel token bhi Postgres me Fernet-encrypted rehta hai, GitHub token jaisा hi. "Disconnect Vercel" se turant clear ho jata hai (GitHub session affect nahi hota)
+- Vercel token save karne se pehle ek validation call (`GET /v2/user`) hoti hai — invalid/expired token save hi nahi hoga
 
 ## 🛠️ Tech Stack
 
