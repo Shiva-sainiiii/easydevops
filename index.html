@@ -119,6 +119,23 @@
   .clear-chat-btn svg { width: 14px; height: 14px; }
   .clear-chat-btn:active { color: var(--accent-2); border-color: var(--accent-2); background: rgba(54,209,255,0.08); }
 
+  .menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    margin-left: 6px;
+    border-radius: 8px;
+    border: 1px solid var(--border-2);
+    background: transparent;
+    color: var(--muted-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .menu-btn svg { width: 16px; height: 16px; }
+  .menu-btn:active { color: var(--accent-2); border-color: var(--accent-2); background: rgba(54,209,255,0.08); }
+
   /* ── USER BADGE + MENU (OAuth identity) ── */
   .user-badge {
     width: 24px; height: 24px;
@@ -174,6 +191,17 @@
     color: var(--green);
   }
   .user-menu-item.vercel-item.connected:active { background: rgba(61,220,151,0.1); }
+
+  /* Netlify menu item — same pattern as Vercel item above. */
+  .user-menu-item.netlify-item {
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .user-menu-item.netlify-item:active { background: rgba(255,255,255,0.06); }
+  .user-menu-item.netlify-item.connected {
+    color: var(--green);
+  }
+  .user-menu-item.netlify-item.connected:active { background: rgba(61,220,151,0.1); }
 
   /* ── VERCEL TOKEN MODAL ── */
   .vercel-modal-overlay {
@@ -295,6 +323,380 @@
     max-width: 300px;
   }
   .login-error-banner.show { display: block; }
+
+  /* ── SCROLL-TO-LATEST FAB ── */
+  #scroll-fab {
+    display: none;
+    position: fixed;
+    right: 16px;
+    bottom: 92px;
+    z-index: 30;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--border-2);
+    background: rgba(15,26,28,0.9);
+    backdrop-filter: blur(12px);
+    color: var(--accent-2);
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    -webkit-tap-highlight-color: transparent;
+  }
+  #scroll-fab.show { display: flex; }
+  #scroll-fab svg { width: 18px; height: 18px; }
+  #scroll-fab .fab-dot {
+    display: none;
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px rgba(54,209,255,0.8);
+  }
+  #scroll-fab.has-new .fab-dot { display: block; }
+
+  /* ── HAMBURGER DRAWER ── */
+  #drawer-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .22s ease;
+  }
+  #drawer-overlay.show { opacity: 1; pointer-events: auto; }
+
+  #drawer {
+    position: fixed;
+    top: 0; right: 0;
+    z-index: 41;
+    width: min(86vw, 360px);
+    height: 100dvh;
+    height: 100vh;
+    background: linear-gradient(180deg, #0c1719 0%, #081213 100%);
+    border-left: 1px solid var(--border-2);
+    box-shadow: -12px 0 40px rgba(0,0,0,0.5);
+    transform: translateX(100%);
+    transition: transform .28s cubic-bezier(.2,.9,.3,1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #drawer.show { transform: translateX(0); }
+
+  .drawer-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .drawer-scroll::-webkit-scrollbar { display: none; }
+
+  .drawer-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 20px 18px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .drawer-avatar {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent), #1a9fd6);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 17px;
+    color: #04181c;
+    overflow: hidden;
+  }
+  .drawer-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .drawer-profile-info { min-width: 0; flex: 1; }
+  .drawer-profile-name {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .drawer-profile-sub {
+    font-size: 11.5px; color: var(--muted); margin-top: 2px;
+    font-family: var(--font-mono);
+  }
+  .drawer-close-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--border-2);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .drawer-close-btn svg { width: 15px; height: 15px; }
+  .drawer-close-btn:active { color: var(--accent-2); border-color: var(--accent-2); }
+
+  .drawer-section { padding: 16px 18px 6px; }
+  .drawer-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    padding-bottom: 8px;
+  }
+  button.drawer-section-title.drawer-section-toggle {
+    width: 100%;
+    font: inherit;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    background: none;
+    border: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    padding-top: 2px;
+  }
+  .gear-icon {
+    width: 15px; height: 15px;
+    color: var(--muted-2);
+    transition: transform .3s ease, color .2s;
+  }
+  .drawer-section-toggle.open .gear-icon {
+    transform: rotate(90deg);
+    color: var(--accent-2);
+  }
+  #settings-list {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    overflow: hidden;
+    transition: grid-template-rows .25s ease, opacity .2s ease;
+  }
+  #settings-list.settings-collapsed { grid-template-rows: 0fr; opacity: 0; }
+  #settings-list.settings-open { grid-template-rows: 1fr; opacity: 1; }
+  #settings-list > .settings-inner { min-height: 0; overflow: hidden; }
+
+  .drawer-new-chat-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-2);
+    background: rgba(54,209,255,0.1);
+    border: 1px solid rgba(54,209,255,0.3);
+    border-radius: 100px;
+    padding: 4px 10px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .drawer-new-chat-btn svg { width: 11px; height: 11px; }
+  .drawer-new-chat-btn:active { transform: scale(0.95); }
+
+  /* Connected apps list — adapted for our per-user OAuth/token model:
+     each row shows real connection state (from authedUser) with a
+     Connect/Disconnect button, not an env-var "Test" button. */
+  .app-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+  }
+  .app-icon {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-2);
+    font-size: 14px;
+  }
+  .app-info { flex: 1; min-width: 0; }
+  .app-name { font-size: 13.5px; font-weight: 500; color: var(--text); }
+  .app-status {
+    font-size: 10.5px; font-family: var(--font-mono); margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .app-status.on  { color: var(--green); }
+  .app-status.off { color: var(--muted-2); }
+
+  .app-action-btn {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    min-width: 44px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 100px;
+    border: 1px solid var(--border-2);
+    background: rgba(255,255,255,0.03);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .app-action-btn:active {
+    color: var(--accent-2);
+    border-color: rgba(54,209,255,0.4);
+    background: rgba(54,209,255,0.08);
+  }
+  .app-action-btn.disconnect { color: var(--red); }
+  .app-action-btn.disconnect:active {
+    color: var(--red);
+    border-color: rgba(255,107,107,0.4);
+    background: rgba(255,107,107,0.08);
+  }
+  .app-action-btn.always-on { opacity: 0.5; cursor: default; }
+
+  .toggle-switch {
+    position: relative;
+    width: 38px; height: 22px;
+    flex-shrink: 0;
+    border-radius: 100px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .18s, border-color .18s;
+  }
+  .toggle-switch.on {
+    background: rgba(54,209,255,0.35);
+    border-color: rgba(54,209,255,0.6);
+  }
+  .toggle-switch .knob {
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #cfe9ea;
+    transition: transform .18s, background .18s;
+  }
+  .toggle-switch.on .knob {
+    transform: translateX(16px);
+    background: var(--accent-2);
+    box-shadow: 0 0 6px rgba(54,209,255,0.7);
+  }
+
+  .setting-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+  }
+  .setting-info { flex: 1; min-width: 0; }
+  .setting-name { font-size: 13.5px; font-weight: 500; color: var(--text); }
+  .setting-sub { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+
+  .drawer-divider { height: 1px; background: var(--border); margin: 12px 0; }
+
+  .chat-hist-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .12s, border-color .12s;
+  }
+  .chat-hist-item:active { background: rgba(255,255,255,0.03); }
+  .chat-hist-item.active {
+    background: rgba(54,209,255,0.08);
+    border-left-color: var(--accent);
+  }
+  .chat-hist-icon {
+    width: 26px; height: 26px;
+    border-radius: 7px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+  .chat-hist-icon svg { width: 13px; height: 13px; }
+  .chat-hist-item.active .chat-hist-icon { color: var(--accent-2); }
+  .chat-hist-info { flex: 1; min-width: 0; }
+  .chat-hist-title {
+    font-size: 13px; font-weight: 500; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chat-hist-meta { font-size: 10px; color: var(--muted-2); margin-top: 1px; }
+  .chat-hist-delete {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px;
+    flex-shrink: 0;
+    border-radius: 7px;
+    color: var(--muted-2);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .chat-hist-delete svg { width: 13px; height: 13px; }
+  .chat-hist-delete:active { color: var(--red); background: rgba(255,107,107,0.1); }
+  .chat-hist-empty {
+    padding: 18px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted-2);
+  }
+
+  .drawer-footer {
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--muted-2);
+    text-align: center;
+  }
+
+  /* ── MESSAGE ACTIONS (copy / retry) ── */
+  .msg-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 0 6px;
+  }
+  .msg-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted-2);
+    font-size: 10.5px;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .15s, border-color .15s;
+  }
+  .msg-action-btn svg { width: 11px; height: 11px; }
+  .msg-action-btn:active { color: var(--accent-2); border-color: rgba(54,209,255,0.4); }
+  .msg-action-btn.copied { color: var(--green); border-color: rgba(61,220,151,0.4); }
+  .msg-action-btn.retry:active { color: var(--red); border-color: rgba(255,107,107,0.4); }
+  .btn-spinner {
+    display: inline-block;
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.25);
+    border-top-color: currentColor;
+    animation: mini-spin 0.6s linear infinite;
+  }
+  @keyframes mini-spin { to { transform: rotate(360deg); } }
 
   @keyframes pulse {
     0%, 100% { opacity: 1; }
@@ -951,6 +1353,11 @@
           <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/>
         </svg>
       </button>
+      <button class="menu-btn" title="Menu" onclick="openDrawer()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M3 12h18M3 18h18"/>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -959,6 +1366,10 @@
     <div class="user-menu-item vercel-item" id="vercel-menu-item" onclick="onVercelMenuClick()">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L24 22H0L12 1Z"/></svg>
       <span id="vercel-menu-label">Connect Vercel</span>
+    </div>
+    <div class="user-menu-item netlify-item" id="netlify-menu-item" onclick="onNetlifyMenuClick()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.49 20.005h-.723l-.628-.628v-1.68l3.293-3.293 1.348 1.348-.132.397-2.85 2.85zm-1.351-3.494V15.19l.628-.628h1.68l3.293 3.293-1.348 1.348-.397-.132-2.85-2.85zM3.999 12.5v-.702l.61-.61H8.44l-.001 2.923H4.61l-.61-.611zm14.997-3.183l.628.628v1.68l-3.293 3.293-1.348-1.348.132-.397 2.85-2.85zm-9.276-4.99l.397.132 2.85 2.85-1.348 1.348-.628-.628v-1.68zm5.61 2.982l2.85-2.85.397.132v1.68l-2.85 2.85z"/></svg>
+      <span id="netlify-menu-label">Connect Netlify</span>
     </div>
     <div class="user-menu-item" onclick="handleLogout()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
@@ -989,6 +1400,29 @@
     </div>
   </div>
 
+  <!-- ═══ NETLIFY TOKEN PASTE MODAL ═══ -->
+  <div id="netlify-modal-overlay" class="vercel-modal-overlay">
+    <div class="vercel-modal">
+      <div class="vercel-modal-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M6.49 20.005h-.723l-.628-.628v-1.68l3.293-3.293 1.348 1.348-.132.397-2.85 2.85zm-1.351-3.494V15.19l.628-.628h1.68l3.293 3.293-1.348 1.348-.397-.132-2.85-2.85zM3.999 12.5v-.702l.61-.61H8.44l-.001 2.923H4.61l-.61-.611zm14.997-3.183l.628.628v1.68l-3.293 3.293-1.348-1.348.132-.397 2.85-2.85zm-9.276-4.99l.397.132 2.85 2.85-1.348 1.348-.628-.628v-1.68zm5.61 2.982l2.85-2.85.397.132v1.68l-2.85 2.85z"/></svg>
+        <h2>Connect Netlify</h2>
+      </div>
+      <p class="vercel-modal-desc">Apna Netlify Personal Access Token paste karo. Token banane ke liye:</p>
+      <ol class="vercel-modal-steps">
+        <li>Netlify dashboard → <strong>User settings → Applications</strong></li>
+        <li><strong>Personal access tokens</strong> section me <strong>New access token</strong></li>
+        <li>Naam do, expiration set karo, token copy karo</li>
+      </ol>
+      <a class="vercel-token-link" href="https://app.netlify.com/user/applications#personal-access-tokens" target="_blank" rel="noopener">app.netlify.com/user/applications kholo →</a>
+      <input type="password" id="netlify-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" />
+      <div id="netlify-modal-error" class="vercel-modal-error"></div>
+      <div class="vercel-modal-actions">
+        <button class="prompt-btn go" id="netlify-connect-btn" onclick="submitNetlifyToken()">Connect</button>
+        <button class="prompt-btn cancel" onclick="hideNetlifyModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ LOGIN GATE — shown until GitHub is connected ═══ -->
   <div id="login-gate">
     <div class="login-card">
@@ -1004,6 +1438,58 @@
       <div class="login-scope-note">Requested scopes: <code>repo</code>, <code>delete_repo</code> — repo read/write + repo deletion. Kabhi bhi Disconnect kar sakte ho.</div>
       <div id="login-error-banner" class="login-error-banner"></div>
     </div>
+  </div>
+
+  <button id="scroll-fab" title="Latest messages pe jao" onclick="scrollToBottom(true)">
+    <span class="fab-dot"></span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+  </button>
+
+  <!-- ═══ HAMBURGER DRAWER — chat history, connected apps, settings ═══ -->
+  <div id="drawer-overlay" onclick="closeDrawer()"></div>
+  <div id="drawer">
+    <div class="drawer-scroll">
+      <div class="drawer-profile">
+        <div class="drawer-avatar" id="drawer-avatar">?</div>
+        <div class="drawer-profile-info">
+          <div class="drawer-profile-name" id="drawer-name">DevOps Agent</div>
+          <div class="drawer-profile-sub" id="drawer-sub">Loading...</div>
+        </div>
+        <button class="drawer-close-btn" onclick="closeDrawer()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">
+          Recent Chats
+          <button class="drawer-new-chat-btn" onclick="startNewChatSession()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            New
+          </button>
+        </div>
+      </div>
+      <div id="chat-hist-list"></div>
+
+      <div class="drawer-divider"></div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Connected Apps</div>
+      </div>
+      <div id="apps-list"></div>
+
+      <div class="drawer-divider"></div>
+
+      <div class="drawer-section">
+        <button class="drawer-section-title drawer-section-toggle" id="settings-toggle-btn" onclick="toggleSettingsPanel()">
+          <span>Settings</span>
+          <svg class="gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+      </div>
+      <div id="settings-list" class="settings-collapsed"></div>
+    </div>
+
+    <div class="drawer-footer">DevOps Agent · Multi-tenant</div>
   </div>
 
   <div id="scroll-area">
@@ -1083,13 +1569,37 @@ const history = [];
 let isLoading = false;
 
 // ══════════════════════════════════════════════════════════════════
+// APP SETTINGS (localStorage) — small client-only UI preferences.
+// Nothing here is security/auth-relevant; safe defaults if storage is
+// unavailable or the key is missing/corrupt.
+// ══════════════════════════════════════════════════════════════════
+const APP_SETTINGS_KEY = 'devops_agent_settings_v1';
+const DEFAULT_SETTINGS = { haptics: true, autoscroll: true, confirmClear: true };
+
+function loadAppSettings() {
+  try {
+    const raw = localStorage.getItem(APP_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch (e) {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function saveAppSettings() {
+  try { localStorage.setItem(APP_SETTINGS_KEY, JSON.stringify(appSettings)); } catch (e) {}
+}
+
+let appSettings = loadAppSettings();
+
+// ══════════════════════════════════════════════════════════════════
 // AUTH — GitHub OAuth session check.
 // This app never stores its own credentials client-side; it only ever
 // asks the server "am I logged in right now?" via the session cookie
 // (httponly, so JS can't read/forge it) and reflects whatever the
 // server says. /api/me is the single source of truth.
 // ══════════════════════════════════════════════════════════════════
-let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername } | null
+let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername, netlifyConnected, netlifyEmail } | null
 
 async function checkAuth() {
   try {
@@ -1101,6 +1611,8 @@ async function checkAuth() {
         avatar_url: data.avatar_url,
         vercelConnected: !!data.vercel_connected,
         vercelUsername: data.vercel_username || null,
+        netlifyConnected: !!data.netlify_connected,
+        netlifyEmail: data.netlify_email || null,
       };
       hideLoginGate();
       renderUserBadge();
@@ -1155,6 +1667,7 @@ function renderUserBadge() {
   badge.style.display = 'flex';
   document.getElementById('user-menu-name').textContent = '@' + authedUser.login;
   renderVercelMenuState();
+  renderNetlifyMenuState();
 }
 
 function renderVercelMenuState() {
@@ -1168,6 +1681,25 @@ function renderVercelMenuState() {
     item.classList.remove('connected');
     label.textContent = 'Connect Vercel';
   }
+  // Keep the drawer's Connected Apps list in sync too, in case it's open
+  // (or gets opened next) after a connect/disconnect changed authedUser.
+  renderAppsList();
+  renderDrawerProfile();
+}
+
+function renderNetlifyMenuState() {
+  const item = document.getElementById('netlify-menu-item');
+  const label = document.getElementById('netlify-menu-label');
+  if (!authedUser) return;
+  if (authedUser.netlifyConnected) {
+    item.classList.add('connected');
+    label.textContent = `Netlify: ${authedUser.netlifyEmail || 'connected'} ✓`;
+  } else {
+    item.classList.remove('connected');
+    label.textContent = 'Connect Netlify';
+  }
+  renderAppsList();
+  renderDrawerProfile();
 }
 
 function toggleUserMenu() {
@@ -1316,53 +1848,360 @@ function confirmDisconnectVercel() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// CHAT PERSISTENCE (localStorage)
-// Keeps the visible conversation across page reloads/app restarts —
-// this is per-device only (not synced across phones/browsers). Stores
-// {role, content, actionClass} per message; deliberately does NOT
-// persist confirm-action buttons (delete/destructive prompts) — those
-// are re-issued fresh by the server each time and should never be
-// resurrected from a stale save after a reload.
+// NETLIFY CONNECTION — same manual-token-paste pattern as Vercel above.
+// See server.py comment near /api/netlify/connect for why this is a
+// paste flow, not OAuth.
 // ══════════════════════════════════════════════════════════════════
-const CHAT_STORAGE_KEY = 'devops_agent_chat_v1';
-const CHAT_STORAGE_MAX = 200; // cap so localStorage doesn't grow unbounded
-
-function loadSavedChat() {
-  try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    return [];
+function onNetlifyMenuClick() {
+  document.getElementById('user-menu').classList.remove('show');
+  if (authedUser && authedUser.netlifyConnected) {
+    confirmDisconnectNetlify();
+  } else {
+    showNetlifyModal();
   }
 }
 
-function saveChatEntry(entry) {
+function showNetlifyModal() {
+  document.getElementById('netlify-modal-overlay').classList.add('show');
+  document.getElementById('netlify-modal-error').classList.remove('show');
+  const input = document.getElementById('netlify-token-input');
+  input.value = '';
+  setTimeout(() => input.focus(), 50);
+}
+
+function hideNetlifyModal() {
+  document.getElementById('netlify-modal-overlay').classList.remove('show');
+}
+
+async function submitNetlifyToken() {
+  const input = document.getElementById('netlify-token-input');
+  const errBox = document.getElementById('netlify-modal-error');
+  const btn = document.getElementById('netlify-connect-btn');
+  const token = input.value.trim();
+
+  errBox.classList.remove('show');
+  if (!token) {
+    errBox.textContent = 'Token paste karo pehle.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+
   try {
-    const saved = loadSavedChat();
-    saved.push(entry);
-    if (saved.length > CHAT_STORAGE_MAX) saved.splice(0, saved.length - CHAT_STORAGE_MAX);
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(saved));
+    const res = await fetch('/api/netlify/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      errBox.textContent = data.reply || 'Connect nahi hua. Token check karke dubara try karo.';
+      errBox.classList.add('show');
+      btn.disabled = false;
+      btn.textContent = 'Connect';
+      return;
+    }
+
+    authedUser.netlifyConnected = true;
+    authedUser.netlifyEmail = data.netlify_email;
+    renderNetlifyMenuState();
+    hideNetlifyModal();
+    addMessage('agent', `✅ Netlify connect ho gaya! (${data.netlify_email}) Ab tum apni sites Netlify pe manage kar sakte ho.`, 'success');
+  } catch (e) {
+    errBox.textContent = 'Server se connect nahi ho paya. Dubara try karo.';
+    errBox.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect';
+  }
+}
+
+function confirmDisconnectNetlify() {
+  const messages = document.getElementById('messages');
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble warning';
+  bubble.innerHTML = `Netlify disconnect kar du? (${authedUser.netlifyEmail || ''}) Netlify commands tab tak kaam nahi karenge jab tak dubara connect na karo.`;
+
+  const actions = document.createElement('div');
+  actions.className = 'confirm-actions';
+  const yesBtn = document.createElement('button');
+  yesBtn.className = 'confirm-btn danger';
+  yesBtn.textContent = 'Haan, Disconnect Karo';
+  yesBtn.onclick = async () => {
+    yesBtn.disabled = true;
+    noBtn.disabled = true;
+    try {
+      await fetch('/api/netlify/disconnect', { method: 'POST', credentials: 'same-origin' });
+    } catch (e) {}
+    authedUser.netlifyConnected = false;
+    authedUser.netlifyEmail = null;
+    renderNetlifyMenuState();
+    addMessage('agent', 'Netlify disconnect ho gaya.', '');
+  };
+  const noBtn = document.createElement('button');
+  noBtn.className = 'confirm-btn cancel';
+  noBtn.textContent = 'Cancel';
+  noBtn.onclick = () => { yesBtn.disabled = true; noBtn.disabled = true; };
+
+  actions.appendChild(yesBtn);
+  actions.appendChild(noBtn);
+  bubble.appendChild(actions);
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CHAT PERSISTENCE (localStorage) — multi-session
+// Keeps multiple separate conversations across page reloads/app restarts,
+// per-device only (not synced across phones/browsers). Each session is
+// {id, title, messages: [{role, content, actionClass}], updatedAt}.
+// Deliberately does NOT persist confirm-action buttons (delete/destructive
+// prompts) — those are re-issued fresh by the server each time and should
+// never be resurrected from a stale save after a reload.
+// ══════════════════════════════════════════════════════════════════
+const SESSIONS_KEY = 'devops_agent_sessions_v1';
+const LEGACY_CHAT_KEY = 'devops_agent_chat_v1'; // single-thread format, pre-drawer
+const SESSION_MSG_MAX = 200; // cap per session so localStorage doesn't grow unbounded
+const SESSIONS_MAX = 50;     // cap number of sessions kept
+
+function loadSessionsState() {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* fall through to fresh/migrated state */ }
+
+  // One-time migration from the old single-thread format.
+  try {
+    const legacyRaw = localStorage.getItem(LEGACY_CHAT_KEY);
+    if (legacyRaw) {
+      const legacyMessages = JSON.parse(legacyRaw);
+      if (Array.isArray(legacyMessages) && legacyMessages.length) {
+        const migrated = {
+          sessions: [{
+            id: 'sess_' + Date.now(),
+            title: titleFromMessages(legacyMessages),
+            messages: legacyMessages,
+            updatedAt: Date.now()
+          }],
+          activeSessionId: null
+        };
+        migrated.activeSessionId = migrated.sessions[0].id;
+        localStorage.setItem(SESSIONS_KEY, JSON.stringify(migrated));
+        localStorage.removeItem(LEGACY_CHAT_KEY);
+        return migrated;
+      }
+    }
+  } catch (e) { /* ignore, start fresh below */ }
+
+  return { sessions: [], activeSessionId: null };
+}
+
+function saveSessionsState(state) {
+  try {
+    if (state.sessions.length > SESSIONS_MAX) {
+      state.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+      state.sessions = state.sessions.slice(0, SESSIONS_MAX);
+    }
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(state));
   } catch (e) {
     // Storage full or unavailable — chat still works, it just won't persist.
   }
 }
 
+function titleFromMessages(messages) {
+  const firstUser = messages.find(m => m.role === 'user');
+  if (!firstUser) return 'Nayi Chat';
+  const t = firstUser.content.trim().replace(/\s+/g, ' ');
+  return t.length > 42 ? t.slice(0, 42) + '…' : t;
+}
+
+let sessionsState = loadSessionsState();
+
+function getActiveSession() {
+  if (!sessionsState.activeSessionId) return null;
+  return sessionsState.sessions.find(s => s.id === sessionsState.activeSessionId) || null;
+}
+
+function ensureActiveSession() {
+  let s = getActiveSession();
+  if (s) return s;
+  s = { id: 'sess_' + Date.now(), title: 'Nayi Chat', messages: [], updatedAt: Date.now() };
+  sessionsState.sessions.unshift(s);
+  sessionsState.activeSessionId = s.id;
+  saveSessionsState(sessionsState);
+  return s;
+}
+
+function saveChatEntry(entry) {
+  const s = ensureActiveSession();
+  s.messages.push(entry);
+  if (s.messages.length > SESSION_MSG_MAX) s.messages.splice(0, s.messages.length - SESSION_MSG_MAX);
+  if (s.messages.length === 1 && entry.role === 'user') s.title = titleFromMessages(s.messages);
+  s.updatedAt = Date.now();
+  saveSessionsState(sessionsState);
+  renderChatHistoryList();
+}
+
 function clearSavedChat() {
-  try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch (e) {}
+  const s = getActiveSession();
+  if (s) {
+    s.messages = [];
+    s.title = 'Nayi Chat';
+    s.updatedAt = Date.now();
+    saveSessionsState(sessionsState);
+    renderChatHistoryList();
+  }
+}
+
+// Wipes the visible chat area and (re)renders whichever session is
+// currently active — used on load and after switching sessions.
+function renderActiveChatIntoView() {
+  const messages = document.getElementById('messages');
+  messages.innerHTML = '';
+  history.length = 0;
+
+  const s = getActiveSession();
+  const es = document.getElementById('empty-state');
+
+  if (!s || !s.messages.length) {
+    if (es) es.style.display = 'flex';
+    scrollToBottom();
+    renderChatHistoryList();
+    return;
+  }
+
+  if (es) es.style.display = 'none';
+
+  s.messages.forEach(entry => {
+    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '');
+    addMessageActions(wrap, bubble, entry.role, entry.content, entry.actionClass || '', () => resendMessage(entry.content));
+    history.push({ role: entry.role === 'user' ? 'user' : 'assistant', content: entry.content });
+  });
+
+  // If the conversation was left mid-confirmation (buttons intentionally
+  // aren't persisted — see the note above SESSIONS_KEY), let the user know
+  // instead of leaving them wondering where the Yes/Cancel buttons went.
+  const last = s.messages[s.messages.length - 1];
+  if (last && last.role === 'agent' && /pakka|confirm|sure\?|delete karna/i.test(last.content)) {
+    renderMessage('agent', '_(Ye confirmation expire ho gaya — command dobara bhejo agar abhi bhi karna hai.)_', 'warning');
+  }
+
+  scrollToBottom();
+  renderChatHistoryList();
 }
 
 function restoreChatOnLoad() {
-  const saved = loadSavedChat();
-  if (!saved.length) return;
+  ensureActiveSession();
+  renderActiveChatIntoView();
+}
 
-  const es = document.getElementById('empty-state');
-  if (es) es.style.display = 'none';
+function startNewChatSession() {
+  vibrate(10);
+  const s = { id: 'sess_' + Date.now(), title: 'Nayi Chat', messages: [], updatedAt: Date.now() };
+  sessionsState.sessions.unshift(s);
+  sessionsState.activeSessionId = s.id;
+  saveSessionsState(sessionsState);
+  renderActiveChatIntoView();
+  closeDrawer();
+}
 
-  saved.forEach(entry => {
-    renderMessage(entry.role, entry.content, entry.actionClass || '');
-    history.push({ role: entry.role === 'user' ? 'user' : 'assistant', content: entry.content });
+function switchToSession(id) {
+  if (id === sessionsState.activeSessionId) { closeDrawer(); return; }
+  vibrate(10);
+  sessionsState.activeSessionId = id;
+  saveSessionsState(sessionsState);
+  renderActiveChatIntoView();
+  closeDrawer();
+}
+
+function deleteSession(id) {
+  sessionsState.sessions = sessionsState.sessions.filter(s => s.id !== id);
+  if (sessionsState.activeSessionId === id) {
+    sessionsState.activeSessionId = sessionsState.sessions.length ? sessionsState.sessions[0].id : null;
+  }
+  saveSessionsState(sessionsState);
+  renderChatHistoryList();
+  // If we just deleted the active session, the view needs to reflect
+  // whatever session (or empty state) is now active.
+  if (!getActiveSession() || sessionsState.activeSessionId !== id) {
+    renderActiveChatIntoView();
+  }
+}
+
+function renderChatHistoryList() {
+  const list = document.getElementById('chat-hist-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const sorted = [...sessionsState.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+
+  if (!sorted.length) {
+    list.innerHTML = '<div class="chat-hist-empty">Koi purani chat nahi hai.</div>';
+    return;
+  }
+
+  sorted.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'chat-hist-item' + (s.id === sessionsState.activeSessionId ? ' active' : '');
+    item.onclick = () => switchToSession(s.id);
+
+    const icon = document.createElement('div');
+    icon.className = 'chat-hist-icon';
+    icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>`;
+
+    const info = document.createElement('div');
+    info.className = 'chat-hist-info';
+    const title = document.createElement('div');
+    title.className = 'chat-hist-title';
+    title.textContent = s.title || 'Nayi Chat';
+    const meta = document.createElement('div');
+    meta.className = 'chat-hist-meta';
+    meta.textContent = `${s.messages.length} messages · ${timeAgo(s.updatedAt)}`;
+    info.appendChild(title);
+    info.appendChild(meta);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'chat-hist-delete';
+    delBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>`;
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      vibrate(12);
+      if (confirm(`"${s.title}" delete karein? Ye wapas nahi aayega.`)) {
+        deleteSession(s.id);
+      }
+    };
+
+    item.appendChild(icon);
+    item.appendChild(info);
+    item.appendChild(delBtn);
+    list.appendChild(item);
   });
-  scrollToBottom();
+}
+
+function timeAgo(ts) {
+  const diff = Math.max(0, Date.now() - ts);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'abhi';
+  if (mins < 60) return `${mins}m pehle`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h pehle`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d pehle`;
+  return new Date(ts).toLocaleDateString();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1390,6 +2229,13 @@ const COMMANDS = [
   { id: 'VERCEL_DELETE', tpl: 'delete vercel project {project_name}',         desc: 'Vercel · delete a project ⚠️',         kw: ['delete','uda','hata','vercel','project'], vercel: true },
   { id: 'VERCEL_ENV_GET', tpl: 'get env for {project_name} vercel',           desc: 'Vercel · view environment variables',  kw: ['env','environment','vars','get','show','vercel'], vercel: true },
   { id: 'VERCEL_ENV_SET', tpl: 'set vercel env {KEY}={value} for {project_name}', desc: 'Vercel · set an environment variable', kw: ['set','env','vercel','add','update'], vercel: true },
+
+  // ── NETLIFY (only surfaced once connected) ──
+  { id: 'NETLIFY_LIST',  tpl: 'list netlify sites',                          desc: 'Netlify · list all sites',             kw: ['list','netlify','sites','sare','dikhao'], netlify: true },
+  { id: 'NETLIFY_INFO',  tpl: 'info about netlify site {site_name}',         desc: 'Netlify · get site details',           kw: ['info','information','details','netlify','site'], netlify: true },
+  { id: 'NETLIFY_DELETE', tpl: 'delete netlify site {site_name}',            desc: 'Netlify · delete a site ⚠️',           kw: ['delete','uda','hata','netlify','site'], netlify: true },
+  { id: 'NETLIFY_ENV_GET', tpl: 'get env for {site_name} netlify',           desc: 'Netlify · view environment variables', kw: ['env','environment','vars','get','show','netlify'], netlify: true },
+  { id: 'NETLIFY_ENV_SET', tpl: 'set netlify env {KEY}={value} for {site_name}', desc: 'Netlify · set an environment variable', kw: ['set','env','netlify','add','update'], netlify: true },
 ];
 
 // ── AUTOFILL STATE ──
@@ -1428,8 +2274,9 @@ function renderSuggestions(rawValue) {
 
   const queryWords = value.toLowerCase().split(/\s+/).filter(Boolean);
   const vercelReady = !!(authedUser && authedUser.vercelConnected);
+  const netlifyReady = !!(authedUser && authedUser.netlifyConnected);
   const scored = COMMANDS
-    .filter(cmd => !cmd.vercel || vercelReady)
+    .filter(cmd => (!cmd.vercel || vercelReady) && (!cmd.netlify || netlifyReady))
     .map(cmd => ({ cmd, score: scoreCommand(cmd, queryWords) }))
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -2537,10 +3384,10 @@ function renderMessage(role, content, actionClass = '') {
 }
 
 function addMessage(role, content, actionClass = '', confirmData = null) {
-  const { bubble } = renderMessage(role, content, actionClass);
+  const { wrap, bubble } = renderMessage(role, content, actionClass);
 
   // Confirm-action buttons are intentionally NOT saved to localStorage —
-  // see the note above CHAT_STORAGE_KEY. They only ever exist live.
+  // see the note above SESSIONS_KEY. They only ever exist live.
   if (confirmData) {
     const actions = document.createElement('div');
     actions.className = 'confirm-actions';
@@ -2567,9 +3414,67 @@ function addMessage(role, content, actionClass = '', confirmData = null) {
     // text itself ("Pakka delete karna hai?") is fine to keep, just not
     // the still-clickable buttons.
     saveChatEntry({ role, content, actionClass });
+    addMessageActions(wrap, bubble, role, content, actionClass, () => resendMessage(content));
   }
 
   scrollToBottom();
+}
+
+// ── COPY / RETRY buttons under a message ──
+// `retryFn` is only meaningful for user messages (re-sends the same text);
+// agent messages only get a copy button.
+function addMessageActions(wrap, bubble, role, plainText, actionClass, retryFn) {
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'msg-action-btn copy';
+  copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
+  copyBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(plainText);
+    } catch (e) {
+      // Clipboard API can fail without a secure context / permission —
+      // fall back silently, the button just won't show the "Copied" state.
+    }
+    vibrate(8);
+    copyBtn.classList.add('copied');
+    copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Copied`;
+    setTimeout(() => {
+      copyBtn.classList.remove('copied');
+      copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
+    }, 1500);
+  };
+  actions.appendChild(copyBtn);
+
+  if (role === 'user' && retryFn) {
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'msg-action-btn retry';
+    retryBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg> Retry`;
+    retryBtn.onclick = () => { vibrate(10); retryFn(); };
+    actions.appendChild(retryBtn);
+  } else if (role === 'agent' && actionClass === 'error' && retryFn) {
+    const retryBtn = document.createElement('button');
+    retryBtn.className = 'msg-action-btn retry';
+    retryBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg> Retry`;
+    retryBtn.onclick = () => { vibrate(10); retryFn(); };
+    actions.appendChild(retryBtn);
+  }
+
+  wrap.appendChild(actions);
+}
+
+// Re-sends a previously-sent user message through the normal pipeline.
+function resendMessage(text) {
+  const input = document.getElementById('userInput');
+  input.value = text;
+  sendMsg();
+}
+
+function vibrate(pattern) {
+  try {
+    if (appSettings.haptics !== false && navigator.vibrate) navigator.vibrate(pattern);
+  } catch (e) { /* not supported — silently ignore */ }
 }
 
 // ── CONFIRMED DESTRUCTIVE ACTION ──
@@ -2613,16 +3518,40 @@ function actionColorFor(action) {
     vercel_list: 'info', vercel_import: 'success', vercel_deploy: 'success',
     vercel_deploy_pending: 'warning', vercel_delete_project: 'success',
     vercel_env: 'info', vercel_env_set: 'success',
-    confirm_required: 'warning', auth_required: 'warning', vercel_auth_required: 'warning',
+    netlify_list: 'info', netlify_site_info: 'info', netlify_delete_site: 'success',
+    netlify_env: 'info', netlify_env_set: 'success',
+    confirm_required: 'warning', auth_required: 'warning',
+    vercel_auth_required: 'warning', netlify_auth_required: 'warning',
     error: 'error', warning: 'warning', message: ''
   };
   return actionColors[action] || '';
 }
 
-function scrollToBottom() {
+function scrollToBottom(force) {
   const area = document.getElementById('scroll-area');
-  requestAnimationFrame(() => { area.scrollTop = area.scrollHeight; });
+  // Respect the "auto-scroll" setting for automatic calls (e.g. after every
+  // new message), but always honor an explicit user tap on the FAB itself.
+  if (!force && appSettings.autoscroll === false) return;
+  requestAnimationFrame(() => {
+    area.scrollTop = area.scrollHeight;
+    updateScrollFab();
+  });
 }
+
+function updateScrollFab() {
+  const area = document.getElementById('scroll-area');
+  const fab = document.getElementById('scroll-fab');
+  if (!area || !fab) return;
+  const distanceFromBottom = area.scrollHeight - area.scrollTop - area.clientHeight;
+  const shouldShow = distanceFromBottom > 240;
+  fab.classList.toggle('show', shouldShow);
+  if (!shouldShow) fab.classList.remove('has-new');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const area = document.getElementById('scroll-area');
+  if (area) area.addEventListener('scroll', updateScrollFab);
+});
 
 // ── SEND ──
 async function sendMsg() {
@@ -2722,6 +3651,13 @@ async function sendMsg() {
       return;
     }
 
+    // ── NETLIFY AUTH: not connected, or token expired/revoked ──
+    if (data.action === 'netlify_auth_required') {
+      addMessage('agent', data.reply, 'warning');
+      showNetlifyModal();
+      return;
+    }
+
     const cls = actionColorFor(data.action);
     addMessage('agent', data.reply, cls);
     history.push({ role: 'assistant', content: data.reply });
@@ -2738,6 +3674,14 @@ async function sendMsg() {
 
 // ── CLEAR CHAT ──
 function confirmClearChat() {
+  // If the user has turned off "confirm before clearing" in Settings, just
+  // clear the active session instantly instead of showing the prompt.
+  if (appSettings.confirmClear === false) {
+    clearSavedChat();
+    renderActiveChatIntoView();
+    return;
+  }
+
   const messages = document.getElementById('messages');
   const wrap = document.createElement('div');
   wrap.className = 'msg-wrap agent';
@@ -2748,7 +3692,7 @@ function confirmClearChat() {
 
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble warning';
-  bubble.innerHTML = 'Poora chat history clear kar du? Ye sirf is device se hatega, GitHub/Vercel pe kuch nahi hoga.';
+  bubble.innerHTML = 'Is chat ki history clear kar du? Ye sirf is device se hatega, GitHub/Vercel/Netlify pe kuch nahi hoga.';
 
   const actions = document.createElement('div');
   actions.className = 'confirm-actions';
@@ -2758,7 +3702,7 @@ function confirmClearChat() {
   yesBtn.textContent = 'Haan, Clear Karo';
   yesBtn.onclick = () => {
     clearSavedChat();
-    location.reload();
+    renderActiveChatIntoView();
   };
 
   const noBtn = document.createElement('button');
@@ -2776,6 +3720,187 @@ function confirmClearChat() {
   wrap.appendChild(bubble);
   messages.appendChild(wrap);
   scrollToBottom();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HAMBURGER DRAWER — open/close, populated with chat history (above),
+// connected apps, and settings (below).
+// ══════════════════════════════════════════════════════════════════
+function openDrawer() {
+  vibrate(8);
+  document.getElementById('drawer').classList.add('show');
+  document.getElementById('drawer-overlay').classList.add('show');
+  renderDrawerProfile();
+  renderChatHistoryList();
+  renderAppsList();
+}
+
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('show');
+  document.getElementById('drawer-overlay').classList.remove('show');
+}
+
+function renderDrawerProfile() {
+  const avatarEl = document.getElementById('drawer-avatar');
+  const nameEl = document.getElementById('drawer-name');
+  const subEl = document.getElementById('drawer-sub');
+  if (!authedUser) {
+    avatarEl.textContent = '?';
+    nameEl.textContent = 'Not connected';
+    subEl.textContent = '';
+    return;
+  }
+  if (authedUser.avatar_url) {
+    avatarEl.innerHTML = `<img src="${escHtml(authedUser.avatar_url)}" alt="" />`;
+  } else {
+    avatarEl.textContent = (authedUser.login || '?').charAt(0).toUpperCase();
+  }
+  nameEl.textContent = '@' + authedUser.login;
+  const connectedCount = 1 + (authedUser.vercelConnected ? 1 : 0) + (authedUser.netlifyConnected ? 1 : 0);
+  subEl.textContent = `${connectedCount} app${connectedCount === 1 ? '' : 's'} connected`;
+}
+
+// ── CONNECTED APPS LIST ──
+// Adapted for our per-user OAuth/token model: this reflects authedUser's
+// REAL connection state (from /api/me), with working Connect/Disconnect
+// buttons wired to the same flows as the header user-menu — it's just a
+// second, more discoverable place to reach them. GitHub is always-on
+// (it's required to be logged in at all), so it has no toggle.
+function renderAppsList() {
+  const list = document.getElementById('apps-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const apps = [
+    {
+      key: 'github', name: 'GitHub', icon: '🐙',
+      connected: !!authedUser,
+      sub: authedUser ? `@${authedUser.login}` : 'Not connected',
+      alwaysOn: true,
+    },
+    {
+      key: 'vercel', name: 'Vercel', icon: '▲',
+      connected: !!(authedUser && authedUser.vercelConnected),
+      sub: authedUser && authedUser.vercelConnected ? `@${authedUser.vercelUsername || 'connected'}` : 'Not connected',
+      onConnect: () => { closeDrawer(); showVercelModal(); },
+      onDisconnect: () => { closeDrawer(); confirmDisconnectVercel(); },
+    },
+    {
+      key: 'netlify', name: 'Netlify', icon: '◆',
+      connected: !!(authedUser && authedUser.netlifyConnected),
+      sub: authedUser && authedUser.netlifyConnected ? (authedUser.netlifyEmail || 'connected') : 'Not connected',
+      onConnect: () => { closeDrawer(); showNetlifyModal(); },
+      onDisconnect: () => { closeDrawer(); confirmDisconnectNetlify(); },
+    },
+  ];
+
+  apps.forEach(app => {
+    const row = document.createElement('div');
+    row.className = 'app-row';
+
+    const icon = document.createElement('div');
+    icon.className = 'app-icon';
+    icon.textContent = app.icon;
+
+    const info = document.createElement('div');
+    info.className = 'app-info';
+    const name = document.createElement('div');
+    name.className = 'app-name';
+    name.textContent = app.name;
+    const status = document.createElement('div');
+    status.className = 'app-status ' + (app.connected ? 'on' : 'off');
+    status.textContent = app.sub;
+    info.appendChild(name);
+    info.appendChild(status);
+
+    row.appendChild(icon);
+    row.appendChild(info);
+
+    if (app.alwaysOn) {
+      const badge = document.createElement('button');
+      badge.className = 'app-action-btn always-on';
+      badge.textContent = '✓';
+      badge.disabled = true;
+      row.appendChild(badge);
+    } else if (app.connected) {
+      const btn = document.createElement('button');
+      btn.className = 'app-action-btn disconnect';
+      btn.textContent = 'Disconnect';
+      btn.onclick = app.onDisconnect;
+      row.appendChild(btn);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'app-action-btn';
+      btn.textContent = 'Connect';
+      btn.onclick = app.onConnect;
+      row.appendChild(btn);
+    }
+
+    list.appendChild(row);
+  });
+}
+
+// ── SETTINGS PANEL ──
+const SETTINGS_LIST = [
+  { key: 'haptics', name: 'Haptics', sub: 'Vibration on taps and actions' },
+  { key: 'autoscroll', name: 'Auto-scroll', sub: 'Jump to latest message automatically' },
+  { key: 'confirmClear', name: 'Confirm before clearing', sub: 'Ask before clearing a chat\'s history' },
+];
+
+function toggleSettingsPanel() {
+  const btn = document.getElementById('settings-toggle-btn');
+  const list = document.getElementById('settings-list');
+  const isOpen = list.classList.contains('settings-open');
+  if (isOpen) {
+    list.classList.remove('settings-open');
+    list.classList.add('settings-collapsed');
+    btn.classList.remove('open');
+  } else {
+    renderSettingsList();
+    list.classList.remove('settings-collapsed');
+    list.classList.add('settings-open');
+    btn.classList.add('open');
+  }
+}
+
+function renderSettingsList() {
+  const list = document.getElementById('settings-list');
+  const inner = document.createElement('div');
+  inner.className = 'settings-inner';
+
+  SETTINGS_LIST.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'setting-row';
+
+    const info = document.createElement('div');
+    info.className = 'setting-info';
+    const name = document.createElement('div');
+    name.className = 'setting-name';
+    name.textContent = s.name;
+    const sub = document.createElement('div');
+    sub.className = 'setting-sub';
+    sub.textContent = s.sub;
+    info.appendChild(name);
+    info.appendChild(sub);
+
+    const toggle = document.createElement('div');
+    const isOn = appSettings[s.key] !== false;
+    toggle.className = 'toggle-switch' + (isOn ? ' on' : '');
+    toggle.innerHTML = '<div class="knob"></div>';
+    toggle.onclick = () => {
+      appSettings[s.key] = !(appSettings[s.key] !== false);
+      saveAppSettings();
+      vibrate(8);
+      toggle.classList.toggle('on');
+    };
+
+    row.appendChild(info);
+    row.appendChild(toggle);
+    inner.appendChild(row);
+  });
+
+  list.innerHTML = '';
+  list.appendChild(inner);
 }
 
 // ── RESTORE ON LOAD ──

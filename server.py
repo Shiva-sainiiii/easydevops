@@ -164,15 +164,19 @@ def init_db():
                     github_token_encrypted BYTEA NOT NULL,
                     vercel_token_encrypted BYTEA,
                     vercel_username TEXT,
+                    netlify_token_encrypted BYTEA,
+                    netlify_email TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
-            # Migration-safe: if this table already existed from before Vercel
-            # support was added, ALTER it rather than relying on CREATE TABLE
-            # IF NOT EXISTS (which only applies to brand-new tables).
+            # Migration-safe: if this table already existed from before Vercel/
+            # Netlify support was added, ALTER it rather than relying on CREATE
+            # TABLE IF NOT EXISTS (which only applies to brand-new tables).
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vercel_token_encrypted BYTEA")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vercel_username TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS netlify_token_encrypted BYTEA")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS netlify_email TEXT")
 
 
 init_db()
@@ -268,6 +272,40 @@ def get_user_vercel_token(user):
     return decrypt_token(blob)
 
 
+def set_netlify_token(user_id, netlify_token, netlify_email):
+    """Same pattern as set_vercel_token — Netlify connection is also optional
+    and independent of GitHub/Vercel."""
+    encrypted = encrypt_token(netlify_token)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    netlify_token_encrypted = %s,
+                    netlify_email = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (encrypted, netlify_email, user_id))
+
+
+def clear_netlify_token(user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    netlify_token_encrypted = NULL,
+                    netlify_email = NULL,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (user_id,))
+
+
+def get_user_netlify_token(user):
+    blob = user.get("netlify_token_encrypted")
+    if not blob:
+        return None
+    return decrypt_token(blob)
+
+
 # ════════════════════════════════════════════════════════════════
 #  AUTH HELPERS
 # ════════════════════════════════════════════════════════════════
@@ -339,6 +377,9 @@ def safe_jsonify(payload):
         vc_tok = get_user_vercel_token(user)
         if vc_tok:
             extra.append(vc_tok)
+        nl_tok = get_user_netlify_token(user)
+        if nl_tok:
+            extra.append(nl_tok)
 
     def scrub(obj):
         if isinstance(obj, str):
@@ -459,6 +500,8 @@ def api_me():
         "avatar_url": user["avatar_url"],
         "vercel_connected": bool(user.get("vercel_token_encrypted")),
         "vercel_username": user.get("vercel_username"),
+        "netlify_connected": bool(user.get("netlify_token_encrypted")),
+        "netlify_email": user.get("netlify_email"),
     })
 
 
@@ -519,6 +562,54 @@ def vercel_disconnect():
     return safe_jsonify({"ok": True})
 
 
+# ════════════════════════════════════════════════════════════════
+#  NETLIFY CONNECTION — manual API token paste, same reasoning as Vercel.
+#  Netlify does support a "public integration" OAuth2 flow, but per their
+#  own docs that's meant for apps built for OTHER people's Netlify accounts
+#  at scale (needs a registered OAuth app + client secret exchange), while
+#  Personal Access Tokens are their own documented, first-class path for
+#  "manual authentication in shell scripts or commands that use the Netlify
+#  API" — exactly this use case. Guaranteed real API access, no ambiguity.
+# ════════════════════════════════════════════════════════════════
+@app.route("/api/netlify/connect", methods=["POST"])
+def netlify_connect():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Pehle GitHub se connect karo.", "action": "auth_required"}), 401
+
+    body = request.json or {}
+    token = (body.get("token") or "").strip()
+    if not token:
+        return safe_jsonify({"reply": "❌ Token khaali hai.", "action": "error"}), 400
+
+    # Validate against Netlify's own "who am I" endpoint before saving.
+    r = requests.get(
+        "https://api.netlify.com/api/v1/user",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        return safe_jsonify({
+            "reply": "❌ Ye token valid nahi hai. Netlify dashboard se dubara copy karke try karo.",
+            "action": "error"
+        }), 400
+
+    netlify_user = r.json()
+    netlify_email = netlify_user.get("email") or netlify_user.get("full_name") or "connected"
+
+    set_netlify_token(user["id"], token, netlify_email)
+    return safe_jsonify({"ok": True, "netlify_email": netlify_email})
+
+
+@app.route("/api/netlify/disconnect", methods=["POST"])
+def netlify_disconnect():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Pehle GitHub se connect karo.", "action": "auth_required"}), 401
+    clear_netlify_token(user["id"])
+    return safe_jsonify({"ok": True})
+
+
 def gh_api(method, endpoint, gh_token, **kwargs):
     url = f"https://api.github.com{endpoint}"
     headers = {
@@ -535,6 +626,27 @@ def vc_api(method, endpoint, vc_token, **kwargs):
         "Content-Type": "application/json",
     }
     return requests.request(method, url, headers=headers, timeout=20, **kwargs)
+
+
+def nl_api(method, endpoint, nl_token, **kwargs):
+    url = f"https://api.netlify.com/api/v1{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {nl_token}",
+        "Content-Type": "application/json",
+    }
+    return requests.request(method, url, headers=headers, timeout=20, **kwargs)
+
+
+def netlify_find_site(site_name, nl_token):
+    """Netlify site IDs and names/subdomains are interchangeable in API
+    paths per their docs, but we still resolve to a full site object first
+    so callers have the real site_id (needed for some endpoints like env
+    vars, which key off account_id, not site_id, so this also gives us
+    that context)."""
+    r = nl_api("GET", f"/sites/{site_name}", nl_token)
+    if r.status_code == 200:
+        return r.json()
+    return None
 
 
 def vercel_find_project(project_name, vc_token):
@@ -598,7 +710,7 @@ def get_file_sha(repo, path, owner, gh_token):
 #  be replayed to execute a destructive action as a different user
 #  even if somehow leaked (e.g. logged, shared in a bug report).
 # ════════════════════════════════════════════════════════════════
-DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT"}
+DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE"}
 
 
 def confirm_token(cmd, value, user_id):
@@ -619,6 +731,9 @@ def build_confirmation(cmd, params, user_id):
     elif cmd == "VERCEL_DELETE_PROJECT":
         target_desc = f"Vercel project `{params.get('project_name')}`"
         warn_text = "Vercel project aur uski saari deployments delete ho jayengi (GitHub repo safe rahega)."
+    elif cmd == "NETLIFY_DELETE_SITE":
+        target_desc = f"Netlify site `{params.get('site_name')}`"
+        warn_text = "Netlify site aur uski saari deployments delete ho jayengi (GitHub repo safe rahega)."
     else:
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."
@@ -641,7 +756,7 @@ def build_confirmation(cmd, params, user_id):
 #  (GitHub would reject cross-account writes anyway, but this keeps
 #  reads scoped correctly too).
 # ════════════════════════════════════════════════════════════════
-def execute_command(cmd, params, owner, gh_token, vc_token=None):
+def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None):
     params = params or {}
 
     try:
@@ -924,6 +1039,102 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None):
                 err = r.json().get("error", {}).get("message", r.text[:200])
                 return {"reply": f"❌ Env set Error: {err}", "action": "error"}
 
+        # ──────────────── NETLIFY ────────────────
+        elif cmd == "NETLIFY_LIST_SITES":
+            if not nl_token:
+                return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
+            r = nl_api("GET", "/sites?per_page=50", nl_token)
+            if r.status_code == 200:
+                sites = r.json()
+                if not sites:
+                    return {"reply": "Koi Netlify site nahi mili.", "action": "netlify_list", "sites": []}
+                lines = [f"🌐 **{s['name']}**\n🔗 {s.get('url', '')}" for s in sites]
+                return {"reply": f"Teri {len(sites)} Netlify sites:\n\n" + "\n\n".join(lines),
+                        "action": "netlify_list", "sites": [{"name": s["name"], "id": s["id"]} for s in sites]}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
+            else:
+                return {"reply": f"❌ Netlify sites fetch nahi hui: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "NETLIFY_GET_SITE_INFO":
+            if not nl_token:
+                return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
+            site_name = params["site_name"]
+            site = netlify_find_site(site_name, nl_token)
+            if not site:
+                return {"reply": f"❌ Netlify site `{site_name}` nahi mili.", "action": "error"}
+            reply = (f"🌐 **{site['name']}**\n"
+                     f"🔗 {site.get('url', '')}\n"
+                     f"🆔 `{site['id']}`\n"
+                     f"🕓 Last updated: {site.get('updated_at', '')}")
+            if site.get("custom_domain"):
+                reply += f"\n🌍 Custom domain: {site['custom_domain']}"
+            return {"reply": reply, "action": "netlify_site_info"}
+
+        elif cmd == "NETLIFY_DELETE_SITE":
+            if not nl_token:
+                return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
+            site_name = params["site_name"]
+            site = netlify_find_site(site_name, nl_token)
+            if not site:
+                return {"reply": f"❌ Netlify site `{site_name}` nahi mili.", "action": "error"}
+            r = nl_api("DELETE", f"/sites/{site['id']}", nl_token)
+            if r.status_code in (200, 204):
+                return {"reply": f"🗑️ Netlify site `{site_name}` delete ho gayi.", "action": "netlify_delete_site"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
+            else:
+                return {"reply": f"❌ Site delete Error: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "NETLIFY_GET_ENV":
+            if not nl_token:
+                return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
+            site_name = params["site_name"]
+            site = netlify_find_site(site_name, nl_token)
+            if not site:
+                return {"reply": f"❌ Netlify site `{site_name}` nahi mili.", "action": "error"}
+            account_id = site.get("account_id")
+            if not account_id:
+                return {"reply": "❌ Is site ka account_id nahi mila.", "action": "error"}
+            r = nl_api("GET", f"/accounts/{account_id}/env?site_id={site['id']}", nl_token)
+            if r.status_code == 200:
+                envs = r.json()
+                if not envs:
+                    return {"reply": f"Site `{site_name}` me koi env vars nahi hai.", "action": "netlify_env"}
+                lines = [f"`{e['key']}`" for e in envs]
+                return {"reply": f"Env vars for `{site_name}` (values encrypted, sirf keys dikha sakta hu):\n\n" + "\n".join(lines),
+                        "action": "netlify_env"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
+            else:
+                return {"reply": f"❌ Env vars fetch nahi hue: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "NETLIFY_SET_ENV":
+            if not nl_token:
+                return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
+            site_name = params["site_name"]
+            key = params["key"]
+            value = params["value"]
+            site = netlify_find_site(site_name, nl_token)
+            if not site:
+                return {"reply": f"❌ Netlify site `{site_name}` nahi mili.", "action": "error"}
+            account_id = site.get("account_id")
+            if not account_id:
+                return {"reply": "❌ Is site ka account_id nahi mila.", "action": "error"}
+            payload = {
+                "key": key,
+                "scopes": ["builds", "functions", "runtime", "post_processing"],
+                "values": [{"value": value, "context": "all"}],
+            }
+            r = nl_api("POST", f"/accounts/{account_id}/env?site_id={site['id']}", nl_token, json=payload)
+            if r.status_code in (200, 201):
+                return {"reply": f"✅ Env var `{key}` set ho gaya `{site_name}` me.\n⚠️ Naya deploy trigger karo change apply karne ke liye.",
+                        "action": "netlify_env_set"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
+            else:
+                return {"reply": f"❌ Env set Error: {r.text[:200]}", "action": "error"}
+
         else:
             return {"reply": f"❌ Unknown command: {cmd}", "action": "error"}
 
@@ -1023,6 +1234,31 @@ INTENT_RULES = [
         rf"(?:set|add|update)\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})\s+.*vercel",
         rf"(?:set|add|update)\s+vercel\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})",
     ], lambda m: {"project_name": _g(m, 3), "key": _g(m, 1), "value": _g(m, 2)}),
+
+    # ── NETLIFY ──
+    ("NETLIFY_LIST_SITES", [
+        r"(?:list|sare|show|dikhao|dikha)\s+.*netlify.*sites?\b",
+        r"^netlify\s+sites?$",
+    ], lambda m: {}),
+
+    ("NETLIFY_DELETE_SITE", [
+        rf"(?:delete|uda|hata)\s+netlify\s+site\s+({SLUG})",
+    ], lambda m: {"site_name": _g(m, 1)}),
+
+    ("NETLIFY_GET_SITE_INFO", [
+        rf"(?:info|information|details)\s+(?:about|of|for)\s+netlify\s+site\s+({SLUG})",
+        rf"netlify\s+site\s+info\s+({SLUG})",
+    ], lambda m: {"site_name": _g(m, 1)}),
+
+    ("NETLIFY_GET_ENV", [
+        rf"(?:get|show|dikhao|dikha)\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})\s+.*netlify",
+        rf"netlify\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})",
+    ], lambda m: {"site_name": _g(m, 1)}),
+
+    ("NETLIFY_SET_ENV", [
+        rf"(?:set|add|update)\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})\s+.*netlify",
+        rf"(?:set|add|update)\s+netlify\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})",
+    ], lambda m: {"site_name": _g(m, 3), "key": _g(m, 1), "value": _g(m, 2)}),
 ]
 
 COMPLEX_KEYWORDS = [
@@ -1044,15 +1280,15 @@ def parse_intent(message):
                     params = extractor(m)
                 except Exception:
                     continue
-                required_fields = {"repo", "project_name", "key"}
+                required_fields = {"repo", "project_name", "site_name", "key"}
                 if any(params.get(f) in (None, "") for f in required_fields if f in params):
                     continue
-                # VERCEL_SET_ENV: env var keys are conventionally uppercase
-                # and case-sensitive on Vercel. The match above ran against
-                # the lowercased message, so recover the original casing for
-                # the key by re-matching the same span against the original
-                # (non-lowered) message.
-                if cmd == "VERCEL_SET_ENV":
+                # VERCEL_SET_ENV / NETLIFY_SET_ENV: env var keys are
+                # conventionally uppercase and case-sensitive. The match
+                # above ran against the lowercased message, so recover the
+                # original casing for the key by re-matching the same span
+                # against the original (non-lowered) message.
+                if cmd in ("VERCEL_SET_ENV", "NETLIFY_SET_ENV"):
                     orig_m = re.search(pat, original, re.IGNORECASE)
                     if orig_m:
                         params["key"] = orig_m.group(1)
@@ -1070,7 +1306,7 @@ def parse_intent(message):
 OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 SYSTEM_PROMPT_TEMPLATE = """You are a DevOps Agent helping GitHub user: {login}.
-You control ONLY this user's own GitHub account{vercel_clause}. You act by outputting EXACTLY ONE command per response.
+You control ONLY this user's own GitHub account{vercel_clause}{netlify_clause}. You act by outputting EXACTLY ONE command per response.
 
 COMMANDS:
 1. CREATE_REPO: <repo-name>
@@ -1082,13 +1318,13 @@ COMMANDS:
 7. DELETE_FILE: {{"repo":"repo-name","path":"file.html","message":"reason"}}
 8. LIST_FILES: {{"repo":"repo-name","path":""}}
 9. GET_REPO_INFO: {{"repo":"repo-name"}}
-{vercel_commands}
+{vercel_commands}{netlify_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
 - JSON must be valid. Escape quotes as \\" and newlines as \\n in content fields.
 - NEVER invent URLs, IDs, or data you don't have — only the commands above give you real information.
 - NEVER output anything resembling a real token/secret, even as an example.
-{vercel_note}"""
+{vercel_note}{netlify_note}"""
 
 VERCEL_COMMANDS_BLOCK = """10. VERCEL_LIST_PROJECTS
 11. VERCEL_IMPORT_REPO: {"repo":"repo-name","project_name":"optional-custom-name"}
@@ -1098,6 +1334,13 @@ VERCEL_COMMANDS_BLOCK = """10. VERCEL_LIST_PROJECTS
 15. VERCEL_SET_ENV: {"project_name":"project-name","key":"KEY","value":"value"}
 """
 
+NETLIFY_COMMANDS_BLOCK = """16. NETLIFY_LIST_SITES
+17. NETLIFY_GET_SITE_INFO: {"site_name":"site-name"}
+18. NETLIFY_DELETE_SITE: {"site_name":"site-name"}
+19. NETLIFY_GET_ENV: {"site_name":"site-name"}
+20. NETLIFY_SET_ENV: {"site_name":"site-name","key":"KEY","value":"value"}
+"""
+
 CODEGEN_SYSTEM_PROMPT = """You generate file content for a developer tool. Output ONLY the raw file content — no markdown fences, no explanation. Write complete, working code. Infer language from the file path."""
 
 COMMANDS = [
@@ -1105,6 +1348,8 @@ COMMANDS = [
     "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
     "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
     "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_SET_ENV:",
+    "NETLIFY_LIST_SITES", "NETLIFY_GET_SITE_INFO:", "NETLIFY_DELETE_SITE:",
+    "NETLIFY_GET_ENV:", "NETLIFY_SET_ENV:",
 ]
 
 
@@ -1139,15 +1384,21 @@ def extract_command(text):
     return (None, None)
 
 
-def call_openrouter_chat(user_message, history, github_login, vercel_connected=False):
+def call_openrouter_chat(user_message, history, github_login, vercel_connected=False, netlify_connected=False):
     vercel_clause = " and their connected Vercel account" if vercel_connected else ""
     vercel_commands = VERCEL_COMMANDS_BLOCK if vercel_connected else ""
     vercel_note = ("" if vercel_connected else
                    "\nNote: this user has NOT connected Vercel yet — do not emit any VERCEL_* command; "
                    "if they ask for a Vercel action, tell them to connect Vercel first via the user menu.\n")
+    netlify_clause = " and their connected Netlify account" if netlify_connected else ""
+    netlify_commands = NETLIFY_COMMANDS_BLOCK if netlify_connected else ""
+    netlify_note = ("" if netlify_connected else
+                     "\nNote: this user has NOT connected Netlify yet — do not emit any NETLIFY_* command; "
+                     "if they ask for a Netlify action, tell them to connect Netlify first via the user menu.\n")
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         login=github_login, vercel_clause=vercel_clause,
         vercel_commands=vercel_commands, vercel_note=vercel_note,
+        netlify_clause=netlify_clause, netlify_commands=netlify_commands, netlify_note=netlify_note,
     )
     messages = [{"role": "system", "content": system_prompt}]
     for h in history[-10:]:
@@ -1302,6 +1553,7 @@ def chat():
 
     owner = user["github_login"]
     vc_token = get_user_vercel_token(user)
+    nl_token = get_user_netlify_token(user)
     body = request.json or {}
 
     # 1. CONFIRMED DESTRUCTIVE ACTION REPLAY
@@ -1315,7 +1567,7 @@ def chat():
             params = json.loads(value) if value else {}
         except (json.JSONDecodeError, TypeError):
             params = {}
-        result = execute_command(cmd, params, owner, gh_token, vc_token)
+        result = execute_command(cmd, params, owner, gh_token, vc_token, nl_token)
         result["source"] = "direct"
         return safe_jsonify(result)
 
@@ -1343,14 +1595,14 @@ def chat():
         if cmd in DESTRUCTIVE_COMMANDS:
             return safe_jsonify(build_confirmation(cmd, params, user["id"]))
 
-        result = execute_command(cmd, params, owner, gh_token, vc_token)
+        result = execute_command(cmd, params, owner, gh_token, vc_token, nl_token)
         result["source"] = "direct"
         result["action_command"] = cmd
         return safe_jsonify(result)
 
     # 3. AI FALLBACK
     try:
-        ai_text = call_openrouter_chat(user_message, conv_history, owner, vercel_connected=bool(vc_token))
+        ai_text = call_openrouter_chat(user_message, conv_history, owner, vercel_connected=bool(vc_token), netlify_connected=bool(nl_token))
     except RuntimeError as e:
         return safe_jsonify({"reply": f"AI Error: {str(e)}", "action": "error", "source": "ai"})
     except requests.Timeout:
@@ -1377,7 +1629,7 @@ def chat():
         if ai_cmd in DESTRUCTIVE_COMMANDS:
             return safe_jsonify(build_confirmation(ai_cmd, ai_params, user["id"]))
 
-        result = execute_command(ai_cmd, ai_params, owner, gh_token, vc_token)
+        result = execute_command(ai_cmd, ai_params, owner, gh_token, vc_token, nl_token)
         result["source"] = "ai"
         result["action_command"] = ai_cmd
         return safe_jsonify(result)

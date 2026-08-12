@@ -123,7 +123,19 @@ docs clear nahi hain — ek open community thread khud isी gap ko flag karta h
 Manual token guaranteed kaam karta hai aur user kabhi bhi apne Vercel dashboard
 se revoke kar sakta hai.
 
+**Netlify**: list/get-info/delete sites, env vars get/set. Same reasoning as
+Vercel — **manual Personal Access Token paste** (user menu me "Connect
+Netlify"). Netlify docs khud PAT ko third-party-tool ke liye first-class,
+recommended path bataते hain.
+
 **Render**: abhi tak nahi hai, future pass me aa sakta hai.
+
+**UI — hamburger drawer**: multi-session chat history (naye chat start karo,
+purani chats me switch karo, delete karo — sab localStorage me, per-device),
+Connected Apps panel (GitHub/Vercel/Netlify status + connect/disconnect ek
+jagah se), aur Settings (haptics, auto-scroll, confirm-before-clear — sab
+chhote client-side preferences). Har message pe copy button hai, aur agar
+koi message fail ho ya user ka apna message ho to retry button bhi.
 
 ## 🔒 Security Notes
 
