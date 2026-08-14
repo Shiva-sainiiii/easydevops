@@ -138,14 +138,16 @@
 
   /* ── USER BADGE + MENU (OAuth identity) ── */
   .user-badge {
-    width: 24px; height: 24px;
+    width: 34px; height: 34px;
     border-radius: 50%;
     overflow: hidden;
-    border: 1.5px solid var(--border-2);
+    border: 2px solid var(--border-2);
     cursor: pointer;
     flex-shrink: 0;
+    transition: border-color .15s;
     -webkit-tap-highlight-color: transparent;
   }
+  .user-badge:active { border-color: var(--accent-2); }
   .user-avatar { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   .user-menu {
@@ -202,6 +204,17 @@
     color: var(--green);
   }
   .user-menu-item.netlify-item.connected:active { background: rgba(61,220,151,0.1); }
+
+  /* Render menu item — same pattern as Vercel/Netlify items above. */
+  .user-menu-item.render-item {
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .user-menu-item.render-item:active { background: rgba(255,255,255,0.06); }
+  .user-menu-item.render-item.connected {
+    color: var(--green);
+  }
+  .user-menu-item.render-item.connected:active { background: rgba(61,220,151,0.1); }
 
   /* ── VERCEL TOKEN MODAL ── */
   .vercel-modal-overlay {
@@ -440,6 +453,28 @@
   }
   .drawer-close-btn svg { width: 15px; height: 15px; }
   .drawer-close-btn:active { color: var(--accent-2); border-color: var(--accent-2); }
+
+  .drawer-logout-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: calc(100% - 36px);
+    margin: 14px 18px 4px;
+    padding: 11px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,107,107,0.3);
+    background: rgba(255,107,107,0.08);
+    color: var(--red);
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .15s, transform .1s;
+  }
+  .drawer-logout-btn svg { width: 15px; height: 15px; }
+  .drawer-logout-btn:active { background: rgba(255,107,107,0.18); transform: scale(0.98); }
 
   .drawer-section { padding: 16px 18px 6px; }
   .drawer-section-title {
@@ -1371,9 +1406,13 @@
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.49 20.005h-.723l-.628-.628v-1.68l3.293-3.293 1.348 1.348-.132.397-2.85 2.85zm-1.351-3.494V15.19l.628-.628h1.68l3.293 3.293-1.348 1.348-.397-.132-2.85-2.85zM3.999 12.5v-.702l.61-.61H8.44l-.001 2.923H4.61l-.61-.611zm14.997-3.183l.628.628v1.68l-3.293 3.293-1.348-1.348.132-.397 2.85-2.85zm-9.276-4.99l.397.132 2.85 2.85-1.348 1.348-.628-.628v-1.68zm5.61 2.982l2.85-2.85.397.132v1.68l-2.85 2.85z"/></svg>
       <span id="netlify-menu-label">Connect Netlify</span>
     </div>
+    <div class="user-menu-item render-item" id="render-menu-item" onclick="onRenderMenuClick()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/><path d="M2 15.5C2 12 5 9 8.5 9H12v6H8.5C5 15 2 19 2 15.5zM22 8.5C22 12 19 15 15.5 15H12V9h3.5C19 9 22 5 22 8.5z"/></svg>
+      <span id="render-menu-label">Connect Render</span>
+    </div>
     <div class="user-menu-item" onclick="handleLogout()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-      Disconnect GitHub
+      Log Out
     </div>
   </div>
 
@@ -1423,6 +1462,29 @@
     </div>
   </div>
 
+  <!-- ═══ RENDER API KEY PASTE MODAL ═══ -->
+  <div id="render-modal-overlay" class="vercel-modal-overlay">
+    <div class="vercel-modal">
+      <div class="vercel-modal-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><circle cx="12" cy="12" r="4"/><path d="M2 15.5C2 12 5 9 8.5 9H12v6H8.5C5 15 2 19 2 15.5zM22 8.5C22 12 19 15 15.5 15H12V9h3.5C19 9 22 5 22 8.5z"/></svg>
+        <h2>Connect Render</h2>
+      </div>
+      <p class="vercel-modal-desc">Apni Render API Key paste karo. Key banane ke liye:</p>
+      <ol class="vercel-modal-steps">
+        <li>Render dashboard → <strong>Account Settings</strong></li>
+        <li><strong>API Keys</strong> section me <strong>Create API Key</strong></li>
+        <li>Naam do, key copy karo</li>
+      </ol>
+      <a class="vercel-token-link" href="https://dashboard.render.com/u/settings#api-keys" target="_blank" rel="noopener">dashboard.render.com/u/settings kholo →</a>
+      <input type="password" id="render-token-input" class="vercel-token-input" placeholder="Paste API key here" autocomplete="off" />
+      <div id="render-modal-error" class="vercel-modal-error"></div>
+      <div class="vercel-modal-actions">
+        <button class="prompt-btn go" id="render-connect-btn" onclick="submitRenderToken()">Connect</button>
+        <button class="prompt-btn cancel" onclick="hideRenderModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ LOGIN GATE — shown until GitHub is connected ═══ -->
   <div id="login-gate">
     <div class="login-card">
@@ -1459,6 +1521,11 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
+
+      <button class="drawer-logout-btn" onclick="handleLogout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Log Out
+      </button>
 
       <div class="drawer-section">
         <div class="drawer-section-title">
@@ -1599,7 +1666,7 @@ let appSettings = loadAppSettings();
 // (httponly, so JS can't read/forge it) and reflects whatever the
 // server says. /api/me is the single source of truth.
 // ══════════════════════════════════════════════════════════════════
-let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername, netlifyConnected, netlifyEmail } | null
+let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername, netlifyConnected, netlifyEmail, renderConnected, renderEmail } | null
 
 async function checkAuth() {
   try {
@@ -1613,6 +1680,8 @@ async function checkAuth() {
         vercelUsername: data.vercel_username || null,
         netlifyConnected: !!data.netlify_connected,
         netlifyEmail: data.netlify_email || null,
+        renderConnected: !!data.render_connected,
+        renderEmail: data.render_email || null,
       };
       hideLoginGate();
       renderUserBadge();
@@ -1668,6 +1737,7 @@ function renderUserBadge() {
   document.getElementById('user-menu-name').textContent = '@' + authedUser.login;
   renderVercelMenuState();
   renderNetlifyMenuState();
+  renderRenderMenuState();
 }
 
 function renderVercelMenuState() {
@@ -1702,6 +1772,21 @@ function renderNetlifyMenuState() {
   renderDrawerProfile();
 }
 
+function renderRenderMenuState() {
+  const item = document.getElementById('render-menu-item');
+  const label = document.getElementById('render-menu-label');
+  if (!authedUser) return;
+  if (authedUser.renderConnected) {
+    item.classList.add('connected');
+    label.textContent = `Render: ${authedUser.renderEmail || 'connected'} ✓`;
+  } else {
+    item.classList.remove('connected');
+    label.textContent = 'Connect Render';
+  }
+  renderAppsList();
+  renderDrawerProfile();
+}
+
 function toggleUserMenu() {
   document.getElementById('user-menu').classList.toggle('show');
 }
@@ -1724,7 +1809,14 @@ async function handleLogout() {
     // naturally expires, but the user isn't stuck looking logged-in.
   }
   authedUser = null;
-  clearSavedChat();
+  // Wipe ALL local chat sessions and settings on logout, not just the
+  // active one — this device may be shared, and the next person to log
+  // in (a different GitHub account) shouldn't see this user's chat
+  // history sitting in the drawer.
+  try {
+    localStorage.removeItem(SESSIONS_KEY);
+    localStorage.removeItem(APP_SETTINGS_KEY);
+  } catch (e) {}
   location.reload();
 }
 
@@ -1963,6 +2055,124 @@ function confirmDisconnectNetlify() {
   messages.appendChild(wrap);
   scrollToBottom();
 }
+
+// ══════════════════════════════════════════════════════════════════
+// RENDER CONNECTION — same manual-token-paste pattern as Vercel/Netlify
+// above. See server.py comment near /api/render/connect for why this is
+// a paste flow (Render has no public OAuth at all).
+// ══════════════════════════════════════════════════════════════════
+function onRenderMenuClick() {
+  document.getElementById('user-menu').classList.remove('show');
+  if (authedUser && authedUser.renderConnected) {
+    confirmDisconnectRender();
+  } else {
+    showRenderModal();
+  }
+}
+
+function showRenderModal() {
+  document.getElementById('render-modal-overlay').classList.add('show');
+  document.getElementById('render-modal-error').classList.remove('show');
+  const input = document.getElementById('render-token-input');
+  input.value = '';
+  setTimeout(() => input.focus(), 50);
+}
+
+function hideRenderModal() {
+  document.getElementById('render-modal-overlay').classList.remove('show');
+}
+
+async function submitRenderToken() {
+  const input = document.getElementById('render-token-input');
+  const errBox = document.getElementById('render-modal-error');
+  const btn = document.getElementById('render-connect-btn');
+  const token = input.value.trim();
+
+  errBox.classList.remove('show');
+  if (!token) {
+    errBox.textContent = 'API key paste karo pehle.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+
+  try {
+    const res = await fetch('/api/render/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      errBox.textContent = data.reply || 'Connect nahi hua. Key check karke dubara try karo.';
+      errBox.classList.add('show');
+      btn.disabled = false;
+      btn.textContent = 'Connect';
+      return;
+    }
+
+    authedUser.renderConnected = true;
+    authedUser.renderEmail = data.render_email;
+    renderRenderMenuState();
+    hideRenderModal();
+    addMessage('agent', `✅ Render connect ho gaya! (${data.render_email}) Ab tum apni services Render pe manage kar sakte ho.`, 'success');
+  } catch (e) {
+    errBox.textContent = 'Server se connect nahi ho paya. Dubara try karo.';
+    errBox.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect';
+  }
+}
+
+function confirmDisconnectRender() {
+  const messages = document.getElementById('messages');
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble warning';
+  bubble.innerHTML = `Render disconnect kar du? (${authedUser.renderEmail || ''}) Render commands tab tak kaam nahi karenge jab tak dubara connect na karo.`;
+
+  const actions = document.createElement('div');
+  actions.className = 'confirm-actions';
+  const yesBtn = document.createElement('button');
+  yesBtn.className = 'confirm-btn danger';
+  yesBtn.textContent = 'Haan, Disconnect Karo';
+  yesBtn.onclick = async () => {
+    yesBtn.disabled = true;
+    noBtn.disabled = true;
+    try {
+      await fetch('/api/render/disconnect', { method: 'POST', credentials: 'same-origin' });
+    } catch (e) {}
+    authedUser.renderConnected = false;
+    authedUser.renderEmail = null;
+    renderRenderMenuState();
+    addMessage('agent', 'Render disconnect ho gaya.', '');
+  };
+  const noBtn = document.createElement('button');
+  noBtn.className = 'confirm-btn cancel';
+  noBtn.textContent = 'Cancel';
+  noBtn.onclick = () => { yesBtn.disabled = true; noBtn.disabled = true; };
+
+  actions.appendChild(yesBtn);
+  actions.appendChild(noBtn);
+  bubble.appendChild(actions);
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+}
+
 
 // ══════════════════════════════════════════════════════════════════
 // CHAT PERSISTENCE (localStorage) — multi-session
@@ -2236,6 +2446,13 @@ const COMMANDS = [
   { id: 'NETLIFY_DELETE', tpl: 'delete netlify site {site_name}',            desc: 'Netlify · delete a site ⚠️',           kw: ['delete','uda','hata','netlify','site'], netlify: true },
   { id: 'NETLIFY_ENV_GET', tpl: 'get env for {site_name} netlify',           desc: 'Netlify · view environment variables', kw: ['env','environment','vars','get','show','netlify'], netlify: true },
   { id: 'NETLIFY_ENV_SET', tpl: 'set netlify env {KEY}={value} for {site_name}', desc: 'Netlify · set an environment variable', kw: ['set','env','netlify','add','update'], netlify: true },
+
+  // ── RENDER (only surfaced once connected) ──
+  { id: 'RENDER_LIST',  tpl: 'list render services',                         desc: 'Render · list all services',           kw: ['list','render','services','sare','dikhao'], render: true },
+  { id: 'RENDER_DELETE', tpl: 'delete service {service_id}',                 desc: 'Render · delete a service ⚠️',         kw: ['delete','uda','hata','render','service'], render: true },
+  { id: 'RENDER_ENV_GET', tpl: 'get env for {service_id} render',            desc: 'Render · view environment variables',  kw: ['env','environment','vars','get','show','render'], render: true },
+  { id: 'RENDER_ENV_SET', tpl: 'set render env {KEY}={value} for {service_id}', desc: 'Render · set an environment variable', kw: ['set','env','render','add','update'], render: true },
+  { id: 'RENDER_DEPLOY', tpl: 'deploy {service_id} to render',               desc: 'Render · trigger a deploy',            kw: ['deploy','render','service'], render: true },
 ];
 
 // ── AUTOFILL STATE ──
@@ -2275,8 +2492,9 @@ function renderSuggestions(rawValue) {
   const queryWords = value.toLowerCase().split(/\s+/).filter(Boolean);
   const vercelReady = !!(authedUser && authedUser.vercelConnected);
   const netlifyReady = !!(authedUser && authedUser.netlifyConnected);
+  const renderReady = !!(authedUser && authedUser.renderConnected);
   const scored = COMMANDS
-    .filter(cmd => (!cmd.vercel || vercelReady) && (!cmd.netlify || netlifyReady))
+    .filter(cmd => (!cmd.vercel || vercelReady) && (!cmd.netlify || netlifyReady) && (!cmd.render || renderReady))
     .map(cmd => ({ cmd, score: scoreCommand(cmd, queryWords) }))
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -3520,8 +3738,10 @@ function actionColorFor(action) {
     vercel_env: 'info', vercel_env_set: 'success',
     netlify_list: 'info', netlify_site_info: 'info', netlify_delete_site: 'success',
     netlify_env: 'info', netlify_env_set: 'success',
+    render_list: 'info', render_delete_service: 'success',
+    render_env: 'info', render_env_update: 'success', render_deploy: 'success',
     confirm_required: 'warning', auth_required: 'warning',
-    vercel_auth_required: 'warning', netlify_auth_required: 'warning',
+    vercel_auth_required: 'warning', netlify_auth_required: 'warning', render_auth_required: 'warning',
     error: 'error', warning: 'warning', message: ''
   };
   return actionColors[action] || '';
@@ -3658,6 +3878,13 @@ async function sendMsg() {
       return;
     }
 
+    // ── RENDER AUTH: not connected, or token expired/revoked ──
+    if (data.action === 'render_auth_required') {
+      addMessage('agent', data.reply, 'warning');
+      showRenderModal();
+      return;
+    }
+
     const cls = actionColorFor(data.action);
     addMessage('agent', data.reply, cls);
     history.push({ role: 'assistant', content: data.reply });
@@ -3756,7 +3983,7 @@ function renderDrawerProfile() {
     avatarEl.textContent = (authedUser.login || '?').charAt(0).toUpperCase();
   }
   nameEl.textContent = '@' + authedUser.login;
-  const connectedCount = 1 + (authedUser.vercelConnected ? 1 : 0) + (authedUser.netlifyConnected ? 1 : 0);
+  const connectedCount = 1 + (authedUser.vercelConnected ? 1 : 0) + (authedUser.netlifyConnected ? 1 : 0) + (authedUser.renderConnected ? 1 : 0);
   subEl.textContent = `${connectedCount} app${connectedCount === 1 ? '' : 's'} connected`;
 }
 
@@ -3791,6 +4018,13 @@ function renderAppsList() {
       sub: authedUser && authedUser.netlifyConnected ? (authedUser.netlifyEmail || 'connected') : 'Not connected',
       onConnect: () => { closeDrawer(); showNetlifyModal(); },
       onDisconnect: () => { closeDrawer(); confirmDisconnectNetlify(); },
+    },
+    {
+      key: 'render', name: 'Render', icon: '⬤',
+      connected: !!(authedUser && authedUser.renderConnected),
+      sub: authedUser && authedUser.renderConnected ? (authedUser.renderEmail || 'connected') : 'Not connected',
+      onConnect: () => { closeDrawer(); showRenderModal(); },
+      onDisconnect: () => { closeDrawer(); confirmDisconnectRender(); },
     },
   ];
 

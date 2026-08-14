@@ -128,7 +128,9 @@ Vercel — **manual Personal Access Token paste** (user menu me "Connect
 Netlify"). Netlify docs khud PAT ko third-party-tool ke liye first-class,
 recommended path bataते hain.
 
-**Render**: abhi tak nahi hai, future pass me aa sakta hai.
+**Render**: list/delete services, env vars get/set, deploy trigger. Render ka
+public OAuth hai hi nahi (docs khud confirm karte hain) — isliye **manual API
+Key paste** hi is platform ke liye sirf option hai, koi alternative nahi.
 
 **UI — hamburger drawer**: multi-session chat history (naye chat start karo,
 purani chats me switch karo, delete karo — sab localStorage me, per-device),

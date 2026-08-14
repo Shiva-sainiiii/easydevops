@@ -166,17 +166,21 @@ def init_db():
                     vercel_username TEXT,
                     netlify_token_encrypted BYTEA,
                     netlify_email TEXT,
+                    render_token_encrypted BYTEA,
+                    render_email TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     updated_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
             # Migration-safe: if this table already existed from before Vercel/
-            # Netlify support was added, ALTER it rather than relying on CREATE
-            # TABLE IF NOT EXISTS (which only applies to brand-new tables).
+            # Netlify/Render support was added, ALTER it rather than relying on
+            # CREATE TABLE IF NOT EXISTS (which only applies to brand-new tables).
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vercel_token_encrypted BYTEA")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS vercel_username TEXT")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS netlify_token_encrypted BYTEA")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS netlify_email TEXT")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS render_token_encrypted BYTEA")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS render_email TEXT")
 
 
 init_db()
@@ -306,6 +310,39 @@ def get_user_netlify_token(user):
     return decrypt_token(blob)
 
 
+def set_render_token(user_id, render_token, render_email):
+    """Same pattern as set_vercel_token/set_netlify_token."""
+    encrypted = encrypt_token(render_token)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    render_token_encrypted = %s,
+                    render_email = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (encrypted, render_email, user_id))
+
+
+def clear_render_token(user_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users SET
+                    render_token_encrypted = NULL,
+                    render_email = NULL,
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (user_id,))
+
+
+def get_user_render_token(user):
+    blob = user.get("render_token_encrypted")
+    if not blob:
+        return None
+    return decrypt_token(blob)
+
+
 # ════════════════════════════════════════════════════════════════
 #  AUTH HELPERS
 # ════════════════════════════════════════════════════════════════
@@ -380,6 +417,9 @@ def safe_jsonify(payload):
         nl_tok = get_user_netlify_token(user)
         if nl_tok:
             extra.append(nl_tok)
+        rd_tok = get_user_render_token(user)
+        if rd_tok:
+            extra.append(rd_tok)
 
     def scrub(obj):
         if isinstance(obj, str):
@@ -502,6 +542,8 @@ def api_me():
         "vercel_username": user.get("vercel_username"),
         "netlify_connected": bool(user.get("netlify_token_encrypted")),
         "netlify_email": user.get("netlify_email"),
+        "render_connected": bool(user.get("render_token_encrypted")),
+        "render_email": user.get("render_email"),
     })
 
 
@@ -610,6 +652,56 @@ def netlify_disconnect():
     return safe_jsonify({"ok": True})
 
 
+# ════════════════════════════════════════════════════════════════
+#  RENDER CONNECTION — manual API key paste, same reasoning as Vercel
+#  and Netlify. Render has NO public OAuth flow at all (confirmed via
+#  their own docs — API keys, created in Account Settings, are the only
+#  documented auth path for third-party tools), so this is the only
+#  option here, not just the preferred one.
+# ════════════════════════════════════════════════════════════════
+@app.route("/api/render/connect", methods=["POST"])
+def render_connect():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Pehle GitHub se connect karo.", "action": "auth_required"}), 401
+
+    body = request.json or {}
+    token = (body.get("token") or "").strip()
+    if not token:
+        return safe_jsonify({"reply": "❌ Token khaali hai.", "action": "error"}), 400
+
+    # Validate against Render's own "who am I" endpoint before saving.
+    r = requests.get(
+        "https://api.render.com/v1/users",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        timeout=15,
+    )
+    if r.status_code != 200:
+        return safe_jsonify({
+            "reply": "❌ Ye API key valid nahi hai. Render dashboard se dubara copy karke try karo.",
+            "action": "error"
+        }), 400
+
+    render_user = r.json()
+    # Response shape can be a bare user object or a list depending on key
+    # scope — handle both defensively rather than assuming one shape.
+    if isinstance(render_user, list):
+        render_user = render_user[0] if render_user else {}
+    render_email = render_user.get("email") or render_user.get("name") or "connected"
+
+    set_render_token(user["id"], token, render_email)
+    return safe_jsonify({"ok": True, "render_email": render_email})
+
+
+@app.route("/api/render/disconnect", methods=["POST"])
+def render_disconnect():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Pehle GitHub se connect karo.", "action": "auth_required"}), 401
+    clear_render_token(user["id"])
+    return safe_jsonify({"ok": True})
+
+
 def gh_api(method, endpoint, gh_token, **kwargs):
     url = f"https://api.github.com{endpoint}"
     headers = {
@@ -632,6 +724,16 @@ def nl_api(method, endpoint, nl_token, **kwargs):
     url = f"https://api.netlify.com/api/v1{endpoint}"
     headers = {
         "Authorization": f"Bearer {nl_token}",
+        "Content-Type": "application/json",
+    }
+    return requests.request(method, url, headers=headers, timeout=20, **kwargs)
+
+
+def rd_api(method, endpoint, rd_token, **kwargs):
+    url = f"https://api.render.com/v1{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {rd_token}",
+        "Accept": "application/json",
         "Content-Type": "application/json",
     }
     return requests.request(method, url, headers=headers, timeout=20, **kwargs)
@@ -710,7 +812,7 @@ def get_file_sha(repo, path, owner, gh_token):
 #  be replayed to execute a destructive action as a different user
 #  even if somehow leaked (e.g. logged, shared in a bug report).
 # ════════════════════════════════════════════════════════════════
-DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE"}
+DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE"}
 
 
 def confirm_token(cmd, value, user_id):
@@ -734,6 +836,9 @@ def build_confirmation(cmd, params, user_id):
     elif cmd == "NETLIFY_DELETE_SITE":
         target_desc = f"Netlify site `{params.get('site_name')}`"
         warn_text = "Netlify site aur uski saari deployments delete ho jayengi (GitHub repo safe rahega)."
+    elif cmd == "RENDER_DELETE_SERVICE":
+        target_desc = f"Render service `{params.get('service_id')}`"
+        warn_text = "Service permanently delete ho jayegi — logs, deploy history, sab kuch. Wapas nahi aayega."
     else:
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."
@@ -756,7 +861,7 @@ def build_confirmation(cmd, params, user_id):
 #  (GitHub would reject cross-account writes anyway, but this keeps
 #  reads scoped correctly too).
 # ════════════════════════════════════════════════════════════════
-def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None):
+def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, rd_token=None):
     params = params or {}
 
     try:
@@ -1135,6 +1240,111 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None):
             else:
                 return {"reply": f"❌ Env set Error: {r.text[:200]}", "action": "error"}
 
+        # ──────────────── RENDER ────────────────
+        elif cmd == "RENDER_LIST_SERVICES":
+            if not rd_token:
+                return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
+            r = rd_api("GET", "/services?limit=50", rd_token)
+            if r.status_code == 200:
+                items = r.json()
+                if not items:
+                    return {"reply": "Koi Render service nahi mila.", "action": "render_list", "services": []}
+                lines = []
+                services = []
+                for item in items:
+                    svc = item.get("service", item)
+                    name = svc.get("name", "unknown")
+                    stype = svc.get("type", "service")
+                    sid = svc.get("id", "")
+                    url = svc.get("serviceDetails", {}).get("url", "")
+                    icon = {"web_service": "🌐", "static_site": "📦", "private_service": "🔒",
+                            "background_worker": "⚙️", "cron_job": "⏰", "postgres": "🐘", "redis": "🟥"}.get(stype, "🧩")
+                    line = f"{icon} **{name}** — `{stype}`\nID: `{sid}`"
+                    if url:
+                        line += f"\n🔗 {url}"
+                    lines.append(line)
+                    services.append({"name": name, "id": sid, "type": stype})
+                return {"reply": f"Tere {len(items)} Render services:\n\n" + "\n\n".join(lines),
+                        "action": "render_list", "services": services}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
+            else:
+                return {"reply": f"❌ Render services fetch nahi hue: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "RENDER_GET_ENV":
+            if not rd_token:
+                return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
+            service_id = params["service_id"]
+            r = rd_api("GET", f"/services/{service_id}/env-vars?limit=100", rd_token)
+            if r.status_code == 200:
+                items = r.json()
+                if not items:
+                    return {"reply": f"Service `{service_id}` me koi env vars nahi hai.", "action": "render_env"}
+                lines = [f"`{item['envVar']['key']}` = `{item['envVar']['value']}`" for item in items]
+                return {"reply": f"Env vars for `{service_id}`:\n\n" + "\n".join(lines), "action": "render_env"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
+            else:
+                return {"reply": f"❌ Env vars fetch nahi hue: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "RENDER_SET_ENV":
+            if not rd_token:
+                return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
+            service_id = params["service_id"]
+            new_vars = params["env_vars"]
+
+            existing_r = rd_api("GET", f"/services/{service_id}/env-vars?limit=100", rd_token)
+            existing = {}
+            if existing_r.status_code == 200:
+                for item in existing_r.json():
+                    existing[item["envVar"]["key"]] = item["envVar"]["value"]
+            elif existing_r.status_code in (401, 403):
+                return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
+
+            existing.update(new_vars)
+            payload = [{"key": k, "value": v} for k, v in existing.items()]
+
+            r = rd_api("PUT", f"/services/{service_id}/env-vars", rd_token, json=payload)
+            if r.status_code in (200, 201):
+                keys = ", ".join(new_vars.keys())
+                return {"reply": f"✅ Env vars update ho gaye for `{service_id}`!\nUpdated keys: `{keys}`\n\n⚠️ Service redeploy hoga automatically Render ki taraf se.",
+                        "action": "render_env_update"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
+            else:
+                return {"reply": f"❌ Env update Error: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "RENDER_DEPLOY":
+            if not rd_token:
+                return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
+            service_id = params["service_id"]
+            clear_cache = params.get("clear_cache", False)
+            payload = {"clearCache": "clear" if clear_cache else "do_not_clear"}
+            r = rd_api("POST", f"/services/{service_id}/deploys", rd_token, json=payload)
+            if r.status_code in (200, 201):
+                dep = r.json()
+                dep_id = dep.get("id", "")
+                status = dep.get("status", "queued")
+                cache_note = "(cache cleared)" if clear_cache else ""
+                return {"reply": f"🚀 Deploy trigger ho gaya for `{service_id}` {cache_note}\nDeploy ID: `{dep_id}`\nStatus: **{status}**",
+                        "action": "render_deploy", "deploy_id": dep_id, "status": status}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
+            else:
+                return {"reply": f"❌ Render deploy Error: {r.text[:200]}", "action": "error"}
+
+        elif cmd == "RENDER_DELETE_SERVICE":
+            if not rd_token:
+                return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
+            service_id = params["service_id"]
+            r = rd_api("DELETE", f"/services/{service_id}", rd_token)
+            if r.status_code in (200, 204):
+                return {"reply": f"🗑️ Render service `{service_id}` delete ho gaya.", "action": "render_delete_service"}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
+            else:
+                return {"reply": f"❌ Service delete Error: {r.text[:200]}", "action": "error"}
+
         else:
             return {"reply": f"❌ Unknown command: {cmd}", "action": "error"}
 
@@ -1153,7 +1363,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None):
 SLUG = r"[\w][\w.\-]*"
 PATH = r"[\w][\w./\-]*"
 
-NO_ARG_COMMANDS = {"LIST_REPOS", "VERCEL_LIST_PROJECTS"}
+NO_ARG_COMMANDS = {"LIST_REPOS", "VERCEL_LIST_PROJECTS", "NETLIFY_LIST_SITES", "RENDER_LIST_SERVICES"}
 
 
 def _g(m, i):
@@ -1259,6 +1469,37 @@ INTENT_RULES = [
         rf"(?:set|add|update)\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})\s+.*netlify",
         rf"(?:set|add|update)\s+netlify\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})",
     ], lambda m: {"site_name": _g(m, 3), "key": _g(m, 1), "value": _g(m, 2)}),
+
+    # ── RENDER ──
+    ("RENDER_LIST_SERVICES", [
+        r"(?:list|sare|show|dikhao|dikha)\s+.*render.*services?\b",
+        r"(?:list|sare|show|dikhao|dikha)\s+.*services?.*render\b",
+        r"^render\s+services?$",
+        r"^services?\s+render$",
+        r"^render\s+(?:ke\s+)?services?\s+(?:dikhao|dikha|show|list)$",
+    ], lambda m: {}),
+
+    ("RENDER_DELETE_SERVICE", [
+        rf"(?:delete|uda|udado|hata|hatao|remove)\s+(?:the\s+)?(?:render\s+)?service\s+({SLUG})",
+    ], lambda m: {"service_id": _g(m, 1)}),
+
+    ("RENDER_DELETE_SERVICE", [
+        rf"({SLUG})\s+service\s+(?:delete|uda(?:o|\s*do)?|hata(?:o|\s*do)?)\s*(?:karo|kar\s*do)?",
+    ], lambda m: {"service_id": _g(m, 1)}),
+
+    ("RENDER_GET_ENV", [
+        rf"(?:get|show|dikhao|dikha)\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})\s+.*render",
+        rf"render\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})",
+    ], lambda m: {"service_id": _g(m, 1)}),
+
+    ("RENDER_SET_ENV", [
+        rf"(?:set|add|update)\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})\s+.*render",
+        rf"(?:set|add|update)\s+render\s+env\s+(\w+)\s*=\s*(\S+)\s+(?:for|in|on)\s+({SLUG})",
+    ], lambda m: {"service_id": _g(m, 3), "env_vars": {_g(m, 1): _g(m, 2)}}),
+
+    ("RENDER_DEPLOY", [
+        rf"deploy\s+({SLUG})\s+(?:to|pe|on)\s+render",
+    ], lambda m: {"service_id": _g(m, 1)}),
 ]
 
 COMPLEX_KEYWORDS = [
@@ -1280,7 +1521,7 @@ def parse_intent(message):
                     params = extractor(m)
                 except Exception:
                     continue
-                required_fields = {"repo", "project_name", "site_name", "key"}
+                required_fields = {"repo", "project_name", "site_name", "service_id", "key"}
                 if any(params.get(f) in (None, "") for f in required_fields if f in params):
                     continue
                 # VERCEL_SET_ENV / NETLIFY_SET_ENV: env var keys are
@@ -1292,6 +1533,14 @@ def parse_intent(message):
                     orig_m = re.search(pat, original, re.IGNORECASE)
                     if orig_m:
                         params["key"] = orig_m.group(1)
+                # RENDER_SET_ENV keeps its key inside env_vars (a dict),
+                # not a flat "key" field — same casing-recovery need, just
+                # applied to the dict's single entry.
+                if cmd == "RENDER_SET_ENV":
+                    orig_m = re.search(pat, original, re.IGNORECASE)
+                    if orig_m and params.get("env_vars"):
+                        real_key = orig_m.group(1)
+                        params["env_vars"] = {real_key: list(params["env_vars"].values())[0]}
                 return cmd, params
     return None, None
 
@@ -1306,7 +1555,7 @@ def parse_intent(message):
 OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 SYSTEM_PROMPT_TEMPLATE = """You are a DevOps Agent helping GitHub user: {login}.
-You control ONLY this user's own GitHub account{vercel_clause}{netlify_clause}. You act by outputting EXACTLY ONE command per response.
+You control ONLY this user's own GitHub account{vercel_clause}{netlify_clause}{render_clause}. You act by outputting EXACTLY ONE command per response.
 
 COMMANDS:
 1. CREATE_REPO: <repo-name>
@@ -1318,13 +1567,13 @@ COMMANDS:
 7. DELETE_FILE: {{"repo":"repo-name","path":"file.html","message":"reason"}}
 8. LIST_FILES: {{"repo":"repo-name","path":""}}
 9. GET_REPO_INFO: {{"repo":"repo-name"}}
-{vercel_commands}{netlify_commands}
+{vercel_commands}{netlify_commands}{render_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
 - JSON must be valid. Escape quotes as \\" and newlines as \\n in content fields.
 - NEVER invent URLs, IDs, or data you don't have — only the commands above give you real information.
 - NEVER output anything resembling a real token/secret, even as an example.
-{vercel_note}{netlify_note}"""
+{vercel_note}{netlify_note}{render_note}"""
 
 VERCEL_COMMANDS_BLOCK = """10. VERCEL_LIST_PROJECTS
 11. VERCEL_IMPORT_REPO: {"repo":"repo-name","project_name":"optional-custom-name"}
@@ -1341,6 +1590,13 @@ NETLIFY_COMMANDS_BLOCK = """16. NETLIFY_LIST_SITES
 20. NETLIFY_SET_ENV: {"site_name":"site-name","key":"KEY","value":"value"}
 """
 
+RENDER_COMMANDS_BLOCK = """21. RENDER_LIST_SERVICES
+22. RENDER_DELETE_SERVICE: {"service_id":"srv-xxx"}
+23. RENDER_GET_ENV: {"service_id":"srv-xxx"}
+24. RENDER_SET_ENV: {"service_id":"srv-xxx","env_vars":{"KEY":"value"}}
+25. RENDER_DEPLOY: {"service_id":"srv-xxx","clear_cache":false}
+"""
+
 CODEGEN_SYSTEM_PROMPT = """You generate file content for a developer tool. Output ONLY the raw file content — no markdown fences, no explanation. Write complete, working code. Infer language from the file path."""
 
 COMMANDS = [
@@ -1350,6 +1606,8 @@ COMMANDS = [
     "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_SET_ENV:",
     "NETLIFY_LIST_SITES", "NETLIFY_GET_SITE_INFO:", "NETLIFY_DELETE_SITE:",
     "NETLIFY_GET_ENV:", "NETLIFY_SET_ENV:",
+    "RENDER_LIST_SERVICES", "RENDER_DELETE_SERVICE:", "RENDER_GET_ENV:",
+    "RENDER_SET_ENV:", "RENDER_DEPLOY:",
 ]
 
 
@@ -1384,7 +1642,7 @@ def extract_command(text):
     return (None, None)
 
 
-def call_openrouter_chat(user_message, history, github_login, vercel_connected=False, netlify_connected=False):
+def call_openrouter_chat(user_message, history, github_login, vercel_connected=False, netlify_connected=False, render_connected=False):
     vercel_clause = " and their connected Vercel account" if vercel_connected else ""
     vercel_commands = VERCEL_COMMANDS_BLOCK if vercel_connected else ""
     vercel_note = ("" if vercel_connected else
@@ -1395,10 +1653,16 @@ def call_openrouter_chat(user_message, history, github_login, vercel_connected=F
     netlify_note = ("" if netlify_connected else
                      "\nNote: this user has NOT connected Netlify yet — do not emit any NETLIFY_* command; "
                      "if they ask for a Netlify action, tell them to connect Netlify first via the user menu.\n")
+    render_clause = " and their connected Render account" if render_connected else ""
+    render_commands = RENDER_COMMANDS_BLOCK if render_connected else ""
+    render_note = ("" if render_connected else
+                    "\nNote: this user has NOT connected Render yet — do not emit any RENDER_* command; "
+                    "if they ask for a Render action, tell them to connect Render first via the user menu.\n")
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         login=github_login, vercel_clause=vercel_clause,
         vercel_commands=vercel_commands, vercel_note=vercel_note,
         netlify_clause=netlify_clause, netlify_commands=netlify_commands, netlify_note=netlify_note,
+        render_clause=render_clause, render_commands=render_commands, render_note=render_note,
     )
     messages = [{"role": "system", "content": system_prompt}]
     for h in history[-10:]:
@@ -1554,6 +1818,7 @@ def chat():
     owner = user["github_login"]
     vc_token = get_user_vercel_token(user)
     nl_token = get_user_netlify_token(user)
+    rd_token = get_user_render_token(user)
     body = request.json or {}
 
     # 1. CONFIRMED DESTRUCTIVE ACTION REPLAY
@@ -1567,7 +1832,7 @@ def chat():
             params = json.loads(value) if value else {}
         except (json.JSONDecodeError, TypeError):
             params = {}
-        result = execute_command(cmd, params, owner, gh_token, vc_token, nl_token)
+        result = execute_command(cmd, params, owner, gh_token, vc_token, nl_token, rd_token)
         result["source"] = "direct"
         return safe_jsonify(result)
 
@@ -1595,14 +1860,14 @@ def chat():
         if cmd in DESTRUCTIVE_COMMANDS:
             return safe_jsonify(build_confirmation(cmd, params, user["id"]))
 
-        result = execute_command(cmd, params, owner, gh_token, vc_token, nl_token)
+        result = execute_command(cmd, params, owner, gh_token, vc_token, nl_token, rd_token)
         result["source"] = "direct"
         result["action_command"] = cmd
         return safe_jsonify(result)
 
     # 3. AI FALLBACK
     try:
-        ai_text = call_openrouter_chat(user_message, conv_history, owner, vercel_connected=bool(vc_token), netlify_connected=bool(nl_token))
+        ai_text = call_openrouter_chat(user_message, conv_history, owner, vercel_connected=bool(vc_token), netlify_connected=bool(nl_token), render_connected=bool(rd_token))
     except RuntimeError as e:
         return safe_jsonify({"reply": f"AI Error: {str(e)}", "action": "error", "source": "ai"})
     except requests.Timeout:
@@ -1629,7 +1894,7 @@ def chat():
         if ai_cmd in DESTRUCTIVE_COMMANDS:
             return safe_jsonify(build_confirmation(ai_cmd, ai_params, user["id"]))
 
-        result = execute_command(ai_cmd, ai_params, owner, gh_token, vc_token, nl_token)
+        result = execute_command(ai_cmd, ai_params, owner, gh_token, vc_token, nl_token, rd_token)
         result["source"] = "ai"
         result["action_command"] = ai_cmd
         return safe_jsonify(result)
