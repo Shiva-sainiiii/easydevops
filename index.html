@@ -1060,7 +1060,7 @@
     width: 30px; height: 30px;
     flex-shrink: 0;
     display: block;
-    background: radial-gradient(circle, rgba(255,159,54,0.14) 0%, transparent 70%);
+    background: radial-gradient(circle, rgba(54,209,255,0.14) 0%, transparent 70%);
     border-radius: 50%;
   }
 
@@ -1071,7 +1071,7 @@
     letter-spacing: 0.2px;
   }
   .think-label .think-glow {
-    background: linear-gradient(90deg, var(--muted) 0%, #ff9f36 50%, var(--muted) 100%);
+    background: linear-gradient(90deg, var(--muted) 0%, var(--accent-2) 50%, var(--muted) 100%);
     background-size: 200% auto;
     -webkit-background-clip: text;
     background-clip: text;
@@ -4335,9 +4335,9 @@ function createHexLoader(canvasId, opts = {}) {
   ctx.scale(dpr, dpr);
 
   const cx = cssSize / 2, cy = cssSize / 2;
-  const accent = '#ff9f36';
-  const accentDim = 'rgba(255,159,54,0.28)';
-  const accentRGB = '255,159,54';
+  const accent = opts.color || '#36d1ff';
+  const accentRGB = opts.colorRGB || '54,209,255';
+  const accentDim = `rgba(${accentRGB},0.28)`;
 
   function hexPoints(r, rotation = 0) {
     const pts = [];
@@ -4444,12 +4444,40 @@ function createHexLoader(canvasId, opts = {}) {
   if (indicator.classList.contains('show')) loader.start();
 })();
 
-// Header brand mark + empty-state emblem + login-gate emblem: all three
-// run continuously (this IS the app's idle mark, not a loading state),
-// pausing only when the tab is backgrounded to save battery.
+// Header brand mark: a plain static hexagon outline — no animation, no
+// orbiting nodes. Just a small themed mark next to the "DevOps Agent"
+// title, drawn once.
+function drawStaticHexMark(canvasId, size) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  ctx.scale(dpr, dpr);
+
+  const cx = size / 2, cy = size / 2;
+  const r = size * 0.42;
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 3) * i - Math.PI / 2;
+    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = '#36d1ff';
+  ctx.lineWidth = Math.max(1.4, size * 0.06);
+  ctx.stroke();
+}
+
+// Empty-state emblem + login-gate emblem: these run continuously as the
+// app's idle mark (not a loading state), pausing only when the tab is
+// backgrounded to save battery. The header brand mark stays a plain
+// static hexagon (drawn above) — no looping animation there.
 (function initBrandLoaders() {
+  drawStaticHexMark('brand-canvas', 20);
+
   const loaders = [
-    createHexLoader('brand-canvas', { size: 20, speed: 0.85 }),
     createHexLoader('emblem-canvas', { size: 56, speed: 0.85 }),
     createHexLoader('login-emblem-canvas', { size: 30, speed: 0.85 }),
   ].filter(Boolean);
