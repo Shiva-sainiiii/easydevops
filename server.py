@@ -1513,7 +1513,27 @@ COMPLEX_KEYWORDS = [
 def parse_intent(message):
     original = message.strip()
     lowered = original.lower()
+
+    # Several Vercel/Render/Netlify patterns are intentionally loose (no
+    # platform keyword required, e.g. "get env vars for X") so short,
+    # natural phrasing still matches. But that means a message that
+    # explicitly names a DIFFERENT platform ("... for X netlify") could get
+    # swallowed by a generic Vercel/Render pattern that runs earlier in the
+    # list, before ever reaching the correctly-specific Netlify rule below
+    # it. Guard against that directly: if the message names a specific
+    # platform, skip every rule belonging to a different one.
+    mentioned = {p for p in ("vercel", "render", "netlify") if re.search(rf"\b{p}\b", lowered)}
+
+    def rule_platform(cmd):
+        if cmd.startswith("VERCEL_"): return "vercel"
+        if cmd.startswith("RENDER_"): return "render"
+        if cmd.startswith("NETLIFY_"): return "netlify"
+        return None
+
     for cmd, patterns, extractor in INTENT_RULES:
+        rp = rule_platform(cmd)
+        if rp and mentioned and rp not in mentioned:
+            continue
         for pat in patterns:
             m = re.search(pat, lowered)
             if m:

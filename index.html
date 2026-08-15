@@ -81,8 +81,8 @@
   }
 
   .brand .mark {
-    width: 18px; height: 18px;
-    color: var(--accent);
+    width: 20px; height: 20px;
+    display: block;
   }
 
   .status {
@@ -789,15 +789,8 @@
   }
 
   .emblem-star {
-    width: 38px; height: 38px;
-    color: var(--accent-2);
-    filter: drop-shadow(0 0 14px rgba(110,231,255,0.65));
-    animation: star-pulse 4.5s ease-in-out infinite;
-  }
-
-  @keyframes star-pulse {
-    0%, 100% { filter: drop-shadow(0 0 10px rgba(110,231,255,0.5)); }
-    50%      { filter: drop-shadow(0 0 20px rgba(110,231,255,0.85)); }
+    width: 56px; height: 56px;
+    display: block;
   }
 
   #empty-state h1 {
@@ -870,12 +863,46 @@
   .msg-wrap.user  { align-items: flex-end; align-self: flex-end; }
   .msg-wrap.agent { align-items: flex-start; align-self: flex-start; }
 
+  .time-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 4px;
+    align-self: stretch;
+  }
+  .time-divider::before, .time-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .time-divider span {
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--muted-2);
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+  }
+
   .msg-label {
     font-size: 10.5px;
     font-family: var(--font-mono);
     color: var(--muted-2);
     padding: 0 6px;
     letter-spacing: 0.3px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .msg-timestamp {
+    color: var(--muted-2);
+    opacity: 0.75;
+    font-size: 10px;
+  }
+  .msg-timestamp::before {
+    content: '·';
+    margin-right: 6px;
+    opacity: 0.6;
   }
 
   .msg-bubble {
@@ -1024,23 +1051,36 @@
   #typing-indicator {
     display: none;
     align-items: center;
-    gap: 10px;
+    gap: 11px;
     padding: 2px 24px 8px;
   }
   #typing-indicator.show { display: flex; }
 
-  .typing-dots { display: flex; gap: 4px; }
-  .typing-dots span {
-    width: 6px; height: 6px;
-    background: var(--accent);
+  #think-canvas {
+    width: 30px; height: 30px;
+    flex-shrink: 0;
+    display: block;
+    background: radial-gradient(circle, rgba(255,159,54,0.14) 0%, transparent 70%);
     border-radius: 50%;
-    animation: bounce 1.2s infinite;
   }
-  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes bounce {
-    0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-    40%           { transform: scale(1);   opacity: 1; }
+
+  .think-label {
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--muted);
+    letter-spacing: 0.2px;
+  }
+  .think-label .think-glow {
+    background: linear-gradient(90deg, var(--muted) 0%, #ff9f36 50%, var(--muted) 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: think-shimmer 1.8s linear infinite;
+  }
+  @keyframes think-shimmer {
+    0%   { background-position: 200% center; }
+    100% { background-position: -200% center; }
   }
 
   /* ── COMMAND AUTOFILL SUGGESTIONS ── */
@@ -1209,12 +1249,17 @@
     border-radius: 50%;
     cursor: pointer;
     display: flex; align-items: center; justify-content: center;
-    transition: opacity 0.15s, transform 0.1s;
+    transition: opacity 0.15s, transform 0.1s, background 0.15s;
     box-shadow: 0 2px 12px rgba(54,209,255,0.35);
   }
   #sendBtn:active { transform: scale(0.92); }
   #sendBtn:disabled { opacity: 0.35; box-shadow: none; }
-  #sendBtn svg { width: 16px; height: 16px; fill: #04181c; margin-left: 1px; }
+  #sendBtn svg { width: 16px; height: 16px; fill: #04181c; }
+  #sendIcon { margin-left: 1px; }
+  #sendBtn.stopping {
+    background: linear-gradient(135deg, #ff8a8a, var(--red));
+    box-shadow: 0 2px 12px rgba(255,107,107,0.4);
+  }
 
   .footnote {
     text-align: center;
@@ -1374,7 +1419,7 @@
 
   <header>
     <div class="brand">
-      <svg class="mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.2 9.2 21.5 11.5 14.2 13.8 12 21 9.8 13.8 2.5 11.5 9.8 9.2Z"/></svg>
+      <canvas id="brand-canvas" class="mark" width="60" height="60"></canvas>
       DevOps Agent
     </div>
     <div class="status">
@@ -1489,7 +1534,7 @@
   <div id="login-gate">
     <div class="login-card">
       <div class="emblem-ring" style="width:84px;height:84px;">
-        <svg class="emblem-star" style="width:30px;height:30px;" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.2 9.2 21.5 11.5 14.2 13.8 12 21 9.8 13.8 2.5 11.5 9.8 9.2Z"/></svg>
+        <canvas id="login-emblem-canvas" class="emblem-star" style="width:30px;height:30px;" width="60" height="60"></canvas>
       </div>
       <h1>DevOps Agent</h1>
       <p>Apna GitHub account connect karo — sab kuch tumhare khud ke account me hoga. Koi shared access nahi, koi tumhare tokens hamare server pe plaintext store nahi hote.</p>
@@ -1562,7 +1607,7 @@
   <div id="scroll-area">
     <div id="empty-state">
       <div class="emblem-ring">
-        <svg class="emblem-star" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 14.2 9.2 21.5 11.5 14.2 13.8 12 21 9.8 13.8 2.5 11.5 9.8 9.2Z"/></svg>
+        <canvas id="emblem-canvas" class="emblem-star" width="112" height="112"></canvas>
       </div>
       <div>
         <h1>DevOps Agent se baatein karein</h1>
@@ -1579,7 +1624,8 @@
     <div id="messages"></div>
 
     <div id="typing-indicator">
-      <div class="typing-dots"><span></span><span></span><span></span></div>
+      <canvas id="think-canvas" width="60" height="60"></canvas>
+      <div class="think-label"><span class="think-glow">Sochte hue...</span></div>
     </div>
   </div>
 
@@ -1621,8 +1667,9 @@
         onkeydown="handleKey(event)"
         oninput="autoResize(this); onInputChange();"
       ></textarea>
-      <button id="sendBtn" onclick="sendMsg()">
-        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      <button id="sendBtn" onclick="handleSendBtnClick()">
+        <svg id="sendIcon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        <svg id="stopIcon" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
     </div>
     <div class="footnote">DevOps Agent can make mistakes. Verify deployments before relying on them.</div>
@@ -1634,6 +1681,8 @@
 // ── STATE ──
 const history = [];
 let isLoading = false;
+let activeController = null;   // AbortController for the in-flight /chat (or /upload) request
+let userCancelled = false;     // distinguishes a manual Stop from a network error
 
 // ══════════════════════════════════════════════════════════════════
 // APP SETTINGS (localStorage) — small client-only UI preferences.
@@ -2283,6 +2332,7 @@ function renderActiveChatIntoView() {
   const messages = document.getElementById('messages');
   messages.innerHTML = '';
   history.length = 0;
+  resetDividerTracking();
 
   const s = getActiveSession();
   const es = document.getElementById('empty-state');
@@ -2297,7 +2347,7 @@ function renderActiveChatIntoView() {
   if (es) es.style.display = 'none';
 
   s.messages.forEach(entry => {
-    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '');
+    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null);
     addMessageActions(wrap, bubble, entry.role, entry.content, entry.actionClass || '', () => resendMessage(entry.content));
     history.push({ role: entry.role === 'user' ? 'user' : 'assistant', content: entry.content });
   });
@@ -3578,18 +3628,81 @@ function escHtml(t) {
 // ── ADD MESSAGE ──
 // Pure DOM rendering — no persistence, no confirm buttons. Used both for
 // live messages and for replaying saved history on page load.
-function renderMessage(role, content, actionClass = '') {
+function formatTimestamp(ts) {
+  const d = new Date(ts || Date.now());
+  let h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, '0');
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m} ${ampm}`;
+}
+
+const DIVIDER_GAP_MS = 5 * 60 * 1000; // 5 minutes
+let lastRenderedTs = null; // tracks the timestamp of the last message actually painted to #messages
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function formatDividerLabel(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const timeStr = formatTimestamp(ts);
+  if (isSameDay(d, now)) return timeStr;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(d, yesterday)) return `Kal · ${timeStr}`;
+  const dateStr = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return `${dateStr} · ${timeStr}`;
+}
+
+// Inserts a "── 5:32 PM ──" style divider into #messages if the gap since
+// the last rendered message is 5+ minutes (or this is the first message
+// in the view). Called right before a new message is painted.
+function maybeInsertDivider(ts) {
+  const messages = document.getElementById('messages');
+  if (lastRenderedTs !== null && (ts - lastRenderedTs) < DIVIDER_GAP_MS) return;
+  const divider = document.createElement('div');
+  divider.className = 'time-divider';
+  const label = document.createElement('span');
+  label.textContent = formatDividerLabel(ts);
+  divider.appendChild(label);
+  messages.appendChild(divider);
+}
+
+function resetDividerTracking() {
+  lastRenderedTs = null;
+}
+
+// Shared label builder (role name + timestamp) used by renderMessage and
+// every one-off interactive bubble (env forms, confirm prompts, etc.) so
+// the timestamp styling stays consistent everywhere a bubble appears.
+function makeMsgLabel(role, timestamp = null) {
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  const roleSpan = document.createElement('span');
+  roleSpan.textContent = role === 'user' ? 'You' : 'Agent';
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'msg-timestamp';
+  timeSpan.textContent = formatTimestamp(timestamp);
+  label.appendChild(roleSpan);
+  label.appendChild(timeSpan);
+  return label;
+}
+
+function renderMessage(role, content, actionClass = '', timestamp = null) {
   const es = document.getElementById('empty-state');
   if (es) es.style.display = 'none';
 
   const messages = document.getElementById('messages');
+  const ts = timestamp || Date.now();
+  maybeInsertDivider(ts);
+  lastRenderedTs = ts;
 
   const wrap = document.createElement('div');
   wrap.className = `msg-wrap ${role}`;
 
-  const label = document.createElement('div');
-  label.className = 'msg-label';
-  label.textContent = role === 'user' ? 'You' : 'Agent';
+  const label = makeMsgLabel(role, ts);
 
   const bubble = document.createElement('div');
   bubble.className = `msg-bubble ${actionClass}`;
@@ -3602,7 +3715,8 @@ function renderMessage(role, content, actionClass = '') {
 }
 
 function addMessage(role, content, actionClass = '', confirmData = null) {
-  const { wrap, bubble } = renderMessage(role, content, actionClass);
+  const ts = Date.now();
+  const { wrap, bubble } = renderMessage(role, content, actionClass, ts);
 
   // Confirm-action buttons are intentionally NOT saved to localStorage —
   // see the note above SESSIONS_KEY. They only ever exist live.
@@ -3631,7 +3745,7 @@ function addMessage(role, content, actionClass = '', confirmData = null) {
     // Only persist messages that aren't a live confirm-prompt — the prompt
     // text itself ("Pakka delete karna hai?") is fine to keep, just not
     // the still-clickable buttons.
-    saveChatEntry({ role, content, actionClass });
+    saveChatEntry({ role, content, actionClass, ts });
     addMessageActions(wrap, bubble, role, content, actionClass, () => resendMessage(content));
   }
 
@@ -3641,6 +3755,33 @@ function addMessage(role, content, actionClass = '', confirmData = null) {
 // ── COPY / RETRY buttons under a message ──
 // `retryFn` is only meaningful for user messages (re-sends the same text);
 // agent messages only get a copy button.
+// Clipboard write with a fallback for contexts where navigator.clipboard
+// isn't available (older in-app webviews, non-HTTPS local testing, etc.)
+// — uses a hidden textarea + document.execCommand as a last resort so the
+// Copy button still works there instead of silently failing.
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) { /* fall through to legacy path */ }
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 function addMessageActions(wrap, bubble, role, plainText, actionClass, retryFn) {
   const actions = document.createElement('div');
   actions.className = 'msg-actions';
@@ -3649,12 +3790,7 @@ function addMessageActions(wrap, bubble, role, plainText, actionClass, retryFn) 
   copyBtn.className = 'msg-action-btn copy';
   copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
   copyBtn.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(plainText);
-    } catch (e) {
-      // Clipboard API can fail without a secure context / permission —
-      // fall back silently, the button just won't show the "Copied" state.
-    }
+    await copyText(plainText);
     vibrate(8);
     copyBtn.classList.add('copied');
     copyBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Copied`;
@@ -3782,10 +3918,11 @@ async function sendMsg() {
   if (!msg) return;
 
   isLoading = true;
+  userCancelled = false;
   input.value = '';
   autoResize(input);
   hideSuggestions();
-  document.getElementById('sendBtn').disabled = true;
+  setSendBtnState(true);
 
   addMessage('user', msg);
   history.push({ role: 'user', content: msg });
@@ -3794,11 +3931,15 @@ async function sendMsg() {
   typing.classList.add('show');
   scrollToBottom();
 
+  const controller = new AbortController();
+  activeController = controller;
+
   try {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history: history.slice(0, -1) })
+      body: JSON.stringify({ message: msg, history: history.slice(0, -1) }),
+      signal: controller.signal
     });
 
     const data = await res.json();
@@ -3829,7 +3970,7 @@ async function sendMsg() {
       wrap.appendChild(label);
       wrap.appendChild(bubble);
       messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info' });
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now() });
       history.push({ role: 'assistant', content: data.reply });
       scrollToBottom();
       return;
@@ -3851,7 +3992,7 @@ async function sendMsg() {
       wrap.appendChild(label);
       wrap.appendChild(bubble);
       messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info' });
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now() });
       history.push({ role: 'assistant', content: data.reply });
       scrollToBottom();
       return;
@@ -3891,11 +4032,44 @@ async function sendMsg() {
 
   } catch (err) {
     typing.classList.remove('show');
-    addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
+    if (userCancelled || err.name === 'AbortError') {
+      addMessage('agent', '⏹️ Rok diya. Kuch aur poochna hai?', '');
+    } else {
+      addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
+    }
   } finally {
     isLoading = false;
-    document.getElementById('sendBtn').disabled = false;
+    userCancelled = false;
+    activeController = null;
+    setSendBtnState(false);
     input.focus();
+  }
+}
+
+function setSendBtnState(loading) {
+  const btn = document.getElementById('sendBtn');
+  const sendIcon = document.getElementById('sendIcon');
+  const stopIcon = document.getElementById('stopIcon');
+  btn.disabled = false; // stays clickable in both states — click means Stop while loading
+  btn.classList.toggle('stopping', loading);
+  btn.title = loading ? 'Rokne ke liye tap karo' : 'Bhejo';
+  sendIcon.style.display = loading ? 'none' : 'block';
+  stopIcon.style.display = loading ? 'block' : 'none';
+}
+
+function handleSendBtnClick() {
+  vibrate(10);
+  if (isLoading) {
+    stopActiveRequest();
+  } else {
+    sendMsg();
+  }
+}
+
+function stopActiveRequest() {
+  if (activeController) {
+    userCancelled = true;
+    activeController.abort();
   }
 }
 
@@ -4136,6 +4310,156 @@ function renderSettingsList() {
   list.innerHTML = '';
   list.appendChild(inner);
 }
+
+// ══════════════════════════════════════════════════════════════════
+// HEX LOADER — reusable canvas hexagon+orbiting-packets animation.
+// Used in four places: the typing indicator (start/stop driven by
+// #typing-indicator.show), the header brand mark, the empty-state
+// emblem, and the login-gate emblem (the latter three run continuously
+// as the app's idle mark, replacing the old static star icon).
+// ══════════════════════════════════════════════════════════════════
+function createHexLoader(canvasId, opts = {}) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !canvas.getContext) return null;
+  const ctx = canvas.getContext('2d');
+
+  const cssSize = opts.size || 30;
+  const hexRadius = cssSize * (opts.hexRadiusRatio || 0.217);
+  const orbitRadius = cssSize * (opts.orbitRadiusRatio || 0.417);
+  const nodeCount = 3;
+  const speed = opts.speed || 1;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  canvas.width = cssSize * dpr;
+  canvas.height = cssSize * dpr;
+  ctx.scale(dpr, dpr);
+
+  const cx = cssSize / 2, cy = cssSize / 2;
+  const accent = '#ff9f36';
+  const accentDim = 'rgba(255,159,54,0.28)';
+  const accentRGB = '255,159,54';
+
+  function hexPoints(r, rotation = 0) {
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+      const a = rotation + (Math.PI / 3) * i - Math.PI / 2;
+      pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+    }
+    return pts;
+  }
+
+  function drawHex(r, rotation, strokeStyle, lineWidth, fillStyle) {
+    const pts = hexPoints(r, rotation);
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.closePath();
+    if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
+    if (strokeStyle) { ctx.strokeStyle = strokeStyle; ctx.lineWidth = lineWidth; ctx.stroke(); }
+  }
+
+  let rafId = null;
+  let running = false;
+  const startTime = { t: 0 };
+
+  function frame(now) {
+    if (!running) return;
+    if (!startTime.t) startTime.t = now;
+    const elapsed = ((now - startTime.t) / 1000) * speed;
+
+    ctx.clearRect(0, 0, cssSize, cssSize);
+
+    const slowRot = elapsed * 0.35;
+    drawHex(hexRadius, slowRot, accentDim, Math.max(1, cssSize * 0.037), null);
+
+    const breathe = 0.55 + 0.45 * Math.sin(elapsed * 2.4);
+    ctx.save();
+    ctx.shadowColor = accent;
+    ctx.shadowBlur = (6 + breathe * 6) * (cssSize / 30);
+    drawHex(hexRadius * 0.42, -slowRot * 1.3, null, 0, `rgba(${accentRGB},${0.35 + breathe * 0.35})`);
+    ctx.restore();
+
+    const cycleLen = 1.35;
+    for (let i = 0; i < nodeCount; i++) {
+      const angle = (Math.PI * 2 / nodeCount) * i - Math.PI / 2 + slowRot;
+      const phase = ((elapsed / cycleLen) + i / nodeCount) % 1;
+      const travel = phase * phase * (3 - 2 * phase);
+      const r = orbitRadius * (1 - travel * 0.82);
+      const px = cx + r * Math.cos(angle);
+      const py = cy + r * Math.sin(angle);
+      const alpha = phase < 0.85 ? 1 : (1 - phase) / 0.15;
+      const size = (cssSize / 30) * (1.6 - travel * 0.6);
+
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(size, 0.4), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${accentRGB},${Math.max(alpha, 0) * 0.9})`;
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 4 * (cssSize / 30);
+      ctx.fill();
+
+      const orbitX = cx + orbitRadius * Math.cos(angle);
+      const orbitY = cy + orbitRadius * Math.sin(angle);
+      ctx.beginPath();
+      ctx.moveTo(orbitX, orbitY);
+      ctx.lineTo(px, py);
+      ctx.strokeStyle = `rgba(${accentRGB},${Math.max(alpha, 0) * 0.18})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    startTime.t = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+  function stop() {
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    ctx.clearRect(0, 0, cssSize, cssSize);
+  }
+
+  return { start, stop };
+}
+
+// Typing indicator: start/stop driven by #typing-indicator.show.
+(function initThinkLoader() {
+  const loader = createHexLoader('think-canvas', { size: 30 });
+  if (!loader) return;
+
+  const indicator = document.getElementById('typing-indicator');
+  const observer = new MutationObserver(() => {
+    if (indicator.classList.contains('show')) loader.start(); else loader.stop();
+  });
+  observer.observe(indicator, { attributes: true, attributeFilter: ['class'] });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) loader.stop();
+    else if (indicator.classList.contains('show')) loader.start();
+  });
+
+  if (indicator.classList.contains('show')) loader.start();
+})();
+
+// Header brand mark + empty-state emblem + login-gate emblem: all three
+// run continuously (this IS the app's idle mark, not a loading state),
+// pausing only when the tab is backgrounded to save battery.
+(function initBrandLoaders() {
+  const loaders = [
+    createHexLoader('brand-canvas', { size: 20, speed: 0.85 }),
+    createHexLoader('emblem-canvas', { size: 56, speed: 0.85 }),
+    createHexLoader('login-emblem-canvas', { size: 30, speed: 0.85 }),
+  ].filter(Boolean);
+  if (!loaders.length) return;
+
+  loaders.forEach(l => l.start());
+  document.addEventListener('visibilitychange', () => {
+    loaders.forEach(l => document.hidden ? l.stop() : l.start());
+  });
+})();
 
 // ── RESTORE ON LOAD ──
 restoreChatOnLoad();
