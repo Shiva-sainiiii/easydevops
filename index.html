@@ -71,6 +71,30 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* ── AMOLED TRUE-BLACK THEME ──
+     Swaps the near-black surfaces for pure #000 (battery savings on OLED
+     screens) and flattens the ambient glow gradients, which look muddy
+     against pure black. Toggled via [data-theme="amoled"] on <html>,
+     driven by the Settings panel (see appSettings.amoled). */
+  html[data-theme="amoled"] {
+    --bg-0:      #000000;
+    --bg-1:      #000000;
+    --surface:   rgba(255,255,255,0.045);
+    --surface-2: rgba(255,255,255,0.08);
+    --border:    rgba(255,255,255,0.10);
+    --border-2:  rgba(255,255,255,0.18);
+  }
+  html[data-theme="amoled"] #ambient {
+    background:
+      radial-gradient(ellipse 600px 500px at 50% 18%, rgba(54,209,255,0.07), transparent 65%),
+      radial-gradient(ellipse 800px 600px at 50% 100%, rgba(20,60,70,0.22), transparent 60%),
+      #000000;
+  }
+  html[data-theme="amoled"] #dock,
+  html[data-theme="amoled"] header {
+    background: #000000;
+  }
+
   /* ── AMBIENT BACKGROUND ── */
   #ambient {
     position: fixed;
@@ -934,6 +958,19 @@
     margin-right: 6px;
     opacity: 0.6;
   }
+  .provider-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 100px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    font-size: 9.5px;
+    font-family: var(--font-sans);
+    color: var(--muted);
+    letter-spacing: 0.2px;
+  }
 
   .msg-bubble {
     max-width: 86vw;
@@ -1720,7 +1757,7 @@ let userCancelled = false;     // distinguishes a manual Stop from a network err
 // unavailable or the key is missing/corrupt.
 // ══════════════════════════════════════════════════════════════════
 const APP_SETTINGS_KEY = 'devops_agent_settings_v1';
-const DEFAULT_SETTINGS = { haptics: true, autoscroll: true, confirmClear: true };
+const DEFAULT_SETTINGS = { haptics: true, autoscroll: true, confirmClear: true, amoled: false };
 
 function loadAppSettings() {
   try {
@@ -1737,6 +1774,11 @@ function saveAppSettings() {
 }
 
 let appSettings = loadAppSettings();
+
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', appSettings.amoled ? 'amoled' : 'default');
+}
+applyTheme();
 
 // ══════════════════════════════════════════════════════════════════
 // AUTH — GitHub OAuth session check.
@@ -2377,7 +2419,7 @@ function renderActiveChatIntoView() {
   if (es) es.style.display = 'none';
 
   s.messages.forEach(entry => {
-    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null);
+    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null, entry.action || null);
     addMessageActions(wrap, bubble, entry.role, entry.content, entry.actionClass || '', () => resendMessage(entry.content));
     history.push({ role: entry.role === 'user' ? 'user' : 'assistant', content: entry.content });
   });
@@ -3221,7 +3263,7 @@ async function doUpload(file, repo, path) {
     typing.classList.remove('show');
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls);
+    addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
     typing.classList.remove('show');
@@ -3474,7 +3516,7 @@ async function doZipUpload(file, repo, dir) {
     typing.classList.remove('show');
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls);
+    addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
     typing.classList.remove('show');
@@ -3720,7 +3762,7 @@ function makeMsgLabel(role, timestamp = null) {
   return label;
 }
 
-function renderMessage(role, content, actionClass = '', timestamp = null) {
+function renderMessage(role, content, actionClass = '', timestamp = null, action = null) {
   const es = document.getElementById('empty-state');
   if (es) es.style.display = 'none';
 
@@ -3734,6 +3776,21 @@ function renderMessage(role, content, actionClass = '', timestamp = null) {
 
   const label = makeMsgLabel(role, ts);
 
+  // Provider badge (🐙 GitHub / ▲ Vercel / ◆ Netlify / ⬤ Render) appended
+  // to the label row when this reply came from a known provider action —
+  // lets the user recognize the source at a glance without reading the
+  // whole bubble. Only meaningful for agent messages; silently no-ops for
+  // user messages or unmapped actions (see providerBadgeFor above).
+  if (role === 'agent') {
+    const badgeText = providerBadgeFor(action);
+    if (badgeText) {
+      const badge = document.createElement('span');
+      badge.className = 'provider-badge';
+      badge.textContent = badgeText;
+      label.appendChild(badge);
+    }
+  }
+
   const bubble = document.createElement('div');
   bubble.className = `msg-bubble ${actionClass}`;
   bubble.innerHTML = role === 'user' ? escHtml(content) : renderMarkdown(content);
@@ -3744,9 +3801,9 @@ function renderMessage(role, content, actionClass = '', timestamp = null) {
   return { wrap, bubble };
 }
 
-function addMessage(role, content, actionClass = '', confirmData = null) {
+function addMessage(role, content, actionClass = '', confirmData = null, action = null) {
   const ts = Date.now();
-  const { wrap, bubble } = renderMessage(role, content, actionClass, ts);
+  const { wrap, bubble } = renderMessage(role, content, actionClass, ts, action);
 
   // Confirm-action buttons are intentionally NOT saved to localStorage —
   // see the note above SESSIONS_KEY. They only ever exist live.
@@ -3775,7 +3832,7 @@ function addMessage(role, content, actionClass = '', confirmData = null) {
     // Only persist messages that aren't a live confirm-prompt — the prompt
     // text itself ("Pakka delete karna hai?") is fine to keep, just not
     // the still-clickable buttons.
-    saveChatEntry({ role, content, actionClass, ts });
+    saveChatEntry({ role, content, actionClass, ts, action });
     addMessageActions(wrap, bubble, role, content, actionClass, () => resendMessage(content));
   }
 
@@ -3886,12 +3943,33 @@ async function runConfirmedAction(confirmData, yesBtn, noBtn) {
     typing.classList.remove('show');
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls);
+    addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
     typing.classList.remove('show');
     addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
   }
+}
+
+// ── PROVIDER BADGE ──
+// Maps an action string to a small "🐙 GitHub" / "▲ Vercel" style tag so
+// a result is recognizable at a glance without reading the whole bubble —
+// same icons already used elsewhere (user menu, Connected Apps rows).
+const PROVIDER_BADGES = {
+  create_repo: '🐙 GitHub', delete_repo: '🐙 GitHub',
+  create_file: '🐙 GitHub', update_file: '🐙 GitHub', delete_file: '🐙 GitHub',
+  list_repos: '🐙 GitHub', list_files: '🐙 GitHub', read_file: '🐙 GitHub', repo_info: '🐙 GitHub',
+  vercel_list: '▲ Vercel', vercel_import: '▲ Vercel', vercel_deploy: '▲ Vercel',
+  vercel_deploy_pending: '▲ Vercel', vercel_delete_project: '▲ Vercel',
+  vercel_env: '▲ Vercel', vercel_env_set: '▲ Vercel',
+  netlify_list: '◆ Netlify', netlify_site_info: '◆ Netlify', netlify_delete_site: '◆ Netlify',
+  netlify_env: '◆ Netlify', netlify_env_set: '◆ Netlify',
+  render_list: '⬤ Render', render_delete_service: '⬤ Render',
+  render_env: '⬤ Render', render_env_update: '⬤ Render', render_deploy: '⬤ Render',
+};
+
+function providerBadgeFor(action) {
+  return PROVIDER_BADGES[action] || null;
 }
 
 function actionColorFor(action) {
@@ -3994,13 +4072,17 @@ async function sendMsg() {
       const label = document.createElement('div');
       label.className = 'msg-label';
       label.textContent = 'Agent';
+      const badge = document.createElement('span');
+      badge.className = 'provider-badge';
+      badge.textContent = '🐙 GitHub';
+      label.appendChild(badge);
       const bubble = document.createElement('div');
       bubble.className = 'msg-bubble info';
       bubble.appendChild(buildFileListBubble(data.repo, data.items));
       wrap.appendChild(label);
       wrap.appendChild(bubble);
       messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now() });
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: 'list_files' });
       history.push({ role: 'assistant', content: data.reply });
       scrollToBottom();
       return;
@@ -4016,13 +4098,17 @@ async function sendMsg() {
       const label = document.createElement('div');
       label.className = 'msg-label';
       label.textContent = 'Agent';
+      const badge = document.createElement('span');
+      badge.className = 'provider-badge';
+      badge.textContent = '🐙 GitHub';
+      label.appendChild(badge);
       const bubble = document.createElement('div');
       bubble.className = 'msg-bubble info';
       bubble.appendChild(buildReadFileBubble(data.repo, data.path, data.reply));
       wrap.appendChild(label);
       wrap.appendChild(bubble);
       messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now() });
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: 'read_file' });
       history.push({ role: 'assistant', content: data.reply });
       scrollToBottom();
       return;
@@ -4057,7 +4143,7 @@ async function sendMsg() {
     }
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls);
+    addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
 
   } catch (err) {
@@ -4260,18 +4346,28 @@ function renderAppsList() {
       badge.textContent = '✓';
       badge.disabled = true;
       row.appendChild(badge);
-    } else if (app.connected) {
-      const btn = document.createElement('button');
-      btn.className = 'app-action-btn disconnect';
-      btn.textContent = 'Disconnect';
-      btn.onclick = app.onDisconnect;
-      row.appendChild(btn);
     } else {
-      const btn = document.createElement('button');
-      btn.className = 'app-action-btn';
-      btn.textContent = 'Connect';
-      btn.onclick = app.onConnect;
-      row.appendChild(btn);
+      // Toggle ON → opens the connect modal (same flow as before — still
+      // requires pasting/validating a real token server-side, the toggle
+      // is just a friendlier affordance than a text button).
+      // Toggle OFF while connected → routes through the existing confirm
+      // dialog (confirmDisconnectVercel/Netlify/Render), which still asks
+      // "are you sure?" before actually clearing anything. If the user
+      // cancels there, the toggle snaps back to ON to reflect that nothing
+      // changed.
+      const toggle = document.createElement('div');
+      toggle.className = 'toggle-switch' + (app.connected ? ' on' : '');
+      toggle.innerHTML = '<div class="knob"></div>';
+      toggle.onclick = () => {
+        vibrate(8);
+        if (app.connected) {
+          toggle.classList.remove('on'); // optimistic; confirm flow re-adds it back if cancelled
+          app.onDisconnect();
+        } else {
+          app.onConnect();
+        }
+      };
+      row.appendChild(toggle);
     }
 
     list.appendChild(row);
@@ -4283,6 +4379,7 @@ const SETTINGS_LIST = [
   { key: 'haptics', name: 'Haptics', sub: 'Vibration on taps and actions' },
   { key: 'autoscroll', name: 'Auto-scroll', sub: 'Jump to latest message automatically' },
   { key: 'confirmClear', name: 'Confirm before clearing', sub: 'Ask before clearing a chat\'s history' },
+  { key: 'amoled', name: 'True black (AMOLED)', sub: 'Pitch-black theme — saves battery on OLED screens' },
 ];
 
 function toggleSettingsPanel() {
@@ -4322,14 +4419,18 @@ function renderSettingsList() {
     info.appendChild(sub);
 
     const toggle = document.createElement('div');
-    const isOn = appSettings[s.key] !== false;
+    // Most settings here default to true (so "not explicitly false" reads
+    // as on). amoled defaults to false, so it needs the opposite check —
+    // otherwise a fresh/never-set value would incorrectly render as "on".
+    const isOn = DEFAULT_SETTINGS[s.key] === false ? appSettings[s.key] === true : appSettings[s.key] !== false;
     toggle.className = 'toggle-switch' + (isOn ? ' on' : '');
     toggle.innerHTML = '<div class="knob"></div>';
     toggle.onclick = () => {
-      appSettings[s.key] = !(appSettings[s.key] !== false);
+      appSettings[s.key] = !toggle.classList.contains('on');
       saveAppSettings();
       vibrate(8);
       toggle.classList.toggle('on');
+      if (s.key === 'amoled') applyTheme();
     };
 
     row.appendChild(info);
