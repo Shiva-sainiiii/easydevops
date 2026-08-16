@@ -1403,6 +1403,102 @@
   .repo-zip-btn:active { background: rgba(61,220,151,0.2); transform: scale(.96); }
   .repo-zip-btn svg { width: 12px; height: 12px; }
 
+  /* ── COMPACT ACTIVITY CARDS (list_repos / vercel_list / netlify_list /
+     render_list replies) ── Replaces long text blocks with a scannable
+     grid of small cards, each with a status badge, so results are
+     legible at a glance on a phone screen instead of scrolling through
+     paragraphs. Mirrors the .file-list row pattern already used for
+     buildFileListBubble, but denser (two-line cards, not full rows). */
+  .activity-list-hdr {
+    font-size: 13px; color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .activity-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .activity-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 11px;
+    background: rgba(255,255,255,0.035);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-decoration: none;
+    color: inherit;
+    transition: background .15s, border-color .15s, transform .1s;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .activity-card:active { background: rgba(255,255,255,0.06); border-color: var(--border-2); transform: scale(.985); }
+  .activity-card-icon {
+    width: 32px; height: 32px;
+    flex-shrink: 0;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-2);
+    font-size: 15px;
+  }
+  .activity-card-main {
+    flex: 1;
+    min-width: 0;
+  }
+  .activity-card-title {
+    font-size: 13.5px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .activity-card-sub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .activity-card-sub .dot-sep { opacity: 0.5; }
+  .activity-status {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    white-space: nowrap;
+  }
+  .activity-status .status-dot-sm {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .activity-status.live {
+    background: rgba(61,220,151,0.12); color: var(--green);
+  }
+  .activity-status.live .status-dot-sm { background: var(--green); box-shadow: 0 0 5px rgba(61,220,151,0.7); }
+  .activity-status.building {
+    background: rgba(255,200,87,0.12); color: var(--yellow);
+  }
+  .activity-status.building .status-dot-sm { background: var(--yellow); box-shadow: 0 0 5px rgba(255,200,87,0.7); animation: pulse 1.4s infinite; }
+  .activity-status.error {
+    background: rgba(255,107,107,0.12); color: var(--red);
+  }
+  .activity-status.error .status-dot-sm { background: var(--red); box-shadow: 0 0 5px rgba(255,107,107,0.7); }
+  .activity-status.neutral {
+    background: rgba(255,255,255,0.05); color: var(--muted-2);
+  }
+  .activity-status.neutral .status-dot-sm { background: var(--muted-2); }
+  .activity-card-chevron {
+    flex-shrink: 0;
+    color: var(--muted-2);
+    width: 15px; height: 15px;
+  }
+
   /* ── INLINE DOWNLOAD BUTTON (read_file reply) ── */
   .read-dl-btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -3675,6 +3771,201 @@ async function requestFileRowDelete(repo, path, btnEl) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// COMPACT ACTIVITY CARDS — list_repos / vercel_list / netlify_list /
+// render_list. Replaces the old big text-block reply with a scannable
+// grid of small tappable cards (icon, name, one-line meta, status
+// badge). Each provider has slightly different fields, so a small
+// per-kind adapter below normalizes them into one shape:
+//   { icon, title, meta: [strings], status: 'live'|'building'|'error'|'neutral', statusLabel, url }
+// before handing off to the shared card-grid renderer.
+// ══════════════════════════════════════════════════════════════════
+
+function timeAgoShort(iso) {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const diff = Math.max(0, Date.now() - then);
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'abhi';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d`;
+  const months = Math.floor(days / 30);
+  return `${months}mo`;
+}
+
+// Maps each provider's raw status vocabulary to one of the four badge
+// states the CSS knows about. Unrecognized/missing values fall back to
+// 'neutral' rather than guessing "live" — an unknown status is not the
+// same claim as a confirmed-healthy one.
+function normalizeActivityStatus(kind, raw) {
+  const s = (raw || '').toString().toLowerCase();
+  if (kind === 'repo') {
+    return { state: 'neutral', label: null }; // repos don't have a live/build state
+  }
+  if (kind === 'vercel') {
+    if (s === 'ready') return { state: 'live', label: 'Live' };
+    if (s === 'building' || s === 'initializing' || s === 'queued') return { state: 'building', label: 'Building' };
+    if (s === 'error') return { state: 'error', label: 'Error' };
+    if (s === 'canceled') return { state: 'neutral', label: 'Canceled' };
+    return { state: 'neutral', label: 'Unknown' };
+  }
+  if (kind === 'netlify') {
+    if (s === 'ready' || s === 'current') return { state: 'live', label: 'Live' };
+    if (s === 'building' || s === 'enqueued' || s === 'processing') return { state: 'building', label: 'Building' };
+    if (s === 'error') return { state: 'error', label: 'Error' };
+    return { state: 'neutral', label: 'Unknown' };
+  }
+  if (kind === 'render') {
+    if (s === 'suspended') return { state: 'error', label: 'Suspended' };
+    if (s === 'active') return { state: 'live', label: 'Active' };
+    return { state: 'neutral', label: 'Unknown' };
+  }
+  return { state: 'neutral', label: null };
+}
+
+function activityIconFor(kind, item) {
+  if (kind === 'repo') return item.fork ? '🍴' : '📁';
+  if (kind === 'vercel') return '▲';
+  if (kind === 'netlify') return '🌐';
+  if (kind === 'render') {
+    const typeIcons = { web_service: '🌐', static_site: '📦', private_service: '🔒',
+                         background_worker: '⚙️', cron_job: '⏰', postgres: '🐘', redis: '🟥' };
+    return typeIcons[item.type] || '🧩';
+  }
+  return '•';
+}
+
+function activityMetaFor(kind, item) {
+  const meta = [];
+  if (kind === 'repo') {
+    meta.push(item.visibility || 'public');
+    if (item.language) meta.push(item.language);
+    const ago = timeAgoShort(item.updated_at);
+    if (ago) meta.push(`updated ${ago}`);
+  } else if (kind === 'vercel') {
+    meta.push(item.framework || 'static');
+  } else if (kind === 'netlify') {
+    if (item.url) meta.push(item.url.replace(/^https?:\/\//, ''));
+  } else if (kind === 'render') {
+    meta.push(item.type || 'service');
+  }
+  return meta;
+}
+
+function activityUrlFor(kind, item, owner) {
+  if (kind === 'repo') return item.url;
+  if (kind === 'vercel') return item.url;
+  if (kind === 'netlify') return item.url;
+  if (kind === 'render') return item.url || null;
+  return null;
+}
+
+// Builds the full bubble: header line ("Tere N repos:") + card grid.
+// `kind` is one of 'repo' | 'vercel' | 'netlify' | 'render'.
+// `onCardTap(item)` fires when a card without a direct URL is tapped
+// (e.g. Render services, which need an env/deploy command rather than
+// a link) — repo/Vercel/Netlify cards with a URL just open it directly.
+function buildActivityListBubble(kind, items, headerText, onCardTap) {
+  const wrap = document.createElement('div');
+
+  const hdr = document.createElement('div');
+  hdr.className = 'activity-list-hdr';
+  hdr.textContent = headerText;
+  wrap.appendChild(hdr);
+
+  const grid = document.createElement('div');
+  grid.className = 'activity-grid';
+
+  items.forEach(item => {
+    const status = normalizeActivityStatus(kind, item.status);
+    const url = activityUrlFor(kind, item);
+    const useLink = !!url;
+
+    const card = document.createElement(useLink ? 'a' : 'div');
+    card.className = 'activity-card';
+    if (useLink) {
+      card.href = url;
+      card.target = '_blank';
+      card.rel = 'noopener';
+    } else if (onCardTap) {
+      card.onclick = () => onCardTap(item);
+    }
+
+    const icon = document.createElement('div');
+    icon.className = 'activity-card-icon';
+    icon.textContent = activityIconFor(kind, item);
+    card.appendChild(icon);
+
+    const main = document.createElement('div');
+    main.className = 'activity-card-main';
+
+    const title = document.createElement('div');
+    title.className = 'activity-card-title';
+    title.textContent = item.name || 'unnamed';
+    main.appendChild(title);
+
+    const meta = activityMetaFor(kind, item);
+    if (meta.length) {
+      const subEl = document.createElement('div');
+      subEl.className = 'activity-card-sub';
+      meta.forEach((m, i) => {
+        if (i > 0) {
+          const sep = document.createElement('span');
+          sep.className = 'dot-sep';
+          sep.textContent = '·';
+          subEl.appendChild(sep);
+        }
+        const span = document.createElement('span');
+        span.textContent = m;
+        subEl.appendChild(span);
+      });
+      main.appendChild(subEl);
+    }
+    card.appendChild(main);
+
+    if (status.label) {
+      const statusEl = document.createElement('div');
+      statusEl.className = `activity-status ${status.state}`;
+      const dot = document.createElement('span');
+      dot.className = 'status-dot-sm';
+      statusEl.appendChild(dot);
+      const label = document.createElement('span');
+      label.textContent = status.label;
+      statusEl.appendChild(label);
+      card.appendChild(statusEl);
+    } else if (kind === 'repo' && typeof item.stars === 'number') {
+      // Repos don't have a live/build state, so show stars instead —
+      // still gives a useful at-a-glance signal in the same badge slot.
+      const starsEl = document.createElement('div');
+      starsEl.className = 'activity-status neutral';
+      starsEl.textContent = `⭐ ${item.stars}`;
+      card.appendChild(starsEl);
+    }
+
+    if (useLink) {
+      const chevron = document.createElement('svg');
+      chevron.className = 'activity-card-chevron';
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('fill', 'none');
+      chevron.setAttribute('stroke', 'currentColor');
+      chevron.setAttribute('stroke-width', '2');
+      chevron.setAttribute('stroke-linecap', 'round');
+      chevron.setAttribute('stroke-linejoin', 'round');
+      chevron.innerHTML = '<path d="M9 18l6-6-6-6"/>';
+      card.appendChild(chevron);
+    }
+
+    grid.appendChild(card);
+  });
+
+  wrap.appendChild(grid);
+  return wrap;
+}
+
 // ── BUILD READ-FILE BUBBLE with download button ──
 function buildReadFileBubble(repo, filePath, content) {
   const wrap = document.createElement('div');
@@ -4109,6 +4400,48 @@ async function sendMsg() {
       wrap.appendChild(bubble);
       messages.appendChild(wrap);
       saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: 'read_file' });
+      history.push({ role: 'assistant', content: data.reply });
+      scrollToBottom();
+      return;
+    }
+
+    // ── FEATURE 3: list_repos / vercel_list / netlify_list / render_list
+    // → compact activity cards instead of a long text block. Falls through
+    // to the normal text bubble below if the array is missing/empty (server
+    // already sends a friendly "koi X nahi mila" reply for the empty case,
+    // so there's nothing useful for a card grid to add there).
+    const ACTIVITY_LIST_CONFIG = {
+      list_repos:     { kind: 'repo',    itemsKey: 'repos',    badge: '🐙 GitHub' },
+      vercel_list:    { kind: 'vercel',  itemsKey: 'projects', badge: '▲ Vercel' },
+      netlify_list:   { kind: 'netlify', itemsKey: 'sites',    badge: '◆ Netlify' },
+      render_list:    { kind: 'render',  itemsKey: 'services', badge: '⬤ Render' },
+    };
+    const activityCfg = ACTIVITY_LIST_CONFIG[data.action];
+    if (activityCfg && Array.isArray(data[activityCfg.itemsKey]) && data[activityCfg.itemsKey].length) {
+      const es = document.getElementById('empty-state');
+      if (es) es.style.display = 'none';
+      const messages = document.getElementById('messages');
+      const wrap = document.createElement('div');
+      wrap.className = 'msg-wrap agent';
+      const label = document.createElement('div');
+      label.className = 'msg-label';
+      label.textContent = 'Agent';
+      const badge = document.createElement('span');
+      badge.className = 'provider-badge';
+      badge.textContent = activityCfg.badge;
+      label.appendChild(badge);
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble info';
+      const items = data[activityCfg.itemsKey];
+      const headerText = data.reply.split('\n')[0]; // first line = "Tere N repos:" style summary
+      const onCardTap = activityCfg.kind === 'render'
+        ? (item) => resendMessage(`get env for ${item.id} render`)
+        : null;
+      bubble.appendChild(buildActivityListBubble(activityCfg.kind, items, headerText, onCardTap));
+      wrap.appendChild(label);
+      wrap.appendChild(bubble);
+      messages.appendChild(wrap);
+      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: data.action });
       history.push({ role: 'assistant', content: data.reply });
       scrollToBottom();
       return;
