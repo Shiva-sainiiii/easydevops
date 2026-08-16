@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /chat
+Disallow: /auth/
+Disallow: /api/
+Disallow: /download
+Disallow: /download-repo-zip
+Disallow: /upload
+Disallow: /upload-zip
+
+Sitemap: https://multitenant-agent.vercel.app/sitemap.xml

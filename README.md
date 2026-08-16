@@ -164,3 +164,26 @@ Frontend   →  Vanilla HTML/CSS/JS (same UI as other versions)
 Hosting    →  Vercel (Python serverless functions)
 AI Layer   →  OpenRouter (shared infra, app-level key)
 ```
+
+## 🔍 SEO / Google Search Console Setup
+
+Favicon, meta tags, `robots.txt`, aur `sitemap.xml` sab already project me hain aur
+deploy hote hi live ho jayenge — koi extra config nahi chahiye. Google me listed
+hone ke liye ye steps manually karne honge (ye code se nahi hota):
+
+1. [Google Search Console](https://search.google.com/search-console) pe jao,
+   apna production URL (`https://multitenant-agent.vercel.app`) as property add karo
+2. Ownership verify karo — **HTML tag method** sabse aasan hai: Search Console
+   jo `<meta name="google-site-verification" content="...">` tag dega, use
+   `index.html` ke `<head>` me (upar wale meta tags ke saath) paste kar do,
+   phir "Verify" dabao
+3. Verify hone ke baad, Search Console me **Sitemaps** section me jaake
+   `sitemap.xml` submit karo (URL: `https://multitenant-agent.vercel.app/sitemap.xml`)
+4. **URL Inspection** tool se apna homepage URL check karo aur "Request Indexing"
+   dabao — isse Google turant crawl karne ki koshish karega (varna khud discover
+   karne me kuch din/hafte lag sakte hain)
+
+Agar production domain badle (custom domain add karo ya Vercel URL change ho),
+to `index.html` ke `<head>` me `canonical`/`og:url`/`og:image` URLs, aur
+`robots.txt` + `sitemap.xml` dono me domain update karna mat bhoolna.
+
