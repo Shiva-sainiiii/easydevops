@@ -1099,11 +1099,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             result = vercel_poll_deployment(dep_id, vc_token)
             if result["ok"]:
                 return {"reply": f"✅ Deployment complete!\n**{project_name}**\n🔗 {result['live_url']}\n\nID: `{dep_id}`",
-                        "action": "vercel_deploy", "deployment_id": dep_id, "url": result["live_url"]}
+                        "action": "vercel_deploy", "deployment_id": dep_id, "url": result["live_url"], "project_name": project_name}
             elif result["timed_out"]:
                 return {"reply": (f"⏳ Deploy trigger ho gaya hai (ID: `{dep_id}`), lekin build abhi bhi chal raha hai.\n\n"
                                    f"Status check karne ke liye thodi der baad bol: 'check deployment status {dep_id}'."),
-                        "action": "vercel_deploy_pending", "deployment_id": dep_id}
+                        "action": "vercel_deploy_pending", "deployment_id": dep_id, "project_name": project_name}
             else:
                 error_detail = result["deployment"].get("errorMessage", "") or result["state"]
                 return {"reply": f"❌ Deployment fail ho gaya.\nStatus: **{result['state']}**\n{error_detail}\nID: `{dep_id}`",
@@ -1906,6 +1906,74 @@ def api_repo_files():
     tree = tree_r.json().get("tree", [])
     files = sorted({item["path"] for item in tree if item.get("type") == "blob"})[:500]
     return safe_jsonify({"files": files})
+
+
+@app.route("/api/vercel/deploy-events", methods=["GET"])
+def api_vercel_deploy_events():
+    # Powers the slide-up live-terminal drawer in the chat UI. Polled by the
+    # frontend every ~2.5s while a deployment is in progress, instead of the
+    # old behaviour of just showing "Sochte hue..." until the single /chat
+    # response (which already blocks server-side for up to 25s) comes back.
+    # `since` lets the frontend ask for only new lines on each poll instead
+    # of re-fetching + re-rendering the whole log every time.
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "Session expired.", "action": "auth_required"}), 401
+
+    vc_token = get_user_vercel_token(user)
+    if not vc_token:
+        return safe_jsonify({"reply": "Vercel connect nahi hai.", "action": "vercel_auth_required"}), 401
+
+    deployment_id = (request.args.get("deployment_id") or "").strip()
+    if not deployment_id:
+        return safe_jsonify({"lines": [], "state": "UNKNOWN", "done": True, "error": "deployment_id required"}), 400
+
+    since = request.args.get("since")
+    events_endpoint = f"/v3/deployments/{deployment_id}/events?direction=forward&limit=300"
+    if since:
+        events_endpoint += f"&since={since}"
+
+    ev_r = vc_api("GET", events_endpoint, vc_token)
+    lines = []
+    last_ts = int(since) if since and since.isdigit() else 0
+    if ev_r.status_code == 200:
+        for event in ev_r.json():
+            text = (event.get("payload") or {}).get("text")
+            created = event.get("created") or 0
+            if text is None:
+                continue
+            for row in text.split("\n"):
+                if row.strip():
+                    lines.append(row)
+            if created > last_ts:
+                last_ts = created
+
+    # Also fetch current readyState so the frontend knows when to stop
+    # polling and whether to show the success/error terminal state.
+    dep_r = vc_api("GET", f"/v13/deployments/{deployment_id}", vc_token)
+    state = "UNKNOWN"
+    live_url = None
+    error_message = None
+    if dep_r.status_code == 200:
+        dep = dep_r.json()
+        state = dep.get("readyState", "UNKNOWN")
+        if state == "READY":
+            raw_url = dep.get("url")
+            if dep.get("aliasAssigned") and dep.get("alias"):
+                live_url = f"https://{dep['alias'][0]}"
+            elif raw_url:
+                live_url = f"https://{raw_url}"
+        if state == "ERROR":
+            error_message = dep.get("errorMessage") or "Build failed."
+
+    return safe_jsonify({
+        "lines": lines,
+        "since": last_ts,
+        "state": state,
+        "done": state in VERCEL_TERMINAL_STATES,
+        "live_url": live_url,
+        "error_message": error_message,
+    })
 
 
 @app.route("/chat", methods=["POST"])
