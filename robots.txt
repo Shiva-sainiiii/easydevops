@@ -8,4 +8,4 @@ Disallow: /download-repo-zip
 Disallow: /upload
 Disallow: /upload-zip
 
-Sitemap: https://multitenant-agent.vercel.app/sitemap.xml
+Sitemap: https://easydevops.vercel.app/sitemap.xml
