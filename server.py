@@ -895,8 +895,19 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 if not repos:
                     return {"reply": "Koi repo nahi hai abhi.", "action": "list_repos", "repos": []}
                 lines = [f"📁 **{rp['name']}** — ⭐{rp['stargazers_count']} — `{rp['visibility']}`\n🔗 {rp['html_url']}" for rp in repos]
+                # Extra fields below (stars/visibility/language/fork/updated_at)
+                # are only used by the frontend's compact activity-card
+                # renderer — the markdown `reply` above stays the fallback
+                # for older clients / the AI-narration path.
                 return {"reply": f"Tere {len(repos)} repos:\n\n" + "\n\n".join(lines), "action": "list_repos",
-                        "repos": [{"name": rp["name"], "url": rp["html_url"]} for rp in repos]}
+                        "repos": [{
+                            "name": rp["name"], "url": rp["html_url"],
+                            "stars": rp.get("stargazers_count", 0),
+                            "visibility": rp.get("visibility", "public"),
+                            "language": rp.get("language"),
+                            "fork": rp.get("fork", False),
+                            "updated_at": rp.get("updated_at"),
+                        } for rp in repos]}
             else:
                 return {"reply": "❌ Repos fetch nahi hue.", "action": "error"}
 
@@ -1006,8 +1017,20 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 for p in projects:
                     live = f"https://{p['name']}.vercel.app"
                     lines.append(f"▲ **{p['name']}** — `{p.get('framework') or 'static'}`\n🔗 {live}")
+                # readyState of the most recent deployment maps to the
+                # frontend's status badge (Live/Building/Error/etc.) — same
+                # VERCEL_TERMINAL_STATES vocabulary used by
+                # vercel_poll_deployment, plus the in-progress states.
+                def _vercel_status(p):
+                    latest = p.get("latestDeployments") or []
+                    return (latest[0].get("readyState") if latest else None) or "UNKNOWN"
                 return {"reply": f"Tere {len(projects)} Vercel projects:\n\n" + "\n\n".join(lines),
-                        "action": "vercel_list", "projects": [{"name": p["name"], "id": p["id"]} for p in projects]}
+                        "action": "vercel_list", "projects": [{
+                            "name": p["name"], "id": p["id"],
+                            "framework": p.get("framework"),
+                            "url": f"https://{p['name']}.vercel.app",
+                            "status": _vercel_status(p),
+                        } for p in projects]}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
             else:
@@ -1155,7 +1178,10 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                     return {"reply": "Koi Netlify site nahi mili.", "action": "netlify_list", "sites": []}
                 lines = [f"🌐 **{s['name']}**\n🔗 {s.get('url', '')}" for s in sites]
                 return {"reply": f"Teri {len(sites)} Netlify sites:\n\n" + "\n\n".join(lines),
-                        "action": "netlify_list", "sites": [{"name": s["name"], "id": s["id"]} for s in sites]}
+                        "action": "netlify_list", "sites": [{
+                            "name": s["name"], "id": s["id"], "url": s.get("url", ""),
+                            "status": s.get("state", "unknown"),
+                        } for s in sites]}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
             else:
@@ -1257,13 +1283,23 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                     stype = svc.get("type", "service")
                     sid = svc.get("id", "")
                     url = svc.get("serviceDetails", {}).get("url", "")
+                    # Render's REST API doesn't return a simple ready/building
+                    # enum on the service object itself (that lives on
+                    # individual deploys) — "suspended" is the one reliable
+                    # top-level signal available here without an extra call
+                    # per service. The frontend treats missing/unknown status
+                    # as neutral rather than assuming healthy.
+                    suspended = svc.get("suspended") == "suspended"
                     icon = {"web_service": "🌐", "static_site": "📦", "private_service": "🔒",
                             "background_worker": "⚙️", "cron_job": "⏰", "postgres": "🐘", "redis": "🟥"}.get(stype, "🧩")
                     line = f"{icon} **{name}** — `{stype}`\nID: `{sid}`"
                     if url:
                         line += f"\n🔗 {url}"
                     lines.append(line)
-                    services.append({"name": name, "id": sid, "type": stype})
+                    services.append({
+                        "name": name, "id": sid, "type": stype, "url": url,
+                        "status": "suspended" if suspended else "active",
+                    })
                 return {"reply": f"Tere {len(items)} Render services:\n\n" + "\n\n".join(lines),
                         "action": "render_list", "services": services}
             elif r.status_code in (401, 403):
