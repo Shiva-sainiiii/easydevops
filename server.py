@@ -812,7 +812,7 @@ def get_file_sha(repo, path, owner, gh_token):
 #  be replayed to execute a destructive action as a different user
 #  even if somehow leaked (e.g. logged, shared in a bug report).
 # ════════════════════════════════════════════════════════════════
-DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE"}
+DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK"}
 
 
 def confirm_token(cmd, value, user_id):
@@ -839,6 +839,11 @@ def build_confirmation(cmd, params, user_id):
     elif cmd == "RENDER_DELETE_SERVICE":
         target_desc = f"Render service `{params.get('service_id')}`"
         warn_text = "Service permanently delete ho jayegi — logs, deploy history, sab kuch. Wapas nahi aayega."
+    elif cmd == "VERCEL_ROLLBACK":
+        dep_desc = f" deployment `{params.get('deployment_id')}`" if params.get("deployment_id") else " pichli production deployment"
+        target_desc = f"Vercel project `{params.get('project_name')}`"
+        warn_text = (f"Live traffic{dep_desc} pe switch ho jayega — abhi ki production deployment se hat jayega. "
+                     f"Naye pushes bhi tab tak auto-deploy nahi honge jab tak wapas promote na karo.")
     else:
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."
@@ -1125,6 +1130,87 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             else:
                 err = r.json().get("error", {}).get("message", r.text[:200]) if r.text else r.text[:200]
                 return {"reply": f"❌ Vercel project delete Error: {err}", "action": "error"}
+
+        elif cmd == "VERCEL_ROLLBACK":
+            # Instant Rollback: repoints production traffic to a previous
+            # READY deployment without a rebuild. `deployment_id` is
+            # optional — when the caller doesn't name one, we resolve to
+            # the most recent READY production deployment BEFORE the
+            # current one, matching "rollback to previous version" intent.
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            project_name = params["project_name"]
+            proj = vercel_find_project(project_name, vc_token)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila.", "action": "error"}
+            project_id = proj.get("id")
+
+            target_id = params.get("deployment_id")
+            target_dep = None
+            if not target_id:
+                r = vc_api("GET", f"/v6/deployments?projectId={project_id}&target=production&limit=10", vc_token)
+                if r.status_code not in (200,):
+                    if r.status_code in (401, 403):
+                        return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+                    return {"reply": f"❌ Deployments list nahi mili: {r.text[:200]}", "action": "error"}
+                deployments = r.json().get("deployments", [])
+                ready = [d for d in deployments if d.get("state") == "READY"]
+                if len(ready) < 2:
+                    return {"reply": f"❌ `{project_name}` ke paas rollback ke liye purani READY deployment nahi hai.", "action": "error"}
+                # index 0 = current live, index 1 = previous production deploy
+                target_dep = ready[1]
+                target_id = target_dep.get("uid") or target_dep.get("id")
+
+            r = vc_api("POST", f"/v1/projects/{project_id}/rollback/{target_id}", vc_token, json={})
+            if r.status_code not in (200, 201, 204):
+                if r.status_code in (401, 403):
+                    return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+                err = r.json().get("error", {}).get("message", r.text[:200]) if r.text else "Rollback fail ho gaya"
+                return {"reply": f"❌ Rollback Error: {err}", "action": "error"}
+
+            created = target_dep.get("created") if target_dep else None
+            when_desc = ""
+            if created:
+                age_min = int((time.time() * 1000 - created) / 60000)
+                when_desc = f" (~{age_min} min pehle ki deployment)" if age_min < 120 else ""
+            return {
+                "reply": f"⏪ `{project_name}` rollback ho gaya{when_desc}!\nDeployment `{target_id}` ab live traffic serve kar rahi hai.\n\n"
+                         f"Naye pushes production pe apne aap deploy nahi honge jab tak 'undo rollback' na karo (promote a new deployment).",
+                "action": "vercel_rollback", "project_name": project_name, "deployment_id": target_id,
+            }
+
+        elif cmd == "VERCEL_LIST_DEPLOYMENTS":
+            # Supports "which deployment to rollback to" — lists recent
+            # production deployments with state + relative age so the user
+            # can pick one, then say "rollback <project> to <id>".
+            if not vc_token:
+                return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
+            project_name = params["project_name"]
+            proj = vercel_find_project(project_name, vc_token)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila.", "action": "error"}
+            r = vc_api("GET", f"/v6/deployments?projectId={proj.get('id')}&target=production&limit=10", vc_token)
+            if r.status_code != 200:
+                if r.status_code in (401, 403):
+                    return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
+                return {"reply": f"❌ Deployments list nahi mili: {r.text[:200]}", "action": "error"}
+            deployments = r.json().get("deployments", [])
+            if not deployments:
+                return {"reply": f"`{project_name}` ki koi production deployment nahi mili.", "action": "vercel_deployments", "deployments": []}
+            lines = []
+            dep_list = []
+            for d in deployments[:10]:
+                dep_id = d.get("uid") or d.get("id")
+                state = d.get("state", "UNKNOWN")
+                created = d.get("created")
+                age_min = int((time.time() * 1000 - created) / 60000) if created else None
+                age_desc = f"{age_min}m pehle" if age_min is not None and age_min < 120 else (f"{age_min//60}h pehle" if age_min else "")
+                icon = "🟢" if state == "READY" else ("🔴" if state == "ERROR" else "⚪")
+                lines.append(f"{icon} `{dep_id}` — {state} — {age_desc}")
+                dep_list.append({"id": dep_id, "state": state, "age_min": age_min})
+            return {"reply": f"`{project_name}` ki recent deployments:\n\n" + "\n".join(lines) +
+                             "\n\nRollback karne ke liye bol: 'rollback " + project_name + " to <id>'",
+                    "action": "vercel_deployments", "project_name": project_name, "deployments": dep_list}
 
         elif cmd == "VERCEL_GET_ENV":
             if not vc_token:
@@ -1471,6 +1557,27 @@ INTENT_RULES = [
         rf"(?:delete|uda|hata)\s+vercel\s+project\s+({SLUG})",
     ], lambda m: {"project_name": _g(m, 1)}),
 
+    ("VERCEL_ROLLBACK", [
+        # Ordered deliberately: verb-final Hinglish forms ("X ko rollback
+        # karo [to Y]") must be tried before verb-first forms ("rollback
+        # X [to Y]") and everything is start-anchored — SLUG is greedy
+        # enough to otherwise swallow a trailing verb like "karo" as if it
+        # were part of the project name when only searched, not anchored.
+        rf"^({SLUG})\s+ko\s+rollback\s+(?:karo|kar\s*do)\s+to\s+([a-zA-Z0-9_-]+)$",
+        rf"^({SLUG})\s+(?:ko\s+)?(?:pichli\s+version\s+pe\s+|previous\s+version\s+pe\s+)rollback\s*(?:karo|kar\s*do)?$",
+        rf"^({SLUG})\s+ko\s+rollback\s+(?:karo|kar\s*do)$",
+        rf"^({SLUG})\s+rollback\s+kar\s*do$",
+        rf"^rollback\s+({SLUG})\s+to\s+(?:previous|last|pichli)\s+(?:version|deployment)$",
+        rf"^rollback\s+({SLUG})\s+to\s+([a-zA-Z0-9_-]+)$",
+        rf"^rollback\s+({SLUG})$",
+        rf"^(?:revert|undo)\s+({SLUG})\s+(?:deploy|deployment)$",
+    ], lambda m: {"project_name": _g(m, 1), "deployment_id": _g(m, 2)} if len(m.groups()) > 1 and _g(m, 2) else {"project_name": _g(m, 1)}),
+
+    ("VERCEL_LIST_DEPLOYMENTS", [
+        rf"({SLUG})\s+(?:ki\s+)?deployments?\s+(?:list|dikhao|dikha|show)",
+        rf"(?:list|show|dikhao|dikha)\s+.*deployments?\s+(?:for|of)\s+({SLUG})",
+    ], lambda m: {"project_name": _g(m, 1)}),
+
     ("VERCEL_GET_ENV", [
         rf"(?:get|show|dikhao|dikha)\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})\s+.*vercel",
         rf"vercel\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+({SLUG})",
@@ -1637,6 +1744,8 @@ VERCEL_COMMANDS_BLOCK = """10. VERCEL_LIST_PROJECTS
 13. VERCEL_DELETE_PROJECT: {"project_name":"project-name"}
 14. VERCEL_GET_ENV: {"project_name":"project-name"}
 15. VERCEL_SET_ENV: {"project_name":"project-name","key":"KEY","value":"value"}
+16. VERCEL_ROLLBACK: {"project_name":"project-name","deployment_id":"optional-specific-id"} — omit deployment_id to rollback to the previous production deployment
+17. VERCEL_LIST_DEPLOYMENTS: {"project_name":"project-name"}
 """
 
 NETLIFY_COMMANDS_BLOCK = """16. NETLIFY_LIST_SITES
@@ -1660,6 +1769,7 @@ COMMANDS = [
     "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
     "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
     "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_SET_ENV:",
+    "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",
     "NETLIFY_LIST_SITES", "NETLIFY_GET_SITE_INFO:", "NETLIFY_DELETE_SITE:",
     "NETLIFY_GET_ENV:", "NETLIFY_SET_ENV:",
     "RENDER_LIST_SERVICES", "RENDER_DELETE_SERVICE:", "RENDER_GET_ENV:",
@@ -1974,6 +2084,56 @@ def api_vercel_deploy_events():
         "live_url": live_url,
         "error_message": error_message,
     })
+
+
+ERROR_ANALYSIS_SYSTEM_PROMPT = """You are a build-log triage assistant. You are given the tail of a failed
+Vercel build log. Reply in Hinglish, in at most 4 short lines total:
+1. One line naming the likely root cause (be specific — package name, file, command).
+2. One line with the concrete fix (a command to run, a line to change, a config to add).
+Do not repeat the raw log back. Do not add disclaimers or a greeting. If the log genuinely
+doesn't contain enough signal to guess a cause, say so in one line instead of inventing one."""
+
+
+@app.route("/api/vercel/analyze-error", methods=["POST"])
+def api_vercel_analyze_error():
+    # Reuses the shared OpenRouter infra (same key/model as chat + codegen)
+    # to turn the raw build log tail into a short diagnosis. Only called
+    # once per failed deployment by the frontend (on state===ERROR), not
+    # polled, so this doesn't add meaningfully to AI usage.
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "Session expired.", "action": "auth_required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    lines = data.get("lines") or []
+    error_message = (data.get("error_message") or "").strip()
+    if not lines and not error_message:
+        return safe_jsonify({"suggestion": None, "error": "no log content"}), 400
+
+    log_tail = "\n".join(str(l) for l in lines[-60:])
+    user_prompt = f"Error message: {error_message}\n\nBuild log (tail):\n{log_tail}"[:6000]
+
+    try:
+        ai_resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "system", "content": ERROR_ANALYSIS_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.2,
+            },
+            timeout=25,
+        ).json()
+        if "error" in ai_resp:
+            raise RuntimeError(ai_resp["error"].get("message", "Unknown AI error"))
+        suggestion = ai_resp["choices"][0]["message"]["content"].strip()
+        suggestion = redact(suggestion)
+        return safe_jsonify({"suggestion": suggestion})
+    except Exception as e:
+        return safe_jsonify({"suggestion": None, "error": "AI analysis abhi available nahi hai."}), 200
 
 
 @app.route("/chat", methods=["POST"])

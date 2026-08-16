@@ -622,6 +622,104 @@
   }
   .deploy-terminal-link:active { opacity: 0.85; }
 
+  /* AI error-troubleshooting block — sits below the log, above the footer,
+     only shown when a build lands in ERROR state and analysis comes back. */
+  .deploy-terminal-ai {
+    flex-shrink: 0;
+    margin: 0 16px 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255,107,107,0.08);
+    border: 1px solid rgba(255,107,107,0.25);
+    display: none;
+  }
+  .deploy-terminal-ai.show { display: block; }
+  .deploy-terminal-ai-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--red);
+    margin-bottom: 6px;
+  }
+  .deploy-terminal-ai-head svg { width: 13px; height: 13px; }
+  .deploy-terminal-ai-body {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text);
+    font-family: var(--font-sans);
+    white-space: pre-line;
+  }
+  .deploy-terminal-ai-loading {
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* ── FULL-SCREEN DRAG & DROP OVERLAY ── */
+  #dropzone-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(6,12,13,0.82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    pointer-events: none;
+  }
+  #dropzone-overlay.show { display: flex; }
+  .dropzone-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 40px 48px;
+    border-radius: var(--radius-lg);
+    border: 2px dashed var(--accent);
+    background: var(--surface-2);
+  }
+  .dropzone-card svg { width: 44px; height: 44px; color: var(--accent); }
+  .dropzone-card-title { font-size: 16px; font-weight: 600; color: var(--text); }
+  .dropzone-card-sub { font-size: 12.5px; color: var(--muted); }
+
+  /* ── UPLOAD PROGRESS RING ── */
+  .upload-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin: 6px 0;
+  }
+  .upload-progress-ring { flex-shrink: 0; }
+  .upload-progress-ring circle { fill: none; stroke-width: 3; }
+  .upload-progress-ring .ring-track { stroke: var(--border-2); }
+  .upload-progress-ring .ring-fill {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+    transition: stroke-dashoffset 0.15s linear;
+  }
+  .upload-progress-pct {
+    position: absolute;
+    font-size: 9px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--accent);
+  }
+  .upload-progress-ring-box { position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+  .upload-progress-info { flex: 1; min-width: 0; }
+  .upload-progress-name { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .upload-progress-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
   .drawer-scroll {
     flex: 1;
     overflow-y: auto;
@@ -1911,9 +2009,27 @@
     <div class="deploy-terminal-log" id="deploy-terminal-log">
       <div class="deploy-log-empty">Connecting to Vercel…</div>
     </div>
+    <div class="deploy-terminal-ai" id="deploy-terminal-ai">
+      <div class="deploy-terminal-ai-head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.2H22l-6 4.6 2.3 7.2-6.3-4.6-6.3 4.6 2.3-7.2-6-4.6h7.6z"/></svg>
+        AI ne error dekha
+      </div>
+      <div class="deploy-terminal-ai-body" id="deploy-terminal-ai-body">
+        <span class="deploy-terminal-ai-loading">Analyze ho raha hai…</span>
+      </div>
+    </div>
     <div class="deploy-terminal-footer">
       <div class="deploy-terminal-status" id="deploy-terminal-status">Build chal raha hai…</div>
       <a class="deploy-terminal-link" id="deploy-terminal-link" href="#" target="_blank" rel="noopener" style="display:none;">Live URL kholo →</a>
+    </div>
+  </div>
+
+  <!-- ═══ FULL-SCREEN DRAG & DROP OVERLAY ═══ -->
+  <div id="dropzone-overlay">
+    <div class="dropzone-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <div class="dropzone-card-title">Yahan drop karo</div>
+      <div class="dropzone-card-sub">Files, folder, ya ek zip — seedha upload ho jayega</div>
     </div>
   </div>
 
@@ -3540,14 +3656,103 @@ function askUploadPath(files, repo) {
 }
 
 // Step 3: actually send one file.
+// ══════════════════════════════════════════════════════════════════
+// UPLOAD PROGRESS — shared XHR wrapper (fetch() has no upload progress
+// events) + a small SVG ring rendered as a chat bubble while it runs.
+// ══════════════════════════════════════════════════════════════════
+function xhrUploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      let data;
+      try { data = JSON.parse(xhr.responseText); } catch (_) { data = { reply: 'Server se invalid response aaya.', action: 'error' }; }
+      resolve({ status: xhr.status, data });
+    };
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.send(formData);
+  });
+}
+
+const RING_RADIUS = 13;
+const RING_CIRC = 2 * Math.PI * RING_RADIUS;
+
+// Renders a progress-ring bubble into the messages list and returns
+// {update(pct), setLabel(text, indeterminate), remove()} to drive it.
+function showUploadProgress(label) {
+  const messages = document.getElementById('messages');
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'upload-progress-wrap';
+  wrap.innerHTML = `
+    <div class="upload-progress-ring-box">
+      <svg class="upload-progress-ring" width="32" height="32" viewBox="0 0 32 32">
+        <circle class="ring-track" cx="16" cy="16" r="${RING_RADIUS}"></circle>
+        <circle class="ring-fill" cx="16" cy="16" r="${RING_RADIUS}"
+          stroke-dasharray="${RING_CIRC}" stroke-dashoffset="${RING_CIRC}"></circle>
+      </svg>
+      <div class="upload-progress-pct">0%</div>
+    </div>
+    <div class="upload-progress-info">
+      <div class="upload-progress-name">${escHtml(label)}</div>
+      <div class="upload-progress-sub">Uploading…</div>
+    </div>
+  `;
+  messages.appendChild(wrap);
+  scrollToBottom();
+
+  const fillEl = wrap.querySelector('.ring-fill');
+  const pctEl = wrap.querySelector('.upload-progress-pct');
+  const subEl = wrap.querySelector('.upload-progress-sub');
+  let spinTimer = null;
+
+  return {
+    update(pct) {
+      clearInterval(spinTimer);
+      spinTimer = null;
+      const clamped = Math.max(0, Math.min(100, pct));
+      fillEl.style.strokeDasharray = `${RING_CIRC}`;
+      fillEl.style.strokeDashoffset = `${RING_CIRC * (1 - clamped / 100)}`;
+      pctEl.textContent = `${clamped}%`;
+      subEl.textContent = clamped >= 100 ? 'Processing…' : 'Uploading…';
+    },
+    setLabel(text, indeterminate) {
+      subEl.textContent = text;
+      if (indeterminate && !spinTimer) {
+        // Small indeterminate spin so the ring doesn't look frozen while
+        // the server does post-upload work (e.g. zip extraction) that
+        // has no progress signal of its own.
+        pctEl.textContent = '';
+        let offset = 0;
+        spinTimer = setInterval(() => {
+          offset = (offset + RING_CIRC * 0.08) % RING_CIRC;
+          fillEl.style.strokeDasharray = `${RING_CIRC * 0.25} ${RING_CIRC}`;
+          fillEl.style.strokeDashoffset = `${-offset}`;
+        }, 60);
+      }
+    },
+    remove() {
+      clearInterval(spinTimer);
+      wrap.remove();
+    },
+  };
+}
+
 async function doUpload(file, repo, path) {
   addMessage('user', `📎 Uploading "${file.name}" → ${repo}/${path}`);
 
-  const typing = document.getElementById('typing-indicator');
-  typing.classList.add('show');
-  scrollToBottom();
   isLoading = true;
   document.getElementById('sendBtn').disabled = true;
+
+  const ring = showUploadProgress(file.name);
+  scrollToBottom();
 
   try {
     const form = new FormData();
@@ -3556,15 +3761,14 @@ async function doUpload(file, repo, path) {
     form.append('path', path);
     form.append('message', `Upload ${path} via DevOps Agent`);
 
-    const res = await fetch('/upload', { method: 'POST', body: form });
-    const data = await res.json();
-    typing.classList.remove('show');
+    const { status, data } = await xhrUploadWithProgress('/upload', form, ring.update);
+    ring.remove();
 
     const cls = actionColorFor(data.action);
     addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
-    typing.classList.remove('show');
+    ring.remove();
     addMessage('agent', '❌ Upload fail ho gaya. Server se connect nahi ho paya.', 'error');
   } finally {
     isLoading = false;
@@ -3583,7 +3787,6 @@ async function doUploadMany(files, repo, paths) {
 
   addMessage('user', `📎 Uploading ${files.length} files → ${repo}${paths[0].includes('/') ? '/' + paths[0].split('/').slice(0, -1).join('/') : ''}`);
 
-  const typing = document.getElementById('typing-indicator');
   isLoading = true;
   document.getElementById('sendBtn').disabled = true;
 
@@ -3591,7 +3794,7 @@ async function doUploadMany(files, repo, paths) {
   const failed = [];
 
   for (let i = 0; i < files.length; i++) {
-    typing.classList.add('show');
+    const ring = showUploadProgress(`${files[i].name} (${i + 1}/${files.length})`);
     scrollToBottom();
     try {
       const form = new FormData();
@@ -3600,11 +3803,10 @@ async function doUploadMany(files, repo, paths) {
       form.append('path', paths[i]);
       form.append('message', `Upload ${paths[i]} via DevOps Agent`);
 
-      const res = await fetch('/upload', { method: 'POST', body: form });
-      const data = await res.json();
-      typing.classList.remove('show');
+      const { status, data } = await xhrUploadWithProgress('/upload', form, ring.update);
+      ring.remove();
 
-      if (res.ok) {
+      if (status >= 200 && status < 300) {
         okCount++;
         addMessage('agent', data.reply, actionColorFor(data.action));
       } else {
@@ -3613,13 +3815,12 @@ async function doUploadMany(files, repo, paths) {
       }
       history.push({ role: 'assistant', content: data.reply });
     } catch (err) {
-      typing.classList.remove('show');
+      ring.remove();
       failed.push(files[i].name);
       addMessage('agent', `❌ "${files[i].name}" upload fail ho gaya. Server se connect nahi ho paya.`, 'error');
     }
   }
 
-  typing.classList.remove('show');
   isLoading = false;
   document.getElementById('sendBtn').disabled = false;
 
@@ -3796,11 +3997,11 @@ async function doZipUpload(file, repo, dir) {
   const dest = dir ? `${repo}/${dir}` : repo;
   addMessage('user', `🗜️ Extracting "${file.name}" → ${dest}`);
 
-  const typing = document.getElementById('typing-indicator');
-  typing.classList.add('show');
-  scrollToBottom();
   isLoading = true;
   document.getElementById('sendBtn').disabled = true;
+
+  const ring = showUploadProgress(file.name);
+  scrollToBottom();
 
   try {
     const form = new FormData();
@@ -3809,15 +4010,20 @@ async function doZipUpload(file, repo, dir) {
     form.append('path', dir);
     form.append('message', `Extract ${file.name} via DevOps Agent`);
 
-    const res = await fetch('/upload-zip', { method: 'POST', body: form });
-    const data = await res.json();
-    typing.classList.remove('show');
+    const { data } = await xhrUploadWithProgress('/upload-zip', form, (pct) => {
+      // Upload itself is usually the fast part; once bytes are fully sent,
+      // the server is still extracting + pushing a commit, so switch the
+      // label instead of leaving the ring pinned at 100% looking stuck.
+      if (pct >= 100) ring.setLabel('Extracting & pushing…', true);
+      else ring.update(pct);
+    });
+    ring.remove();
 
     const cls = actionColorFor(data.action);
     addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
-    typing.classList.remove('show');
+    ring.remove();
     addMessage('agent', '❌ Zip upload fail ho gaya. Server se connect nahi ho paya.', 'error');
   } finally {
     isLoading = false;
@@ -4491,6 +4697,7 @@ function actionColorFor(action) {
     vercel_list: 'info', vercel_import: 'success', vercel_deploy: 'success',
     vercel_deploy_pending: 'warning', vercel_delete_project: 'success',
     vercel_env: 'info', vercel_env_set: 'success',
+    vercel_rollback: 'success', vercel_deployments: 'info',
     netlify_list: 'info', netlify_site_info: 'info', netlify_delete_site: 'success',
     netlify_env: 'info', netlify_env_set: 'success',
     render_list: 'info', render_delete_service: 'success',
@@ -4526,7 +4733,112 @@ function updateScrollFab() {
 document.addEventListener('DOMContentLoaded', () => {
   const area = document.getElementById('scroll-area');
   if (area) area.addEventListener('scroll', updateScrollFab);
+  initDragDrop();
 });
+
+// ══════════════════════════════════════════════════════════════════
+// FULL-SCREEN DRAG & DROP
+// Listens on the whole document so a file can be dropped anywhere in
+// the app, not just a specific target. dragenter/dragleave use a
+// counter because those events fire on every child element the
+// cursor crosses — without it the overlay flickers on/off as the
+// pointer moves over nested elements during a drag.
+// A single dropped .zip routes to the zip pipeline (matches the clip
+// menu's "Upload zip" behavior); anything else (one or more files,
+// or a dropped folder via webkitGetAsEntry) goes through the regular
+// multi-file upload pipeline.
+// ══════════════════════════════════════════════════════════════════
+let dragCounter = 0;
+
+function initDragDrop() {
+  const overlay = document.getElementById('dropzone-overlay');
+  if (!overlay) return;
+
+  document.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    dragCounter++;
+    overlay.classList.add('show');
+  });
+
+  document.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+  });
+
+  document.addEventListener('dragleave', (e) => {
+    if (!e.dataTransfer) return;
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) overlay.classList.remove('show');
+  });
+
+  document.addEventListener('drop', async (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.classList.remove('show');
+
+    const files = await filesFromDataTransfer(e.dataTransfer);
+    if (!files.length) return;
+
+    if (files.length === 1 && /\.zip$/i.test(files[0].name)) {
+      askZipUploadRepo(files[0]);
+    } else {
+      askUploadRepo(files);
+    }
+  });
+
+  // Dropping outside the window entirely (e.g. onto another app) never
+  // fires 'drop' on our document — reset the counter/overlay on
+  // window blur as a safety net so it can't get stuck open.
+  window.addEventListener('blur', () => { dragCounter = 0; overlay.classList.remove('show'); });
+}
+
+// Resolves dropped items to a flat File[] list, walking folders
+// recursively via the (Chromium/WebKit) FileSystem entry API when
+// available so a dropped folder behaves like the folder picker
+// (relativePath preserved for nested-path uploads). Falls back to
+// dataTransfer.files directly on browsers without entry support.
+function filesFromDataTransfer(dataTransfer) {
+  const items = dataTransfer.items;
+  if (!items || !items.length || !items[0].webkitGetAsEntry) {
+    return Promise.resolve(Array.from(dataTransfer.files || []));
+  }
+
+  const entries = Array.from(items)
+    .map(it => it.webkitGetAsEntry && it.webkitGetAsEntry())
+    .filter(Boolean);
+  if (!entries.length) return Promise.resolve(Array.from(dataTransfer.files || []));
+
+  const out = [];
+  function readEntry(entry, prefix) {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        entry.file(file => {
+          if (prefix) {
+            try { Object.defineProperty(file, 'webkitRelativePath', { value: prefix + file.name }); } catch (_) {}
+          }
+          out.push(file);
+          resolve();
+        }, () => resolve());
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const readBatch = () => {
+          reader.readEntries(async (children) => {
+            if (!children.length) { resolve(); return; }
+            await Promise.all(children.map(c => readEntry(c, prefix + entry.name + '/')));
+            readBatch(); // readEntries may not return everything in one call
+          }, () => resolve());
+        };
+        readBatch();
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  return Promise.all(entries.map(en => readEntry(en, ''))).then(() => out);
+}
 
 // ── SEND ──
 async function sendMsg() {
@@ -4845,6 +5157,7 @@ const DEPLOY_ERROR_LINE_RE = /\b(error|failed|exception|traceback|fatal|cannot f
 function openDeployTerminal(deploymentId, projectName) {
   deployTerminalActive = true;
   deployTerminalSince = 0;
+  errorAnalysisRequested = false;
 
   const overlay = document.getElementById('deploy-terminal-overlay');
   const panel = document.getElementById('deploy-terminal');
@@ -4853,9 +5166,11 @@ function openDeployTerminal(deploymentId, projectName) {
   const linkEl = document.getElementById('deploy-terminal-link');
   const projectEl = document.getElementById('deploy-terminal-project');
   const subEl = document.getElementById('deploy-terminal-sub');
+  const aiBlock = document.getElementById('deploy-terminal-ai');
 
   panel.classList.remove('state-ready', 'state-error');
   log.innerHTML = '<div class="deploy-log-empty">Connecting to Vercel…</div>';
+  aiBlock.classList.remove('show');
   statusEl.textContent = 'Build chal raha hai…';
   statusEl.className = 'deploy-terminal-status';
   linkEl.style.display = 'none';
@@ -4920,6 +5235,7 @@ async function pollDeployEvents(deploymentId) {
       statusEl.textContent = data.error_message || 'Build fail ho gaya';
       statusEl.className = 'deploy-terminal-status is-error';
       if (data.error_message) appendDeployLogLine(data.error_message, true);
+      if (data.state === 'ERROR') requestErrorAnalysis(data.error_message);
     } else {
       statusEl.textContent = `Building… (${data.state || 'BUILDING'})`;
     }
@@ -4933,6 +5249,43 @@ async function pollDeployEvents(deploymentId) {
   }
 
   deployTerminalPollTimer = setTimeout(() => pollDeployEvents(deploymentId), 2500);
+}
+
+// AI error troubleshooting — fires once per failed deployment. Collects the
+// error-highlighted lines currently in the log DOM (cheap, avoids a second
+// server round-trip to re-fetch them) and sends them + the error_message to
+// the backend for a short diagnosis, rendered in the terminal's AI block.
+let errorAnalysisRequested = false;
+
+function requestErrorAnalysis(errorMessage) {
+  if (errorAnalysisRequested) return;
+  errorAnalysisRequested = true;
+
+  const aiBlock = document.getElementById('deploy-terminal-ai');
+  const aiBody = document.getElementById('deploy-terminal-ai-body');
+  aiBlock.classList.add('show');
+  aiBody.innerHTML = '<span class="deploy-terminal-ai-loading">Analyze ho raha hai…</span>';
+
+  const log = document.getElementById('deploy-terminal-log');
+  const errorLines = Array.from(log.querySelectorAll('.deploy-log-line')).map(el => el.textContent);
+  const allLines = Array.from(log.querySelectorAll('.deploy-log-line')).length
+    ? Array.from(log.querySelectorAll('.deploy-log-line')).map(el => el.textContent)
+    : errorLines;
+
+  fetch('/api/vercel/analyze-error', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lines: allLines, error_message: errorMessage || '' }),
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.suggestion) {
+        aiBody.textContent = data.suggestion;
+      } else {
+        aiBlock.classList.remove('show');
+      }
+    })
+    .catch(() => { aiBlock.classList.remove('show'); });
 }
 
 function appendDeployLogLine(text, isError) {
