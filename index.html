@@ -457,6 +457,171 @@
   }
   #drawer.show { transform: translateX(0); }
 
+  /* ═══ LIVE DEPLOY TERMINAL — slide-up drawer ═══
+     Shown while a Vercel deployment is running instead of leaving the user
+     staring at "Sochte hue..." in the chat. Polls /api/vercel/deploy-events
+     every ~2.5s and appends new log lines. Border/accent flips to red on
+     build failure, green on success. */
+  #deploy-terminal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0,0,0,0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+  #deploy-terminal-overlay.show { opacity: 1; pointer-events: auto; }
+
+  #deploy-terminal {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 51;
+    height: min(72vh, 560px);
+    background: #0a0f10;
+    border-top: 1px solid var(--border-2);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 40px rgba(0,0,0,0.55);
+    transform: translateY(100%);
+    transition: transform .3s cubic-bezier(.2,.9,.3,1), border-color .25s ease, box-shadow .25s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #deploy-terminal.show { transform: translateY(0); }
+  #deploy-terminal.state-error {
+    border-top: 1px solid var(--red);
+    box-shadow: 0 -12px 40px rgba(255,107,107,0.15);
+  }
+  #deploy-terminal.state-ready {
+    border-top: 1px solid var(--green);
+    box-shadow: 0 -12px 40px rgba(61,220,151,0.12);
+  }
+
+  .deploy-terminal-drag {
+    width: 36px; height: 4px;
+    border-radius: 100px;
+    background: var(--border-2);
+    margin: 10px auto 4px;
+    flex-shrink: 0;
+  }
+
+  .deploy-terminal-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px 12px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .deploy-terminal-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(54,209,255,0.18);
+    animation: deployPulse 1.4s ease-in-out infinite;
+  }
+  #deploy-terminal.state-ready .deploy-terminal-dot {
+    background: var(--green);
+    box-shadow: 0 0 0 3px rgba(61,220,151,0.18);
+    animation: none;
+  }
+  #deploy-terminal.state-error .deploy-terminal-dot {
+    background: var(--red);
+    box-shadow: 0 0 0 3px rgba(255,107,107,0.18);
+    animation: none;
+  }
+  @keyframes deployPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+  .deploy-terminal-title {
+    flex: 1; min-width: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .deploy-terminal-title-sub {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+  .deploy-terminal-close {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    border: 1px solid var(--border-2);
+    background: var(--surface);
+    color: var(--muted);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .deploy-terminal-close svg { width: 14px; height: 14px; }
+  .deploy-terminal-close:active { color: var(--accent-2); border-color: var(--accent-2); }
+
+  .deploy-terminal-log {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 16px 16px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: #9fb0b0;
+  }
+  .deploy-log-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 1px 0;
+  }
+  .deploy-log-line.is-error {
+    color: var(--red);
+    background: rgba(255,107,107,0.08);
+    border-left: 2px solid var(--red);
+    padding-left: 8px;
+    margin-left: -8px;
+    border-radius: 0 4px 4px 0;
+    cursor: pointer;
+  }
+  .deploy-log-line.is-error:active { background: rgba(255,107,107,0.16); }
+  .deploy-log-empty {
+    color: var(--muted-2);
+    font-style: italic;
+  }
+
+  .deploy-terminal-footer {
+    flex-shrink: 0;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .deploy-terminal-status {
+    flex: 1; min-width: 0;
+    font-size: 11.5px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .deploy-terminal-status.is-error { color: var(--red); }
+  .deploy-terminal-status.is-ready { color: var(--green); }
+  .deploy-terminal-link {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--bg-0);
+    background: var(--green);
+    padding: 6px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  .deploy-terminal-link:active { opacity: 0.85; }
+
   .drawer-scroll {
     flex: 1;
     overflow-y: auto;
@@ -1728,6 +1893,29 @@
     <span class="fab-dot"></span>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
   </button>
+
+  <!-- ═══ LIVE DEPLOY TERMINAL — slide-up build log panel ═══ -->
+  <div id="deploy-terminal-overlay" onclick="closeDeployTerminal()"></div>
+  <div id="deploy-terminal">
+    <div class="deploy-terminal-drag"></div>
+    <div class="deploy-terminal-header">
+      <div class="deploy-terminal-dot" id="deploy-terminal-dot"></div>
+      <div class="deploy-terminal-title">
+        Deploying<span id="deploy-terminal-project"></span>
+        <div class="deploy-terminal-title-sub" id="deploy-terminal-sub">Vercel · build shuru ho raha hai…</div>
+      </div>
+      <button class="deploy-terminal-close" onclick="closeDeployTerminal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="deploy-terminal-log" id="deploy-terminal-log">
+      <div class="deploy-log-empty">Connecting to Vercel…</div>
+    </div>
+    <div class="deploy-terminal-footer">
+      <div class="deploy-terminal-status" id="deploy-terminal-status">Build chal raha hai…</div>
+      <a class="deploy-terminal-link" id="deploy-terminal-link" href="#" target="_blank" rel="noopener" style="display:none;">Live URL kholo →</a>
+    </div>
+  </div>
 
   <!-- ═══ HAMBURGER DRAWER — chat history, connected apps, settings ═══ -->
   <div id="drawer-overlay" onclick="closeDrawer()"></div>
@@ -4507,6 +4695,20 @@ async function sendMsg() {
       return;
     }
 
+    // ── LIVE DEPLOY TERMINAL: Vercel deploy triggered → slide-up build
+    // logs instead of just a text bubble. Still posts the normal chat
+    // bubble too (so the reply is in history/scrollback either way), then
+    // opens the terminal on top of it. 'vercel_deploy_pending' means the
+    // 25s synchronous poll on the server timed out while still BUILDING —
+    // the terminal keeps polling client-side past that point.
+    if ((data.action === 'vercel_deploy' || data.action === 'vercel_deploy_pending') && data.deployment_id) {
+      const cls = actionColorFor(data.action);
+      addMessage('agent', data.reply, cls, null, data.action);
+      history.push({ role: 'assistant', content: data.reply });
+      openDeployTerminal(data.deployment_id, data.project_name || '');
+      return;
+    }
+
     const cls = actionColorFor(data.action);
     addMessage('agent', data.reply, cls, null, data.action);
     history.push({ role: 'assistant', content: data.reply });
@@ -4620,6 +4822,136 @@ function openDrawer() {
 function closeDrawer() {
   document.getElementById('drawer').classList.remove('show');
   document.getElementById('drawer-overlay').classList.remove('show');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LIVE DEPLOY TERMINAL
+// Slide-up drawer that polls /api/vercel/deploy-events every ~2.5s while
+// a Vercel deployment is in progress, instead of leaving the chat stuck
+// on "Sochte hue...". Opened automatically whenever a /chat response
+// comes back with action 'vercel_deploy' or 'vercel_deploy_pending' and
+// a deployment_id. Manual close (X button or overlay tap) just hides the
+// panel and stops polling — it doesn't cancel the actual Vercel build.
+// ══════════════════════════════════════════════════════════════════
+let deployTerminalPollTimer = null;
+let deployTerminalSince = 0;
+let deployTerminalActive = false;
+
+// Heuristic for coloring a log line as an error in the terminal — Vercel's
+// build output doesn't tag lines with a severity, so this matches on the
+// same keywords a developer would visually scan for in a real terminal.
+const DEPLOY_ERROR_LINE_RE = /\b(error|failed|exception|traceback|fatal|cannot find module|enoent|npm err!)\b/i;
+
+function openDeployTerminal(deploymentId, projectName) {
+  deployTerminalActive = true;
+  deployTerminalSince = 0;
+
+  const overlay = document.getElementById('deploy-terminal-overlay');
+  const panel = document.getElementById('deploy-terminal');
+  const log = document.getElementById('deploy-terminal-log');
+  const statusEl = document.getElementById('deploy-terminal-status');
+  const linkEl = document.getElementById('deploy-terminal-link');
+  const projectEl = document.getElementById('deploy-terminal-project');
+  const subEl = document.getElementById('deploy-terminal-sub');
+
+  panel.classList.remove('state-ready', 'state-error');
+  log.innerHTML = '<div class="deploy-log-empty">Connecting to Vercel…</div>';
+  statusEl.textContent = 'Build chal raha hai…';
+  statusEl.className = 'deploy-terminal-status';
+  linkEl.style.display = 'none';
+  projectEl.textContent = projectName ? ` — ${projectName}` : '';
+  subEl.textContent = 'Vercel · live build logs';
+
+  overlay.classList.add('show');
+  panel.classList.add('show');
+  vibrate(8);
+
+  pollDeployEvents(deploymentId);
+}
+
+function closeDeployTerminal() {
+  deployTerminalActive = false;
+  if (deployTerminalPollTimer) {
+    clearTimeout(deployTerminalPollTimer);
+    deployTerminalPollTimer = null;
+  }
+  document.getElementById('deploy-terminal-overlay').classList.remove('show');
+  document.getElementById('deploy-terminal').classList.remove('show');
+}
+
+async function pollDeployEvents(deploymentId) {
+  if (!deployTerminalActive) return;
+
+  const log = document.getElementById('deploy-terminal-log');
+  const panel = document.getElementById('deploy-terminal');
+  const statusEl = document.getElementById('deploy-terminal-status');
+  const linkEl = document.getElementById('deploy-terminal-link');
+  const dot = document.getElementById('deploy-terminal-dot');
+
+  try {
+    const url = `/api/vercel/deploy-events?deployment_id=${encodeURIComponent(deploymentId)}&since=${deployTerminalSince}`;
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (res.status === 401) {
+      appendDeployLogLine('Session/Vercel connection expired.', true);
+      statusEl.textContent = 'Connection expired';
+      statusEl.className = 'deploy-terminal-status is-error';
+      panel.classList.add('state-error');
+      return;
+    }
+
+    const emptyPlaceholder = log.querySelector('.deploy-log-empty');
+    if (emptyPlaceholder && data.lines && data.lines.length) emptyPlaceholder.remove();
+
+    (data.lines || []).forEach(line => appendDeployLogLine(line, DEPLOY_ERROR_LINE_RE.test(line)));
+    if (typeof data.since === 'number') deployTerminalSince = data.since;
+
+    if (data.state === 'READY') {
+      panel.classList.add('state-ready');
+      statusEl.textContent = '✓ Deployment live';
+      statusEl.className = 'deploy-terminal-status is-ready';
+      if (data.live_url) {
+        linkEl.href = data.live_url;
+        linkEl.style.display = '';
+      }
+    } else if (data.state === 'ERROR' || data.state === 'CANCELED') {
+      panel.classList.add('state-error');
+      statusEl.textContent = data.error_message || 'Build fail ho gaya';
+      statusEl.className = 'deploy-terminal-status is-error';
+      if (data.error_message) appendDeployLogLine(data.error_message, true);
+    } else {
+      statusEl.textContent = `Building… (${data.state || 'BUILDING'})`;
+    }
+
+    if (data.done) {
+      deployTerminalPollTimer = null;
+      return; // terminal state reached — stop polling, leave panel open
+    }
+  } catch (err) {
+    appendDeployLogLine('Log stream se connect nahi ho paya, retry ho raha hai…', false);
+  }
+
+  deployTerminalPollTimer = setTimeout(() => pollDeployEvents(deploymentId), 2500);
+}
+
+function appendDeployLogLine(text, isError) {
+  const log = document.getElementById('deploy-terminal-log');
+  const line = document.createElement('div');
+  line.className = 'deploy-log-line' + (isError ? ' is-error' : '');
+  line.textContent = text;
+  if (isError) {
+    // Tap an error line to copy the exact stack-trace text — quicker than
+    // trying to select monospace text by hand on a small screen.
+    line.title = 'Tap to copy';
+    line.onclick = () => {
+      navigator.clipboard?.writeText(text).catch(() => {});
+      vibrate(6);
+    };
+  }
+  const wasNearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  log.appendChild(line);
+  if (wasNearBottom) log.scrollTop = log.scrollHeight;
 }
 
 function renderDrawerProfile() {
