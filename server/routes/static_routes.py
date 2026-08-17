@@ -16,6 +16,16 @@ def home():
     return send_from_directory(".", "index.html")
 
 
+@static_bp.route("/style.css")
+def style_css():
+    return send_from_directory(".", "style.css", mimetype="text/css")
+
+
+@static_bp.route("/script.js")
+def script_js():
+    return send_from_directory(".", "script.js", mimetype="application/javascript")
+
+
 @static_bp.route("/favicon.ico")
 def favicon_ico():
     return send_from_directory(".", "favicon.ico", mimetype="image/vnd.microsoft.icon")
