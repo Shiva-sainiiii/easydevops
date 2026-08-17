@@ -36,6 +36,16 @@ OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")                # still app-level: A
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")  # used to build the OAuth callback URL
 DATABASE_URL = os.getenv("DATABASE_URL")                    # Neon Postgres connection string
 
+# Firestore holds chat session history (see server/firestore_db.py) — a
+# separate concern from the Postgres users table above, which holds
+# encrypted provider tokens. This is the *raw JSON contents* of a Firebase
+# service-account key, not a file path: Vercel's serverless filesystem is
+# read-only at deploy time and a committed .json key file would leak a
+# private credential into git history, so the whole file's content is
+# pasted into one env var instead (same reasoning as FERNET_KEY/GITHUB_*
+# above — no secret ever touches disk in this repo).
+FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+
 if not FLASK_SECRET_KEY:
     raise RuntimeError("FLASK_SECRET_KEY env var missing — required to sign session cookies. Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
 if not FERNET_KEY:
@@ -44,5 +54,7 @@ if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
     raise RuntimeError("GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET missing — register a GitHub OAuth App and set these.")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL env var missing — set this to your Neon Postgres connection string.")
+if not FIREBASE_SERVICE_ACCOUNT_JSON:
+    raise RuntimeError("FIREBASE_SERVICE_ACCOUNT_JSON env var missing — paste the full contents of your Firebase service-account JSON key (Firebase Console → Project settings → Service accounts → Generate new private key).")
 
 IS_PROD = os.getenv("FLASK_ENV") != "development"

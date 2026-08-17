@@ -2710,61 +2710,48 @@ function confirmDisconnectRender() {
 
 
 // ══════════════════════════════════════════════════════════════════
-// CHAT PERSISTENCE (localStorage) — multi-session
-// Keeps multiple separate conversations across page reloads/app restarts,
-// per-device only (not synced across phones/browsers). Each session is
-// {id, title, messages: [{role, content, actionClass}], updatedAt}.
-// Deliberately does NOT persist confirm-action buttons (delete/destructive
-// prompts) — those are re-issued fresh by the server each time and should
-// never be resurrected from a stale save after a reload.
+// CHAT PERSISTENCE (Firestore, via server/api/sessions/*) — multi-session
+// Keeps multiple separate conversations across page reloads/app restarts/
+// devices — this used to be pure localStorage, which meant a cleared
+// browser cache or a fresh device lost every conversation. Now the
+// server (server/firestore_db.py) is the source of truth; this module is
+// a thin in-memory mirror (`sessionsState`) of the server's state, kept
+// around so the existing render code (renderChatHistoryList,
+// renderActiveChatIntoView, etc.) can stay synchronous and instant —
+// every mutation updates the mirror immediately for a snappy UI, then
+// fires a background call to persist it server-side. If that background
+// call fails (offline, server hiccup), the in-memory chat still works
+// for the rest of the session; it just won't have survived a reload.
+// Each session is {id, title, messages: [{role, content, actionClass}],
+// updatedAt}. Deliberately does NOT persist confirm-action buttons
+// (delete/destructive prompts) — those are re-issued fresh by the server
+// each time and should never be resurrected from a stale save after a
+// reload.
 // ══════════════════════════════════════════════════════════════════
-const SESSIONS_KEY = 'devops_agent_sessions_v1';
-const LEGACY_CHAT_KEY = 'devops_agent_chat_v1'; // single-thread format, pre-drawer
-const SESSION_MSG_MAX = 200; // cap per session so localStorage doesn't grow unbounded
-const SESSIONS_MAX = 50;     // cap number of sessions kept
+const SESSION_MSG_MAX = 200; // cap per session, mirrors server/firestore_db.py SESSION_MSG_MAX
+const SESSIONS_MAX = 50;     // cap number of sessions kept, mirrors server/firestore_db.py SESSIONS_MAX
 
-function loadSessionsState() {
+let sessionsState = { sessions: [], activeSessionId: null };
+
+// Fire-and-forget POST — used for the background persistence calls below.
+// Swallows errors deliberately: a failed sync shouldn't surface as a user-
+// facing error mid-chat, it just means this particular change didn't make
+// it to the server (next successful call re-syncs the latest state anyway).
+async function _syncPost(url, body) {
   try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { /* fall through to fresh/migrated state */ }
-
-  // One-time migration from the old single-thread format.
-  try {
-    const legacyRaw = localStorage.getItem(LEGACY_CHAT_KEY);
-    if (legacyRaw) {
-      const legacyMessages = JSON.parse(legacyRaw);
-      if (Array.isArray(legacyMessages) && legacyMessages.length) {
-        const migrated = {
-          sessions: [{
-            id: 'sess_' + Date.now(),
-            title: titleFromMessages(legacyMessages),
-            messages: legacyMessages,
-            updatedAt: Date.now()
-          }],
-          activeSessionId: null
-        };
-        migrated.activeSessionId = migrated.sessions[0].id;
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(migrated));
-        localStorage.removeItem(LEGACY_CHAT_KEY);
-        return migrated;
-      }
-    }
-  } catch (e) { /* ignore, start fresh below */ }
-
-  return { sessions: [], activeSessionId: null };
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    });
+  } catch (e) { /* offline or server hiccup — in-memory state still works */ }
 }
 
-function saveSessionsState(state) {
+async function _syncDelete(url) {
   try {
-    if (state.sessions.length > SESSIONS_MAX) {
-      state.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-      state.sessions = state.sessions.slice(0, SESSIONS_MAX);
-    }
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(state));
-  } catch (e) {
-    // Storage full or unavailable — chat still works, it just won't persist.
-  }
+    await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
+  } catch (e) { /* see _syncPost */ }
 }
 
 function titleFromMessages(messages) {
@@ -2774,20 +2761,25 @@ function titleFromMessages(messages) {
   return t.length > 42 ? t.slice(0, 42) + '…' : t;
 }
 
-let sessionsState = loadSessionsState();
-
 function getActiveSession() {
   if (!sessionsState.activeSessionId) return null;
   return sessionsState.sessions.find(s => s.id === sessionsState.activeSessionId) || null;
 }
 
+// ensureActiveSession() historically both "get or create" AND was called
+// synchronously from saveChatEntry(). Keeping it synchronous (operating
+// only on the in-memory mirror) avoids making every single message-send
+// path async just to persist a session id — the background sync calls
+// below (append_message etc.) create the session server-side on first
+// write anyway (see append_message() in firestore_db.py), so a client-
+// minted id here is fine; it just needs to be stable for this browser tab.
 function ensureActiveSession() {
   let s = getActiveSession();
   if (s) return s;
-  s = { id: 'sess_' + Date.now(), title: 'Nayi Chat', messages: [], updatedAt: Date.now() };
+  s = { id: 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), title: 'Nayi Chat', messages: [], updatedAt: Date.now() };
   sessionsState.sessions.unshift(s);
   sessionsState.activeSessionId = s.id;
-  saveSessionsState(sessionsState);
+  _syncPost(`/api/sessions/${encodeURIComponent(s.id)}/active`, null);
   return s;
 }
 
@@ -2797,8 +2789,12 @@ function saveChatEntry(entry) {
   if (s.messages.length > SESSION_MSG_MAX) s.messages.splice(0, s.messages.length - SESSION_MSG_MAX);
   if (s.messages.length === 1 && entry.role === 'user') s.title = titleFromMessages(s.messages);
   s.updatedAt = Date.now();
-  saveSessionsState(sessionsState);
+  if (sessionsState.sessions.length > SESSIONS_MAX) {
+    sessionsState.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    sessionsState.sessions = sessionsState.sessions.slice(0, SESSIONS_MAX);
+  }
   renderChatHistoryList();
+  _syncPost(`/api/sessions/${encodeURIComponent(s.id)}/messages`, entry);
 }
 
 function clearSavedChat() {
@@ -2807,8 +2803,8 @@ function clearSavedChat() {
     s.messages = [];
     s.title = 'Nayi Chat';
     s.updatedAt = Date.now();
-    saveSessionsState(sessionsState);
     renderChatHistoryList();
+    _syncPost(`/api/sessions/${encodeURIComponent(s.id)}/clear`, null);
   }
 }
 
@@ -2862,28 +2858,45 @@ function renderActiveChatIntoView() {
   renderChatHistoryList();
 }
 
-function restoreChatOnLoad() {
+async function restoreChatOnLoad() {
+  try {
+    const res = await fetch('/api/sessions', { credentials: 'same-origin' });
+    if (res.ok) {
+      const state = await res.json();
+      if (state && Array.isArray(state.sessions)) {
+        // Defensive: guarantee every session has a messages array, even
+        // if a doc somehow lacks one — every render path below assumes
+        // s.messages exists without re-checking.
+        state.sessions.forEach(s => { if (!Array.isArray(s.messages)) s.messages = []; });
+        sessionsState = state;
+      }
+    }
+  } catch (e) {
+    // Offline or not logged in yet — fall back to a fresh empty session so
+    // the chat UI still works; ensureActiveSession() below mints one
+    // locally and it'll sync once connectivity/login is available.
+  }
   ensureActiveSession();
   renderActiveChatIntoView();
 }
 
 function startNewChatSession() {
   vibrate(10);
-  const s = { id: 'sess_' + Date.now(), title: 'Nayi Chat', messages: [], updatedAt: Date.now() };
+  const s = { id: 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8), title: 'Nayi Chat', messages: [], updatedAt: Date.now() };
   sessionsState.sessions.unshift(s);
   sessionsState.activeSessionId = s.id;
-  saveSessionsState(sessionsState);
   renderActiveChatIntoView();
   closeDrawer();
+  _syncPost(`/api/sessions/${encodeURIComponent(s.id)}/active`, null);
 }
 
 function switchToSession(id) {
   if (id === sessionsState.activeSessionId) { closeDrawer(); return; }
   vibrate(10);
   sessionsState.activeSessionId = id;
-  saveSessionsState(sessionsState);
   renderActiveChatIntoView();
   closeDrawer();
+  _syncPost(`/api/sessions/${encodeURIComponent(id)}/active`, null);
 }
 
 function deleteSession(id) {
@@ -2891,13 +2904,13 @@ function deleteSession(id) {
   if (sessionsState.activeSessionId === id) {
     sessionsState.activeSessionId = sessionsState.sessions.length ? sessionsState.sessions[0].id : null;
   }
-  saveSessionsState(sessionsState);
   renderChatHistoryList();
   // If we just deleted the active session, the view needs to reflect
   // whatever session (or empty state) is now active.
   if (!getActiveSession() || sessionsState.activeSessionId !== id) {
     renderActiveChatIntoView();
   }
+  _syncDelete(`/api/sessions/${encodeURIComponent(id)}`);
 }
 
 function renderChatHistoryList() {
