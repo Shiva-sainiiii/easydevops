@@ -2833,7 +2833,19 @@ function renderActiveChatIntoView() {
   if (es) es.style.display = 'none';
 
   s.messages.forEach(entry => {
+    // Rich cards (file lists, repo/vercel/netlify/render grids) need their
+    // structured data (items/repos/projects/etc, saved alongside content —
+    // see saveChatEntry calls above) rebuilt as real DOM widgets here too,
+    // not just plain markdown — otherwise they only look right until the
+    // next reload. buildRichBubbleNode is the same dispatcher the live
+    // /chat response path uses, so a saved entry renders identically to
+    // how it looked when it first arrived.
+    const richNode = entry.role === 'agent' ? buildRichBubbleNode(entry) : null;
     const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null, entry.action || null);
+    if (richNode) {
+      bubble.innerHTML = '';
+      bubble.appendChild(richNode);
+    }
     addMessageActions(wrap, bubble, entry.role, entry.content, entry.actionClass || '', () => resendMessage(entry.content));
     history.push({ role: entry.role === 'user' ? 'user' : 'assistant', content: entry.content });
   });
@@ -4380,6 +4392,59 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   return wrap;
 }
 
+// ── RICH BUBBLE DISPATCH ──
+// Single source of truth for "does this message need a rich DOM widget
+// instead of a plain markdown bubble, and if so which one" — used both
+// right after a live /chat response comes back AND when replaying saved
+// history on page load/session-switch. Previously the live path built
+// these widgets inline (see git history) while the reload path only ever
+// called renderMarkdown() on entry.content, so file-list/activity cards
+// looked right live and silently degraded to plain text after a refresh
+// (the structured items/repos/projects arrays were never saved, only the
+// human-readable reply string was). Centralizing it here means both paths
+// automatically stay in sync — fix a bubble once, it's fixed everywhere.
+//
+// `entry` shape (superset of what saveChatEntry stores): {action, reply,
+// repo, path, items, repos, projects, sites, services}. Returns a DOM
+// node to append into the bubble, or null if this action has no rich
+// widget (caller should fall back to renderMarkdown(entry.reply/content)).
+const ACTIVITY_LIST_CONFIG = {
+  list_repos:   { kind: 'repo',    itemsKey: 'repos',    badge: 'github' },
+  vercel_list:  { kind: 'vercel',  itemsKey: 'projects', badge: 'vercel' },
+  netlify_list: { kind: 'netlify', itemsKey: 'sites',    badge: 'netlify' },
+  render_list:  { kind: 'render',  itemsKey: 'services', badge: 'render' },
+};
+
+function richBubbleBadgeFor(entry) {
+  if (entry.action === 'list_files' || entry.action === 'read_file') return 'github';
+  const cfg = ACTIVITY_LIST_CONFIG[entry.action];
+  return cfg ? cfg.badge : null;
+}
+
+function buildRichBubbleNode(entry) {
+  const replyText = entry.reply != null ? entry.reply : entry.content;
+
+  if (entry.action === 'list_files' && entry.items && entry.repo) {
+    return buildFileListBubble(entry.repo, entry.items);
+  }
+
+  if (entry.action === 'read_file' && entry.repo && entry.path) {
+    return buildReadFileBubble(entry.repo, entry.path, replyText);
+  }
+
+  const activityCfg = ACTIVITY_LIST_CONFIG[entry.action];
+  if (activityCfg && Array.isArray(entry[activityCfg.itemsKey]) && entry[activityCfg.itemsKey].length) {
+    const items = entry[activityCfg.itemsKey];
+    const headerText = (replyText || '').split('\n')[0];
+    const onCardTap = activityCfg.kind === 'render'
+      ? (item) => resendMessage(`get env for ${item.id} render`)
+      : null;
+    return buildActivityListBubble(activityCfg.kind, items, headerText, onCardTap);
+  }
+
+  return null;
+}
+
 // ── BUILD READ-FILE BUBBLE with download button ──
 function buildReadFileBubble(repo, filePath, content) {
   const wrap = document.createElement('div');
@@ -4899,98 +4964,50 @@ async function sendMsg() {
       return;
     }
 
-    // ── FEATURE 1: list_files → rich file rows with per-file download ──
-    if (data.action === 'list_files' && data.items && data.repo) {
-      const es = document.getElementById('empty-state');
-      if (es) es.style.display = 'none';
-      const messages = document.getElementById('messages');
-      const wrap = document.createElement('div');
-      wrap.className = 'msg-wrap agent';
-      const label = document.createElement('div');
-      label.className = 'msg-label';
-      label.textContent = 'Agent';
-      const badge = document.createElement('span');
-      badge.className = 'provider-badge';
-      badge.innerHTML = providerBadgeHtml('github');
-      label.appendChild(badge);
-      const bubble = document.createElement('div');
-      bubble.className = 'msg-bubble info';
-      bubble.appendChild(buildFileListBubble(data.repo, data.items));
-      wrap.appendChild(label);
-      wrap.appendChild(bubble);
-      messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: 'list_files' });
-      history.push({ role: 'assistant', content: data.reply });
-      scrollToBottom();
-      return;
-    }
-
-    // ── FEATURE 2: read_file → content + inline download button ──
-    if (data.action === 'read_file' && data.repo && data.path) {
-      const es = document.getElementById('empty-state');
-      if (es) es.style.display = 'none';
-      const messages = document.getElementById('messages');
-      const wrap = document.createElement('div');
-      wrap.className = 'msg-wrap agent';
-      const label = document.createElement('div');
-      label.className = 'msg-label';
-      label.textContent = 'Agent';
-      const badge = document.createElement('span');
-      badge.className = 'provider-badge';
-      badge.innerHTML = providerBadgeHtml('github');
-      label.appendChild(badge);
-      const bubble = document.createElement('div');
-      bubble.className = 'msg-bubble info';
-      bubble.appendChild(buildReadFileBubble(data.repo, data.path, data.reply));
-      wrap.appendChild(label);
-      wrap.appendChild(bubble);
-      messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: 'read_file' });
-      history.push({ role: 'assistant', content: data.reply });
-      scrollToBottom();
-      return;
-    }
-
-    // ── FEATURE 3: list_repos / vercel_list / netlify_list / render_list
-    // → compact activity cards instead of a long text block. Falls through
-    // to the normal text bubble below if the array is missing/empty (server
-    // already sends a friendly "koi X nahi mila" reply for the empty case,
-    // so there's nothing useful for a card grid to add there).
-    const ACTIVITY_LIST_CONFIG = {
-      list_repos:     { kind: 'repo',    itemsKey: 'repos',    badge: 'github' },
-      vercel_list:    { kind: 'vercel',  itemsKey: 'projects', badge: 'vercel' },
-      netlify_list:   { kind: 'netlify', itemsKey: 'sites',    badge: 'netlify' },
-      render_list:    { kind: 'render',  itemsKey: 'services', badge: 'render' },
-    };
-    const activityCfg = ACTIVITY_LIST_CONFIG[data.action];
-    if (activityCfg && Array.isArray(data[activityCfg.itemsKey]) && data[activityCfg.itemsKey].length) {
-      const es = document.getElementById('empty-state');
-      if (es) es.style.display = 'none';
-      const messages = document.getElementById('messages');
-      const wrap = document.createElement('div');
-      wrap.className = 'msg-wrap agent';
-      const label = document.createElement('div');
-      label.className = 'msg-label';
-      label.textContent = 'Agent';
-      const badge = document.createElement('span');
-      badge.className = 'provider-badge';
-      badge.innerHTML = providerBadgeHtml(activityCfg.badge);
-      label.appendChild(badge);
-      const bubble = document.createElement('div');
-      bubble.className = 'msg-bubble info';
-      const items = data[activityCfg.itemsKey];
-      const headerText = data.reply.split('\n')[0]; // first line = "Tere N repos:" style summary
-      const onCardTap = activityCfg.kind === 'render'
-        ? (item) => resendMessage(`get env for ${item.id} render`)
-        : null;
-      bubble.appendChild(buildActivityListBubble(activityCfg.kind, items, headerText, onCardTap));
-      wrap.appendChild(label);
-      wrap.appendChild(bubble);
-      messages.appendChild(wrap);
-      saveChatEntry({ role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(), action: data.action });
-      history.push({ role: 'assistant', content: data.reply });
-      scrollToBottom();
-      return;
+    // ── RICH BUBBLES: list_files / read_file / list_repos / vercel_list /
+    // netlify_list / render_list → structured DOM widgets instead of a
+    // plain text block. buildRichBubbleNode() (single source of truth,
+    // shared with the page-load restore path) decides whether this action
+    // has a widget; falls through to the normal text bubble below if not,
+    // or if the underlying array is missing/empty (server already sends a
+    // friendly "koi X nahi mila" reply for the empty case).
+    {
+      const richNode = buildRichBubbleNode(data);
+      if (richNode) {
+        const es = document.getElementById('empty-state');
+        if (es) es.style.display = 'none';
+        const messages = document.getElementById('messages');
+        const wrap = document.createElement('div');
+        wrap.className = 'msg-wrap agent';
+        const label = document.createElement('div');
+        label.className = 'msg-label';
+        label.textContent = 'Agent';
+        const badgeKey = richBubbleBadgeFor(data);
+        if (badgeKey) {
+          const badge = document.createElement('span');
+          badge.className = 'provider-badge';
+          badge.innerHTML = providerBadgeHtml(badgeKey);
+          label.appendChild(badge);
+        }
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble info';
+        bubble.appendChild(richNode);
+        wrap.appendChild(label);
+        wrap.appendChild(bubble);
+        messages.appendChild(wrap);
+        // Persist the full structured payload (items/repos/projects/etc),
+        // not just the plain-text reply — this is what makes the card
+        // survive a page refresh instead of degrading to a text bubble.
+        saveChatEntry({
+          role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(),
+          action: data.action, repo: data.repo, path: data.path,
+          items: data.items, repos: data.repos, projects: data.projects,
+          sites: data.sites, services: data.services,
+        });
+        history.push({ role: 'assistant', content: data.reply });
+        scrollToBottom();
+        return;
+      }
     }
 
     // ── AUTH: session expired / not connected mid-conversation ──

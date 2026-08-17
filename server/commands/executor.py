@@ -12,7 +12,7 @@ import base64
 import requests
 
 from server.providers.github import gh_api, get_file_sha
-from server.providers.vercel import vc_api, vercel_find_project, vercel_poll_deployment, VERCEL_TERMINAL_STATES
+from server.providers.vercel import vc_api, vercel_find_project, vercel_poll_deployment, vercel_project_live_url, VERCEL_TERMINAL_STATES
 from server.providers.netlify import nl_api, netlify_find_site
 from server.providers.render import rd_api
 from server.security import safe_repo_path, UnsafePathError
@@ -182,10 +182,6 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 projects = r.json().get("projects", [])
                 if not projects:
                     return {"reply": "Koi Vercel project nahi mila.", "action": "vercel_list", "projects": []}
-                lines = []
-                for p in projects:
-                    live = f"https://{p['name']}.vercel.app"
-                    lines.append(f"▲ **{p['name']}** — `{p.get('framework') or 'static'}`\n🔗 {live}")
                 # readyState of the most recent deployment maps to the
                 # frontend's status badge (Live/Building/Error/etc.) — same
                 # VERCEL_TERMINAL_STATES vocabulary used by
@@ -193,13 +189,23 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 def _vercel_status(p):
                     latest = p.get("latestDeployments") or []
                     return (latest[0].get("readyState") if latest else None) or "UNKNOWN"
+                lines = []
+                project_cards = []
+                for p in projects:
+                    # Real URL from the latest deployment's alias/url — never
+                    # guessed from the project name (see vercel_project_live_url
+                    # docstring for why `<name>.vercel.app` can be wrong).
+                    live = vercel_project_live_url(p)
+                    link_line = f"\n🔗 {live}" if live else "\n_(abhi koi deployment nahi — link uplabdh nahi)_"
+                    lines.append(f"▲ **{p['name']}** — `{p.get('framework') or 'static'}`{link_line}")
+                    project_cards.append({
+                        "name": p["name"], "id": p["id"],
+                        "framework": p.get("framework"),
+                        "url": live,
+                        "status": _vercel_status(p),
+                    })
                 return {"reply": f"Tere {len(projects)} Vercel projects:\n\n" + "\n\n".join(lines),
-                        "action": "vercel_list", "projects": [{
-                            "name": p["name"], "id": p["id"],
-                            "framework": p.get("framework"),
-                            "url": f"https://{p['name']}.vercel.app",
-                            "status": _vercel_status(p),
-                        } for p in projects]}
+                        "action": "vercel_list", "projects": project_cards}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
             else:
