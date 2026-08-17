@@ -313,7 +313,7 @@
   .vercel-token-input {
     width: 100%;
     box-sizing: border-box;
-    padding: 11px 12px;
+    padding: 11px 38px 11px 12px;
     border-radius: 10px;
     border: 1px solid var(--border-2);
     background: rgba(0,0,0,0.3);
@@ -321,10 +321,52 @@
     font-family: var(--font-mono);
     font-size: 13px;
     outline: none;
-    margin-bottom: 8px;
     transition: border-color 0.15s;
   }
   .vercel-token-input:focus { border-color: var(--accent); }
+  .vercel-token-input.token-valid { border-color: var(--green); }
+  .vercel-token-input.token-invalid { border-color: var(--red); }
+
+  /* ── CLIENT-SIDE TOKEN PRE-VALIDATION (tick/cross) ── */
+  .token-input-wrap { position: relative; margin-bottom: 8px; }
+  .token-validate-icon {
+    position: absolute;
+    right: 10px; top: 50%;
+    transform: translateY(-50%);
+    width: 18px; height: 18px;
+    display: none;
+    align-items: center; justify-content: center;
+  }
+  .token-validate-icon.show { display: flex; }
+  .token-validate-icon.checking svg { animation: token-spin 0.7s linear infinite; }
+  .token-validate-icon.checking svg { color: var(--muted); }
+  .token-validate-icon.valid svg { color: var(--green); }
+  .token-validate-icon.invalid svg { color: var(--red); }
+  @keyframes token-spin { to { transform: rotate(360deg); } }
+  .token-validate-label {
+    font-size: 11.5px;
+    margin-bottom: 8px;
+    display: none;
+  }
+  .token-validate-label.show { display: block; }
+  .token-validate-label.valid { color: var(--green); }
+  .token-validate-label.invalid { color: var(--red); }
+
+  /* ── TOKEN STORAGE CLARITY NOTICE — shown in every provider connect
+     modal so it's clear at the moment of pasting a token exactly where
+     it goes: encrypted in the backend DB, never in the browser. ── */
+  .token-storage-notice {
+    display: flex; gap: 7px; align-items: flex-start;
+    font-size: 11px; line-height: 1.5; color: var(--muted);
+    background: rgba(110,231,255,0.06);
+    border: 1px solid rgba(110,231,255,0.15);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+  }
+  .token-storage-notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; color: var(--accent-2); }
+  .token-storage-notice strong { color: var(--text); font-weight: 600; }
+
   .vercel-modal-error {
     display: none;
     font-size: 12px; color: var(--red);
@@ -333,6 +375,164 @@
   .vercel-modal-error.show { display: block; }
   .vercel-modal-actions { display: flex; gap: 8px; margin-top: 4px; }
   .vercel-modal-actions .prompt-btn { flex: 1; }
+
+  /* ── INLINE CODE EDITOR / DIFF WIDGET ──
+     Full-screen overlay (like the vercel-modal but edge-to-edge) with two
+     panes swapped via a "mode" class on the root: 'editing' shows the
+     textarea + line-number gutter, 'diffing' shows the computed unified
+     diff before the user confirms a commit. Kept in plain HTML/CSS/JS
+     (no external editor lib) so it stays framework-free like the rest of
+     this file — line numbers are a synced-scroll <div> next to a
+     transparent-caret-colored <textarea>, a common lightweight pattern
+     for a "good enough" code editor that doesn't need a real AST/tokenizer. */
+  #code-editor-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 95;
+    flex-direction: column;
+    background: var(--bg-0);
+  }
+  #code-editor-overlay.show { display: flex; }
+
+  .editor-topbar {
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 14px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-1);
+  }
+  .editor-topbar-close {
+    width: 34px; height: 34px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: 50%;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .editor-topbar-close svg { width: 16px; height: 16px; }
+  .editor-topbar-meta { flex: 1; min-width: 0; }
+  .editor-topbar-path {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .editor-topbar-repo { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .editor-topbar-save {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: #04181c;
+    border: none; border-radius: 9px;
+    font-family: var(--font-sans); font-size: 13px; font-weight: 700;
+    cursor: pointer;
+  }
+  .editor-topbar-save:disabled { opacity: 0.4; }
+  .editor-topbar-save.saving { opacity: 0.7; }
+
+  .editor-body {
+    flex: 1; min-height: 0;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+  .editor-gutter {
+    flex-shrink: 0;
+    width: 42px;
+    padding: 14px 0;
+    text-align: right;
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+    color: var(--muted-2);
+    background: var(--bg-1);
+    overflow: hidden;
+    user-select: none;
+    white-space: pre;
+  }
+  .editor-gutter-line { padding-right: 8px; }
+  #editor-textarea {
+    flex: 1; min-width: 0;
+    padding: 14px 14px;
+    background: transparent;
+    border: none; outline: none; resize: none;
+    color: var(--text);
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
+    white-space: pre;
+    overflow: auto;
+    tab-size: 2;
+  }
+  .editor-status-bar {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+    padding: 8px 14px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: var(--bg-1);
+    font-size: 11px; color: var(--muted);
+  }
+  .editor-status-bar .editor-conflict {
+    color: var(--yellow);
+    display: none;
+  }
+  .editor-status-bar .editor-conflict.show { display: inline; }
+
+  /* ── DIFF PREVIEW PANE ── */
+  #editor-diff-pane {
+    display: none;
+    flex: 1; min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #editor-diff-pane.show { display: flex; }
+  .editor-diff-scroll {
+    flex: 1; overflow-y: auto;
+    padding: 10px 0;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+  }
+  .diff-line {
+    display: flex;
+    padding: 1px 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .diff-line-marker { flex-shrink: 0; width: 18px; opacity: 0.7; }
+  .diff-line-add { background: rgba(61,220,151,0.10); color: #b8f5da; }
+  .diff-line-add .diff-line-marker { color: var(--green); }
+  .diff-line-del { background: rgba(255,107,107,0.10); color: #ffd3d3; }
+  .diff-line-del .diff-line-marker { color: var(--red); }
+  .diff-line-ctx { color: var(--muted); }
+  .diff-empty-note {
+    padding: 30px 14px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: var(--font-sans);
+  }
+  .diff-summary-bar {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    font-size: 11.5px; font-family: var(--font-mono);
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .diff-summary-bar .plus { color: var(--green); }
+  .diff-summary-bar .minus { color: var(--red); }
+
+  /* Read-file bubble's Edit button — sits next to the existing Download
+     button (.read-dl-btn), same visual weight. */
+  .read-edit-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 8px; margin-left: 8px;
+    padding: 6px 12px;
+    background: rgba(61,220,151,0.10);
+    border: 1px solid rgba(61,220,151,0.30);
+    border-radius: 8px;
+    color: var(--green); font-family: var(--font-mono);
+    font-size: 11.5px; font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .read-edit-btn svg { width: 13px; height: 13px; }
 
   /* ── LOGIN GATE ── */
   #login-gate {
@@ -1615,12 +1815,60 @@
 
   /* ── FILE-ROW DOWNLOAD BUTTONS (list_files reply) ── */
   .file-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+
+  /* ── SWIPE-TO-ACTION (mobile) ──
+     Structure per row: .file-row-swipe wraps a .file-row-swipe-actions-bg
+     (fixed underneath, holding a left "download" affordance and a right
+     "delete" affordance) and the actual .file-row sits on top, translated
+     via transform: translateX() as the user drags. Swipe left far enough
+     -> reveals delete (red) and firing it triggers the same confirm-token
+     delete flow the existing trash-icon button uses. Swipe right ->
+     reveals download (accent) and firing it triggers the same href the
+     existing download button uses. Short swipes just snap back — nothing
+     fires until past the commit threshold. Desktop/mouse users still have
+     the original inline buttons untouched, so nothing is lost for them. */
+  .file-row-swipe {
+    position: relative;
+    overflow: hidden;
+    border-radius: 9px;
+  }
+  .file-row-swipe-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    border-radius: 9px;
+    pointer-events: none;
+  }
+  .file-row-swipe-bg-dl {
+    justify-content: flex-start;
+    padding-left: 16px;
+    background: rgba(54,209,255,0.16);
+    color: var(--accent);
+  }
+  .file-row-swipe-bg-del {
+    justify-content: flex-end;
+    padding-right: 16px;
+    background: rgba(255,107,107,0.16);
+    color: var(--red);
+  }
+  .file-row-swipe-bg svg { width: 16px; height: 16px; }
+  .file-row-swipe-bg span {
+    font-size: 11px; font-weight: 600; font-family: var(--font-mono);
+    margin: 0 6px;
+  }
+  .file-row-swipe.dragging .file-row { transition: none; }
+  .file-row-swipe:not(.dragging) .file-row { transition: transform 0.2s ease; }
+
   .file-row {
+    position: relative;
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 7px 10px;
-    background: rgba(255,255,255,0.04);
+    background: var(--bg-1);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 9px;
+    touch-action: pan-y;
+    -webkit-tap-highlight-color: transparent;
   }
   .file-row-name {
     font-family: var(--font-mono); font-size: 12.5px;
@@ -1915,7 +2163,15 @@
         <li>Scope <strong>Full Account</strong> select karo, token copy karo</li>
       </ol>
       <a class="vercel-token-link" href="https://vercel.com/account/tokens" target="_blank" rel="noopener">vercel.com/account/tokens kholo →</a>
-      <input type="password" id="vercel-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" />
+      <div class="token-input-wrap">
+        <input type="password" id="vercel-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" oninput="onTokenInput('vercel')" />
+        <span id="vercel-token-icon" class="token-validate-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg></span>
+      </div>
+      <div id="vercel-token-label" class="token-validate-label"></div>
+      <div class="token-storage-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>Ye token sirf tumhare backend account me jaake <strong>encrypted</strong> (AES/Fernet) store hota hai — browser me kahi save nahi hota, na hi kabhi plaintext me kahi dikhta hai.</span>
+      </div>
       <div id="vercel-modal-error" class="vercel-modal-error"></div>
       <div class="vercel-modal-actions">
         <button class="prompt-btn go" id="vercel-connect-btn" onclick="submitVercelToken()">Connect</button>
@@ -1938,7 +2194,15 @@
         <li>Naam do, expiration set karo, token copy karo</li>
       </ol>
       <a class="vercel-token-link" href="https://app.netlify.com/user/applications#personal-access-tokens" target="_blank" rel="noopener">app.netlify.com/user/applications kholo →</a>
-      <input type="password" id="netlify-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" />
+      <div class="token-input-wrap">
+        <input type="password" id="netlify-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" oninput="onTokenInput('netlify')" />
+        <span id="netlify-token-icon" class="token-validate-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg></span>
+      </div>
+      <div id="netlify-token-label" class="token-validate-label"></div>
+      <div class="token-storage-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>Ye token sirf tumhare backend account me jaake <strong>encrypted</strong> (AES/Fernet) store hota hai — browser me kahi save nahi hota, na hi kabhi plaintext me kahi dikhta hai.</span>
+      </div>
       <div id="netlify-modal-error" class="vercel-modal-error"></div>
       <div class="vercel-modal-actions">
         <button class="prompt-btn go" id="netlify-connect-btn" onclick="submitNetlifyToken()">Connect</button>
@@ -1961,12 +2225,49 @@
         <li>Naam do, key copy karo</li>
       </ol>
       <a class="vercel-token-link" href="https://dashboard.render.com/u/settings#api-keys" target="_blank" rel="noopener">dashboard.render.com/u/settings kholo →</a>
-      <input type="password" id="render-token-input" class="vercel-token-input" placeholder="Paste API key here" autocomplete="off" />
+      <div class="token-input-wrap">
+        <input type="password" id="render-token-input" class="vercel-token-input" placeholder="Paste API key here" autocomplete="off" oninput="onTokenInput('render')" />
+        <span id="render-token-icon" class="token-validate-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg></span>
+      </div>
+      <div id="render-token-label" class="token-validate-label"></div>
+      <div class="token-storage-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>Ye key sirf tumhare backend account me jaake <strong>encrypted</strong> (AES/Fernet) store hoti hai — browser me kahi save nahi hoti, na hi kabhi plaintext me kahi dikhti hai.</span>
+      </div>
       <div id="render-modal-error" class="vercel-modal-error"></div>
       <div class="vercel-modal-actions">
         <button class="prompt-btn go" id="render-connect-btn" onclick="submitRenderToken()">Connect</button>
         <button class="prompt-btn cancel" onclick="hideRenderModal()">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ INLINE CODE EDITOR / DIFF WIDGET OVERLAY ═══ -->
+  <div id="code-editor-overlay">
+    <div class="editor-topbar">
+      <button class="editor-topbar-close" id="editor-close-btn" title="Close editor">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <div class="editor-topbar-meta">
+        <div class="editor-topbar-path" id="editor-path-label">file.txt</div>
+        <div class="editor-topbar-repo" id="editor-repo-label">repo</div>
+      </div>
+      <button class="editor-topbar-save" id="editor-save-btn">Review changes</button>
+    </div>
+
+    <div class="editor-body" id="editor-edit-pane">
+      <div class="editor-gutter" id="editor-gutter"></div>
+      <textarea id="editor-textarea" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+    </div>
+
+    <div id="editor-diff-pane">
+      <div class="diff-summary-bar" id="editor-diff-summary"></div>
+      <div class="editor-diff-scroll" id="editor-diff-scroll"></div>
+    </div>
+
+    <div class="editor-status-bar">
+      <span id="editor-status-left">Loading…</span>
+      <span class="editor-conflict" id="editor-conflict-note">⚠️ File changed elsewhere</span>
     </div>
   </div>
 
@@ -2362,6 +2663,97 @@ async function handleLogout() {
 // or disconnects (already connected) — same click-to-toggle pattern as
 // a lot of "connected account" UIs.
 // ══════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
+// CLIENT-SIDE TOKEN PRE-VALIDATION (tick/cross before submit)
+// Debounced call to /api/<provider>/validate as the user types/pastes
+// into a token field — shows a spinner while checking, then a green
+// tick or red cross + short label, all BEFORE they hit Connect. The
+// real /connect call on submit still re-validates server-side (this
+// never skips that), it just gives earlier feedback so a typo'd or
+// expired token doesn't have to round-trip through the full connect
+// flow to be caught.
+// ══════════════════════════════════════════════════════════════════
+const TOKEN_VALIDATE_DEBOUNCE_MS = 600;
+const _tokenValidateTimers = {};
+const _tokenValidateSeq = { vercel: 0, netlify: 0, render: 0 };
+
+const TOKEN_ICON_SPINNER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 3a9 9 0 019 9"/></svg>';
+const TOKEN_ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+const TOKEN_ICON_CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+
+const TOKEN_VALIDATE_LABELS = {
+  vercel: { valid: 'Token valid hai', invalid: 'Ye token valid nahi hai' },
+  netlify: { valid: 'Token valid hai', invalid: 'Ye token valid nahi hai' },
+  render: { valid: 'API key valid hai', invalid: 'Ye API key valid nahi hai' },
+};
+
+function onTokenInput(provider) {
+  const input = document.getElementById(`${provider}-token-input`);
+  const icon = document.getElementById(`${provider}-token-icon`);
+  const label = document.getElementById(`${provider}-token-label`);
+  const value = input.value.trim();
+
+  clearTimeout(_tokenValidateTimers[provider]);
+
+  if (!value) {
+    input.classList.remove('token-valid', 'token-invalid');
+    icon.classList.remove('show', 'checking', 'valid', 'invalid');
+    label.classList.remove('show', 'valid', 'invalid');
+    return;
+  }
+
+  // Show a checking spinner immediately so typing feels responsive,
+  // then actually fire the validate call after the debounce window.
+  input.classList.remove('token-valid', 'token-invalid');
+  icon.className = 'token-validate-icon show checking';
+  icon.innerHTML = TOKEN_ICON_SPINNER;
+  label.classList.remove('show');
+
+  const mySeq = ++_tokenValidateSeq[provider];
+  _tokenValidateTimers[provider] = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/${provider}/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ token: value }),
+      });
+      const data = await res.json();
+
+      // Stale response guard — if the user kept typing, a newer call has
+      // already been fired; don't let a slow older response overwrite it.
+      if (mySeq !== _tokenValidateSeq[provider]) return;
+
+      if (data.valid === true) {
+        input.classList.add('token-valid');
+        input.classList.remove('token-invalid');
+        icon.className = 'token-validate-icon show valid';
+        icon.innerHTML = TOKEN_ICON_CHECK;
+        label.textContent = data.label ? `${TOKEN_VALIDATE_LABELS[provider].valid} (@${data.label})` : TOKEN_VALIDATE_LABELS[provider].valid;
+        label.className = 'token-validate-label show valid';
+      } else if (data.valid === false) {
+        input.classList.add('token-invalid');
+        input.classList.remove('token-valid');
+        icon.className = 'token-validate-icon show invalid';
+        icon.innerHTML = TOKEN_ICON_CROSS;
+        label.textContent = TOKEN_VALIDATE_LABELS[provider].invalid;
+        label.className = 'token-validate-label show invalid';
+      } else {
+        // valid === null (network hiccup talking to the provider) —
+        // inconclusive, so just hide the indicator rather than guess.
+        input.classList.remove('token-valid', 'token-invalid');
+        icon.classList.remove('show', 'checking', 'valid', 'invalid');
+        label.classList.remove('show');
+      }
+    } catch (e) {
+      if (mySeq !== _tokenValidateSeq[provider]) return;
+      input.classList.remove('token-valid', 'token-invalid');
+      icon.classList.remove('show', 'checking', 'valid', 'invalid');
+      label.classList.remove('show');
+    }
+  }, TOKEN_VALIDATE_DEBOUNCE_MS);
+}
+
 function onVercelMenuClick() {
   document.getElementById('user-menu').classList.remove('show');
   if (authedUser && authedUser.vercelConnected) {
@@ -2371,11 +2763,23 @@ function onVercelMenuClick() {
   }
 }
 
+function resetTokenValidateUI(provider) {
+  const input = document.getElementById(`${provider}-token-input`);
+  const icon = document.getElementById(`${provider}-token-icon`);
+  const label = document.getElementById(`${provider}-token-label`);
+  clearTimeout(_tokenValidateTimers[provider]);
+  _tokenValidateSeq[provider]++; // invalidates any in-flight validate response
+  input.classList.remove('token-valid', 'token-invalid');
+  icon.classList.remove('show', 'checking', 'valid', 'invalid');
+  label.classList.remove('show', 'valid', 'invalid');
+}
+
 function showVercelModal() {
   document.getElementById('vercel-modal-overlay').classList.add('show');
   document.getElementById('vercel-modal-error').classList.remove('show');
   const input = document.getElementById('vercel-token-input');
   input.value = '';
+  resetTokenValidateUI('vercel');
   setTimeout(() => input.focus(), 50);
 }
 
@@ -2493,6 +2897,7 @@ function showNetlifyModal() {
   document.getElementById('netlify-modal-error').classList.remove('show');
   const input = document.getElementById('netlify-token-input');
   input.value = '';
+  resetTokenValidateUI('netlify');
   setTimeout(() => input.focus(), 50);
 }
 
@@ -2610,6 +3015,7 @@ function showRenderModal() {
   document.getElementById('render-modal-error').classList.remove('show');
   const input = document.getElementById('render-token-input');
   input.value = '';
+  resetTokenValidateUI('render');
   setTimeout(() => input.focus(), 50);
 }
 
@@ -4151,6 +4557,32 @@ function buildFileListBubble(repo, items) {
       rowActions.appendChild(delBtn);
 
       row.appendChild(rowActions);
+
+      // ── SWIPE-TO-ACTION WRAP ──
+      // Only files (not dirs) get swipe — dirs have no download/delete
+      // action to swipe to anyway. Swipe right reveals + fires download,
+      // swipe left reveals + fires delete (through the same confirm-token
+      // flow as the trash-icon button, via requestFileRowDelete above).
+      const swipeWrap = document.createElement('div');
+      swipeWrap.className = 'file-row-swipe';
+
+      const bgDl = document.createElement('div');
+      bgDl.className = 'file-row-swipe-bg file-row-swipe-bg-dl';
+      bgDl.innerHTML = iconDl() + '<span>Download</span>';
+
+      const bgDel = document.createElement('div');
+      bgDel.className = 'file-row-swipe-bg file-row-swipe-bg-del';
+      bgDel.innerHTML = '<span>Delete</span>' + iconTrash();
+
+      swipeWrap.appendChild(bgDl);
+      swipeWrap.appendChild(bgDel);
+      swipeWrap.appendChild(row);
+      attachSwipeActions(swipeWrap, row, {
+        onSwipeRight: () => dlBtn.click(),
+        onSwipeLeft: () => requestFileRowDelete(repo, item.path, delBtn),
+      });
+      list.appendChild(swipeWrap);
+      return;
     }
 
     list.appendChild(row);
@@ -4158,6 +4590,71 @@ function buildFileListBubble(repo, items) {
 
   wrap.appendChild(list);
   return wrap;
+}
+
+// ── SWIPE-TO-ACTION GESTURE HANDLER (mobile file list rows) ──
+// Attaches touch handlers to `row` (the visible foreground element) inside
+// `container` (the position:relative wrapper holding the background
+// affordances). Tracks a horizontal drag via touch events, translates the
+// row live as the finger moves, and fires the matching callback once the
+// drag passes SWIPE_COMMIT_PX in either direction — otherwise the row
+// snaps back to rest. Vertical scroll intent is detected early (first
+// ~10px of movement) and yielded to so this never fights the page's
+// normal vertical scrolling.
+const SWIPE_COMMIT_PX = 72;
+const SWIPE_MAX_PX = 96;
+
+function attachSwipeActions(container, row, { onSwipeRight, onSwipeLeft }) {
+  let startX = 0, startY = 0, currentX = 0, dragging = false, axisLocked = null;
+
+  row.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    currentX = 0;
+    axisLocked = null;
+    dragging = false;
+  }, { passive: true });
+
+  row.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+
+    if (axisLocked === null) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return; // not enough movement yet to decide
+      axisLocked = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (axisLocked === 'x') {
+        dragging = true;
+        container.classList.add('dragging');
+      }
+    }
+    if (axisLocked !== 'x') return; // vertical drag — let the page scroll normally
+
+    e.preventDefault(); // we own horizontal movement now
+    currentX = Math.max(-SWIPE_MAX_PX, Math.min(SWIPE_MAX_PX, dx));
+    row.style.transform = `translateX(${currentX}px)`;
+  }, { passive: false });
+
+  row.addEventListener('touchend', () => {
+    if (!dragging) return;
+    container.classList.remove('dragging');
+    dragging = false;
+    if (currentX >= SWIPE_COMMIT_PX) {
+      onSwipeRight && onSwipeRight();
+    } else if (currentX <= -SWIPE_COMMIT_PX) {
+      onSwipeLeft && onSwipeLeft();
+    }
+    row.style.transform = 'translateX(0)';
+    currentX = 0;
+  });
+
+  row.addEventListener('touchcancel', () => {
+    container.classList.remove('dragging');
+    dragging = false;
+    row.style.transform = 'translateX(0)';
+    currentX = 0;
+  });
 }
 
 // ── DELETE BUTTON ON A FILE ROW (list_files bubble) ──
@@ -4458,7 +4955,7 @@ function buildRichBubbleNode(entry) {
   return null;
 }
 
-// ── BUILD READ-FILE BUBBLE with download button ──
+// ── BUILD READ-FILE BUBBLE with download + edit buttons ──
 function buildReadFileBubble(repo, filePath, content) {
   const wrap = document.createElement('div');
   wrap.innerHTML = renderMarkdown(content);
@@ -4473,8 +4970,302 @@ function buildReadFileBubble(repo, filePath, content) {
   dlBtn.title = 'Download ' + filePath;
   wrap.appendChild(document.createElement('br'));
   wrap.appendChild(dlBtn);
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'read-edit-btn';
+  editBtn.innerHTML = iconEdit() + ' Edit';
+  editBtn.title = 'Edit ' + filePath;
+  editBtn.onclick = () => openCodeEditor(repo, filePath);
+  wrap.appendChild(editBtn);
+
   return wrap;
 }
+
+function iconEdit() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// INLINE CODE EDITOR / DIFF WIDGET
+//
+// Flow: openCodeEditor(repo, path) -> fetch current content+sha from
+// /api/file-source -> textarea editor with a synced line-number gutter
+// -> "Review changes" builds a line-level diff against the original and
+// swaps to the diff pane -> "Commit" (relabeled save button in diff mode)
+// posts to /api/file-source, which re-checks the sha server-side and
+// either saves or returns a 409 conflict the UI surfaces inline.
+// ══════════════════════════════════════════════════════════════════
+let editorState = null; // { repo, path, originalContent, sha, mode }
+
+async function openCodeEditor(repo, path) {
+  const overlay = document.getElementById('code-editor-overlay');
+  const textarea = document.getElementById('editor-textarea');
+  const statusLeft = document.getElementById('editor-status-left');
+  const saveBtn = document.getElementById('editor-save-btn');
+  const conflictNote = document.getElementById('editor-conflict-note');
+
+  document.getElementById('editor-path-label').textContent = path;
+  document.getElementById('editor-repo-label').textContent = repo;
+  textarea.value = '';
+  statusLeft.textContent = 'Loading…';
+  conflictNote.classList.remove('show');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Review changes';
+  setEditorMode('editing');
+  overlay.classList.add('show');
+
+  try {
+    const res = await fetch(`/api/file-source?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`, {
+      credentials: 'same-origin',
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      statusLeft.textContent = data.reply || 'File load nahi hui.';
+      return;
+    }
+    editorState = { repo, path, originalContent: data.content, sha: data.sha, mode: 'editing' };
+    textarea.value = data.content;
+    renderEditorGutter();
+    const lineCount = data.content.split('\n').length;
+    statusLeft.textContent = `${lineCount} lines`;
+    saveBtn.disabled = false;
+  } catch (e) {
+    statusLeft.textContent = '❌ Server se connect nahi ho paya.';
+  }
+}
+
+function closeCodeEditor() {
+  document.getElementById('code-editor-overlay').classList.remove('show');
+  editorState = null;
+}
+
+function setEditorMode(mode) {
+  const editPane = document.getElementById('editor-edit-pane');
+  const diffPane = document.getElementById('editor-diff-pane');
+  const saveBtn = document.getElementById('editor-save-btn');
+  if (mode === 'editing') {
+    editPane.style.display = 'flex';
+    diffPane.classList.remove('show');
+    saveBtn.textContent = 'Review changes';
+  } else {
+    editPane.style.display = 'none';
+    diffPane.classList.add('show');
+    saveBtn.textContent = 'Commit change';
+  }
+  if (editorState) editorState.mode = mode;
+}
+
+// Keeps the line-number gutter in sync with the textarea's line count and
+// scroll position — re-rendered on input and scroll rather than using a
+// contenteditable overlay, which is simpler and avoids caret/IME bugs.
+function renderEditorGutter() {
+  const textarea = document.getElementById('editor-textarea');
+  const gutter = document.getElementById('editor-gutter');
+  const lineCount = textarea.value.split('\n').length;
+  let html = '';
+  for (let i = 1; i <= lineCount; i++) html += `<div class="editor-gutter-line">${i}</div>`;
+  gutter.innerHTML = html;
+  gutter.scrollTop = textarea.scrollTop;
+}
+
+// ── LINE-LEVEL DIFF (LCS-based) ──
+// Good enough for typical source files (hundreds to a few thousand
+// lines) without pulling in a diff library. Returns an array of
+// {type: 'ctx'|'add'|'del', text} in display order.
+function computeLineDiff(oldText, newText) {
+  const a = oldText.split('\n');
+  const b = newText.split('\n');
+  const n = a.length, m = b.length;
+
+  // LCS table (classic DP) — fine at this scale; for pathological huge
+  // files this could be slow, so cap it defensively.
+  if (n * m > 4_000_000) {
+    return [{ type: 'note', text: 'File bahut badi hai line-by-line diff ke liye — seedha commit karo, ya download karke local diff dekho.' }];
+  }
+
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const result = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      result.push({ type: 'ctx', text: a[i] });
+      i++; j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      result.push({ type: 'del', text: a[i] });
+      i++;
+    } else {
+      result.push({ type: 'add', text: b[j] });
+      j++;
+    }
+  }
+  while (i < n) { result.push({ type: 'del', text: a[i] }); i++; }
+  while (j < m) { result.push({ type: 'add', text: b[j] }); j++; }
+  return result;
+}
+
+function renderDiffPane() {
+  const scroll = document.getElementById('editor-diff-scroll');
+  const summary = document.getElementById('editor-diff-summary');
+  const textarea = document.getElementById('editor-textarea');
+  const diff = computeLineDiff(editorState.originalContent, textarea.value);
+
+  if (diff.length === 1 && diff[0].type === 'note') {
+    scroll.innerHTML = `<div class="diff-empty-note">${escHtml(diff[0].text)}</div>`;
+    summary.textContent = '';
+    return;
+  }
+
+  const added = diff.filter(d => d.type === 'add').length;
+  const removed = diff.filter(d => d.type === 'del').length;
+  if (added === 0 && removed === 0) {
+    scroll.innerHTML = `<div class="diff-empty-note">Koi change nahi hai.</div>`;
+    summary.textContent = 'No changes';
+    return;
+  }
+  summary.innerHTML = `<span class="plus">+${added}</span> &nbsp; <span class="minus">-${removed}</span> &nbsp; changed lines`;
+
+  // Context-collapse: unchanged runs longer than 6 lines only show the
+  // first/last 3, so a one-line edit in a 2000-line file doesn't render
+  // the whole file. Small unchanged runs stay fully visible for readability.
+  const CONTEXT_EDGE = 3;
+  const CONTEXT_COLLAPSE_THRESHOLD = 8;
+  let html = '';
+  let ctxRun = [];
+
+  function flushCtxRun() {
+    if (ctxRun.length === 0) return;
+    if (ctxRun.length <= CONTEXT_COLLAPSE_THRESHOLD) {
+      for (const line of ctxRun) html += diffLineHtml('ctx', line);
+    } else {
+      for (const line of ctxRun.slice(0, CONTEXT_EDGE)) html += diffLineHtml('ctx', line);
+      html += `<div class="diff-line diff-line-ctx"><span class="diff-line-marker"> </span>… ${ctxRun.length - CONTEXT_EDGE * 2} unchanged lines …</div>`;
+      for (const line of ctxRun.slice(-CONTEXT_EDGE)) html += diffLineHtml('ctx', line);
+    }
+    ctxRun = [];
+  }
+
+  for (const d of diff) {
+    if (d.type === 'ctx') {
+      ctxRun.push(d.text);
+    } else {
+      flushCtxRun();
+      html += diffLineHtml(d.type, d.text);
+    }
+  }
+  flushCtxRun();
+  scroll.innerHTML = html;
+}
+
+function diffLineHtml(type, text) {
+  const cls = type === 'add' ? 'diff-line-add' : type === 'del' ? 'diff-line-del' : 'diff-line-ctx';
+  const marker = type === 'add' ? '+' : type === 'del' ? '−' : ' ';
+  return `<div class="diff-line ${cls}"><span class="diff-line-marker">${marker}</span>${escHtml(text) || '&nbsp;'}</div>`;
+}
+
+async function commitEditorChange() {
+  const saveBtn = document.getElementById('editor-save-btn');
+  const statusLeft = document.getElementById('editor-status-left');
+  const conflictNote = document.getElementById('editor-conflict-note');
+  const textarea = document.getElementById('editor-textarea');
+
+  saveBtn.disabled = true;
+  saveBtn.classList.add('saving');
+  saveBtn.textContent = 'Committing…';
+  conflictNote.classList.remove('show');
+
+  try {
+    const res = await fetch('/api/file-source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        repo: editorState.repo,
+        path: editorState.path,
+        content: textarea.value,
+        sha: editorState.sha,
+        message: `Edit ${editorState.path} via inline editor`,
+      }),
+    });
+    const data = await res.json();
+
+    if (res.status === 409) {
+      // Conflict — someone/something changed the file since we opened it.
+      conflictNote.classList.add('show');
+      statusLeft.textContent = data.reply || 'Conflict.';
+      saveBtn.disabled = false;
+      saveBtn.classList.remove('saving');
+      saveBtn.textContent = 'Commit change';
+      return;
+    }
+    if (!res.ok) {
+      statusLeft.textContent = data.reply || 'Save nahi hui.';
+      saveBtn.disabled = false;
+      saveBtn.classList.remove('saving');
+      saveBtn.textContent = 'Commit change';
+      return;
+    }
+
+    // Success — reflect it in chat history same as any other file-write
+    // action, then close the editor.
+    addMessage('agent', data.reply, 'success', null, data.action);
+    history.push({ role: 'assistant', content: data.reply });
+    closeCodeEditor();
+  } catch (e) {
+    statusLeft.textContent = '❌ Server se connect nahi ho paya.';
+    saveBtn.disabled = false;
+    saveBtn.classList.remove('saving');
+    saveBtn.textContent = 'Commit change';
+  }
+}
+
+function initCodeEditorHandlers() {
+  const textarea = document.getElementById('editor-textarea');
+  const gutter = document.getElementById('editor-gutter');
+  const saveBtn = document.getElementById('editor-save-btn');
+  const closeBtn = document.getElementById('editor-close-btn');
+
+  textarea.addEventListener('input', renderEditorGutter);
+  textarea.addEventListener('scroll', () => { gutter.scrollTop = textarea.scrollTop; });
+  // Tab inserts two spaces instead of moving focus — expected editor
+  // behavior, and without this a mobile keyboard's Tab key (if present)
+  // would just jump focus away from the textarea.
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const start = textarea.selectionStart, end = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, start) + '  ' + textarea.value.slice(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+    renderEditorGutter();
+  });
+
+  saveBtn.addEventListener('click', () => {
+    if (!editorState) return;
+    if (editorState.mode === 'editing') {
+      renderDiffPane();
+      setEditorMode('diffing');
+    } else {
+      commitEditorChange();
+    }
+  });
+
+  closeBtn.addEventListener('click', () => {
+    if (editorState && editorState.mode === 'diffing') {
+      // Back out of the diff view to keep editing, rather than closing —
+      // closing entirely still needs a second tap, which also guards
+      // against an accidental discard of unsaved edits.
+      setEditorMode('editing');
+      return;
+    }
+    closeCodeEditor();
+  });
+}
+document.addEventListener('DOMContentLoaded', initCodeEditorHandlers);
 
 function escHtml(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

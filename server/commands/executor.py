@@ -16,6 +16,7 @@ from server.providers.vercel import vc_api, vercel_find_project, vercel_poll_dep
 from server.providers.netlify import nl_api, netlify_find_site
 from server.providers.render import rd_api
 from server.security import safe_repo_path, UnsafePathError
+from server.commands.render_blueprint import generate_render_yaml
 
 
 def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, rd_token=None):
@@ -152,6 +153,10 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"🗑️ File `{path}` delete ho gayi.", "action": "delete_file"}
             else:
                 return {"reply": f"❌ Delete Error: {r.json().get('message','')}", "action": "error"}
+
+        elif cmd == "GENERATE_RENDER_YAML":
+            repo = params["repo"]
+            return generate_render_yaml(repo, owner, gh_token)
 
         elif cmd == "GET_REPO_INFO":
             repo = params["repo"]

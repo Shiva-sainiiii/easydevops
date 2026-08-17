@@ -17,6 +17,67 @@ provider_bp = Blueprint("provider_routes", __name__)
 
 
 # ════════════════════════════════════════════════════════════════
+#  CLIENT-SIDE TOKEN PRE-VALIDATION (tick/cross before submit)
+#
+#  Same three "who am I" calls the real /connect routes already make,
+#  just exposed standalone and read-only — no DB write, no session
+#  requirement beyond being logged into GitHub (these tokens aren't
+#  saved anywhere by this endpoint). The frontend debounces calls to
+#  this as the user types/pastes into the token field, so a bad paste
+#  shows a ✗ immediately instead of only failing after the user hits
+#  Connect and round-trips through the real /connect route.
+#
+#  Deliberately separate from /connect rather than a shared helper with
+#  a "dry_run" flag — keeping the actual token-saving path free of any
+#  validate-only branching is worth the small duplication of the three
+#  short whoami calls below.
+# ════════════════════════════════════════════════════════════════
+_VALIDATE_ENDPOINTS = {
+    "vercel": ("https://api.vercel.com/v2/user", lambda j: j.get("user", {}).get("username") or j.get("user", {}).get("email")),
+    "netlify": ("https://api.netlify.com/api/v1/user", lambda j: j.get("email") or j.get("full_name")),
+    "render": ("https://api.render.com/v1/users", lambda j: (j[0] if isinstance(j, list) and j else j if isinstance(j, dict) else {}).get("email") or (j[0] if isinstance(j, list) and j else j if isinstance(j, dict) else {}).get("name")),
+}
+
+
+@provider_bp.route("/api/<provider>/validate", methods=["POST"])
+def validate_provider_token(provider):
+    user = current_user()
+    if not user:
+        return safe_jsonify({"valid": False, "reason": "not_logged_in"}), 401
+
+    if provider not in _VALIDATE_ENDPOINTS:
+        return safe_jsonify({"valid": False, "reason": "unknown_provider"}), 400
+
+    body = request.json or {}
+    token = (body.get("token") or "").strip()
+    if not token:
+        return safe_jsonify({"valid": False, "reason": "empty"})
+
+    url, extract_label = _VALIDATE_ENDPOINTS[provider]
+    try:
+        r = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=10,
+        )
+    except requests.RequestException:
+        # Network hiccup talking to the provider shouldn't be shown as
+        # "invalid token" — the frontend treats this as inconclusive and
+        # just doesn't show a tick/cross yet, letting the real /connect
+        # call on submit be the final word.
+        return safe_jsonify({"valid": None, "reason": "network_error"})
+
+    if r.status_code != 200:
+        return safe_jsonify({"valid": False, "reason": "rejected"})
+
+    try:
+        label = extract_label(r.json())
+    except Exception:
+        label = None
+    return safe_jsonify({"valid": True, "label": label})
+
+
+# ════════════════════════════════════════════════════════════════
 #  VERCEL CONNECTION — manual API token paste (not OAuth).
 #
 #  WHY MANUAL TOKEN INSTEAD OF OAUTH:

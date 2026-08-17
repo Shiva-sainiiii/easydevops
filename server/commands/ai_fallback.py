@@ -29,6 +29,7 @@ COMMANDS:
 7. DELETE_FILE: {{"repo":"repo-name","path":"file.html","message":"reason"}}
 8. LIST_FILES: {{"repo":"repo-name","path":""}}
 9. GET_REPO_INFO: {{"repo":"repo-name"}}
+10. GENERATE_RENDER_YAML: {{"repo":"repo-name"}} — auto-detects the repo's stack and commits a render.yaml IaC blueprint
 {vercel_commands}{netlify_commands}{render_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
@@ -37,28 +38,28 @@ RULES:
 - NEVER output anything resembling a real token/secret, even as an example.
 {vercel_note}{netlify_note}{render_note}"""
 
-VERCEL_COMMANDS_BLOCK = """10. VERCEL_LIST_PROJECTS
-11. VERCEL_IMPORT_REPO: {"repo":"repo-name","project_name":"optional-custom-name"}
-12. VERCEL_DEPLOY: {"project_name":"project-name"}
-13. VERCEL_DELETE_PROJECT: {"project_name":"project-name"}
-14. VERCEL_GET_ENV: {"project_name":"project-name"}
-15. VERCEL_SET_ENV: {"project_name":"project-name","key":"KEY","value":"value"}
-16. VERCEL_ROLLBACK: {"project_name":"project-name","deployment_id":"optional-specific-id"} — omit deployment_id to rollback to the previous production deployment
-17. VERCEL_LIST_DEPLOYMENTS: {"project_name":"project-name"}
+VERCEL_COMMANDS_BLOCK = """11. VERCEL_LIST_PROJECTS
+12. VERCEL_IMPORT_REPO: {"repo":"repo-name","project_name":"optional-custom-name"}
+13. VERCEL_DEPLOY: {"project_name":"project-name"}
+14. VERCEL_DELETE_PROJECT: {"project_name":"project-name"}
+15. VERCEL_GET_ENV: {"project_name":"project-name"}
+16. VERCEL_SET_ENV: {"project_name":"project-name","key":"KEY","value":"value"}
+17. VERCEL_ROLLBACK: {"project_name":"project-name","deployment_id":"optional-specific-id"} — omit deployment_id to rollback to the previous production deployment
+18. VERCEL_LIST_DEPLOYMENTS: {"project_name":"project-name"}
 """
 
-NETLIFY_COMMANDS_BLOCK = """16. NETLIFY_LIST_SITES
-17. NETLIFY_GET_SITE_INFO: {"site_name":"site-name"}
-18. NETLIFY_DELETE_SITE: {"site_name":"site-name"}
-19. NETLIFY_GET_ENV: {"site_name":"site-name"}
-20. NETLIFY_SET_ENV: {"site_name":"site-name","key":"KEY","value":"value"}
+NETLIFY_COMMANDS_BLOCK = """19. NETLIFY_LIST_SITES
+20. NETLIFY_GET_SITE_INFO: {"site_name":"site-name"}
+21. NETLIFY_DELETE_SITE: {"site_name":"site-name"}
+22. NETLIFY_GET_ENV: {"site_name":"site-name"}
+23. NETLIFY_SET_ENV: {"site_name":"site-name","key":"KEY","value":"value"}
 """
 
-RENDER_COMMANDS_BLOCK = """21. RENDER_LIST_SERVICES
-22. RENDER_DELETE_SERVICE: {"service_id":"srv-xxx"}
-23. RENDER_GET_ENV: {"service_id":"srv-xxx"}
-24. RENDER_SET_ENV: {"service_id":"srv-xxx","env_vars":{"KEY":"value"}}
-25. RENDER_DEPLOY: {"service_id":"srv-xxx","clear_cache":false}
+RENDER_COMMANDS_BLOCK = """24. RENDER_LIST_SERVICES
+25. RENDER_DELETE_SERVICE: {"service_id":"srv-xxx"}
+26. RENDER_GET_ENV: {"service_id":"srv-xxx"}
+27. RENDER_SET_ENV: {"service_id":"srv-xxx","env_vars":{"KEY":"value"}}
+28. RENDER_DEPLOY: {"service_id":"srv-xxx","clear_cache":false}
 """
 
 CODEGEN_SYSTEM_PROMPT = """You generate file content for a developer tool. Output ONLY the raw file content — no markdown fences, no explanation. Write complete, working code. Infer language from the file path."""
@@ -66,6 +67,7 @@ CODEGEN_SYSTEM_PROMPT = """You generate file content for a developer tool. Outpu
 COMMANDS = [
     "CREATE_REPO:", "DELETE_REPO:", "LIST_REPOS", "CREATE_FILE:",
     "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
+    "GENERATE_RENDER_YAML:",
     "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
     "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_SET_ENV:",
     "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",

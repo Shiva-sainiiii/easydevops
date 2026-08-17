@@ -19,6 +19,7 @@ from server.commands.executor import execute_command
 from server.commands.intent_parser import parse_intent, NO_ARG_COMMANDS
 from server.commands.ai_fallback import call_openrouter_chat, extract_command, handle_create_or_edit_file
 from server.commands.code_generate import handle_code_generate
+from server.commands.render_blueprint import generate_render_yaml
 
 chat_bp = Blueprint("chat_routes", __name__)
 
@@ -86,6 +87,14 @@ def chat():
                 return safe_jsonify({"reply": "AI ne content generate karne me bahut time lagaya. Dobara try karo 🔄", "action": "error", "source": "hybrid"})
             except Exception as e:
                 return safe_jsonify({"reply": f"❌ Error: {str(e)}", "action": "error", "source": "hybrid"})
+
+        if cmd == "GENERATE_RENDER_YAML":
+            try:
+                result = generate_render_yaml(params["repo"], owner, gh_token)
+                result["source"] = "direct"
+                return safe_jsonify(result)
+            except Exception as e:
+                return safe_jsonify({"reply": f"❌ Error: {str(e)}", "action": "error", "source": "direct"})
 
         if cmd == "CODE_GENERATE":
             try:

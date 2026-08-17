@@ -5,13 +5,14 @@ dropdowns), plus the Vercel live-build-log polling endpoint and the
 AI error-analysis endpoint used by the deploy terminal drawer.
 """
 import requests
+import base64
 from flask import Blueprint, request
 
 from server.config import OPENROUTER_KEY
 from server.auth import current_user
 from server.db import decrypt_token, get_user_vercel_token
-from server.security import safe_jsonify, redact
-from server.providers.github import gh_api
+from server.security import safe_jsonify, redact, safe_repo_path, UnsafePathError
+from server.providers.github import gh_api, get_file_sha
 from server.providers.vercel import vc_api, VERCEL_TERMINAL_STATES
 from server.commands.ai_fallback import OPENROUTER_MODEL
 
@@ -82,6 +83,117 @@ def api_repo_files():
     tree = tree_r.json().get("tree", [])
     files = sorted({item["path"] for item in tree if item.get("type") == "blob"})[:500]
     return safe_jsonify({"files": files})
+
+
+# ════════════════════════════════════════════════════════════════
+#  INLINE CODE EDITOR — backs the editor overlay in the frontend.
+#
+#  GET  /api/file-source  — fetches decoded text content for the editor
+#       to open. Kept separate from the existing /download route
+#       (file_routes.py) because that one streams raw bytes with a
+#       Content-Disposition download header; this one returns JSON text
+#       for the editor to bind to a <textarea>/CodeMirror doc.
+#
+#  POST /api/file-source  — commits editor content directly via a single
+#       GitHub contents PUT, same call shape execute_command's EDIT_FILE
+#       branch uses. Deliberately NOT routed through EDIT_FILE's normal
+#       /chat path, since that path always sends the instruction through
+#       OpenRouter for AI content-gen (see handle_create_or_edit_file) —
+#       a manual editor save already HAS the exact final content the user
+#       wants and shouldn't be rewritten by an LLM in between. Still goes
+#       through the same safe_repo_path() guard and sha-based update as
+#       every other file-write surface.
+# ════════════════════════════════════════════════════════════════
+MAX_EDITOR_FILE_BYTES = 2 * 1024 * 1024  # 2MB — generous for a text editor, keeps huge binaries out
+
+
+@api_bp.route("/api/file-source", methods=["GET"])
+def api_file_source():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "❌ Login chahiye.", "action": "error"}), 401
+    gh_token = decrypt_token(user["github_token_encrypted"])
+    owner = user["github_login"]
+
+    repo = (request.args.get("repo") or "").strip()
+    path = (request.args.get("path") or "").strip().lstrip("/")
+    if not repo or not path:
+        return safe_jsonify({"reply": "❌ repo aur path chahiye.", "action": "error"}), 400
+
+    r = gh_api("GET", f"/repos/{owner}/{repo}/contents/{path}", gh_token)
+    if r.status_code != 200:
+        msg = r.json().get("message", "File nahi mili") if r.content else "File nahi mili"
+        return safe_jsonify({"reply": f"❌ GitHub: {msg}", "action": "error"}), r.status_code
+
+    data = r.json()
+    if data.get("type") != "file":
+        return safe_jsonify({"reply": "❌ Ye path ek file nahi hai.", "action": "error"}), 400
+    if data.get("size", 0) > MAX_EDITOR_FILE_BYTES:
+        return safe_jsonify({"reply": "❌ File bahut badi hai editor ke liye (2MB+). Download karke local me edit karo.", "action": "error"}), 413
+
+    raw = base64.b64decode(data["content"])
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return safe_jsonify({"reply": "❌ Ye binary file lag rahi hai — text editor me nahi khul sakti.", "action": "error"}), 400
+
+    return safe_jsonify({"repo": repo, "path": path, "content": text, "sha": data.get("sha")})
+
+
+@api_bp.route("/api/file-source", methods=["POST"])
+def api_file_source_save():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "❌ Login chahiye.", "action": "error"}), 401
+    gh_token = decrypt_token(user["github_token_encrypted"])
+    owner = user["github_login"]
+
+    body = request.json or {}
+    repo = (body.get("repo") or "").strip()
+    raw_path = (body.get("path") or "").strip()
+    content = body.get("content")
+    expected_sha = (body.get("sha") or "").strip()
+    message = (body.get("message") or "").strip()
+
+    if not repo or not raw_path or content is None:
+        return safe_jsonify({"reply": "❌ repo, path aur content chahiye.", "action": "error"}), 400
+
+    try:
+        path = safe_repo_path(raw_path)
+    except UnsafePathError as e:
+        return safe_jsonify({"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}), 400
+
+    if len(content.encode("utf-8")) > MAX_EDITOR_FILE_BYTES:
+        return safe_jsonify({"reply": "❌ Content bahut bada hai (2MB+).", "action": "error"}), 413
+
+    current_sha = get_file_sha(repo, path, owner, gh_token)
+    if not current_sha:
+        return safe_jsonify({"reply": f"❌ File `{path}` exist nahi karti repo `{repo}` me.", "action": "error"}), 404
+
+    # If the caller's sha doesn't match what's on GitHub right now, someone
+    # else (or another tab) changed the file since the editor opened it —
+    # refuse to blindly overwrite; the frontend surfaces this as a conflict
+    # and offers to reload the latest content before saving again.
+    if expected_sha and expected_sha != current_sha:
+        return safe_jsonify({
+            "reply": "⚠️ Ye file editor khulne ke baad kahi aur se update hui hai. Latest version reload karke dubara edit karo.",
+            "action": "conflict",
+        }), 409
+
+    if not message:
+        message = f"Edit {path} via inline editor"
+
+    payload = {"message": message, "content": base64.b64encode(content.encode("utf-8")).decode(), "sha": current_sha}
+    r = gh_api("PUT", f"/repos/{owner}/{repo}/contents/{path}", gh_token, json=payload)
+    if r.status_code in (200, 201):
+        url = r.json()["content"]["html_url"]
+        new_sha = r.json()["content"]["sha"]
+        return safe_jsonify({
+            "reply": f"✅ File save ho gayi!\n**{path}**\n🔗 {url}",
+            "action": "update_file", "url": url, "repo": repo, "path": path, "sha": new_sha,
+        })
+    err = r.json().get("message", "Save nahi hui") if r.content else "Save nahi hui"
+    return safe_jsonify({"reply": f"❌ GitHub Error: {err}", "action": "error"}), r.status_code
 
 
 @api_bp.route("/api/vercel/deploy-events", methods=["GET"])

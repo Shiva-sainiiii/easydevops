@@ -173,6 +173,13 @@ INTENT_RULES = [
         rf"deploy\s+({SLUG})\s+(?:to|pe|on)\s+render",
     ], lambda m: {"service_id": _g(m, 1)}),
 
+    ("GENERATE_RENDER_YAML", [
+        rf"(?:generate|bana|banao|bana\s*do|create)\s+(?:a\s+|ek\s+)?render\.?ya?ml\s+(?:for|in|of)\s+({SLUG})",
+        rf"({SLUG})\s+(?:ke\s+liye|ka)\s+render\.?ya?ml\s+(?:generate|bana|banao|bana\s*do)",
+        rf"render\.?ya?ml\s+(?:generate|bana|banao|bana\s*do)\s+(?:for|in)\s+({SLUG})",
+        rf"^({SLUG})\s+(?:ke\s+liye\s+)?(?:blueprint|iac)\s+(?:generate|bana|banao)",
+    ], lambda m: {"repo": _g(m, 1)}),
+
     # ── CODE_GENERATE (multi-file agentic build/edit) ──
     # Deliberately placed LAST: its patterns are the broadest in this list
     # (any "<verb> ... in <repo>" or "<repo> mein <verb> ..." shape), and
