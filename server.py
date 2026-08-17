@@ -805,6 +805,64 @@ def get_file_sha(repo, path, owner, gh_token):
     return None
 
 
+class UnsafePathError(ValueError):
+    """Raised by safe_repo_path() when a path can't be trusted as staying
+    inside the target repo — see that function for what's rejected."""
+    pass
+
+
+def safe_repo_path(raw_path):
+    """Normalizes and validates a path before it's used in any GitHub
+    contents/tree API call. Every write surface in this file (CREATE_FILE,
+    EDIT_FILE, DELETE_FILE, the multi-file CODE_GENERATE commit, /upload,
+    /upload-zip) MUST route the caller-supplied path through this before
+    using it — none of them previously did, which meant a path like
+    "../../.github/workflows/evil.yml" (typed by a user, or emitted by the
+    AI codegen path in response to an instruction that asked for it) would
+    be committed exactly where its `..` segments pointed, since GitHub's
+    Git Data API does not itself sandbox `..` in tree/content paths the
+    way a filesystem call would.
+
+    Rejects (raises UnsafePathError):
+      - empty path after stripping
+      - any path containing a literal ".." segment (traversal)
+      - absolute-looking paths (leading "/" after our own normalization
+        would already be gone, but also reject a leading "~" or a drive
+        letter like "C:" defensively)
+      - paths escaping into a dotfile-looking root segment that isn't
+        meant to be user-writable in this app's own workflow directory
+        (".github/") — this app's own CI config living in the same repo
+        namespace as user content is exactly the kind of target this
+        function exists to protect, so it's blocked outright rather than
+        merely traversal-checked.
+
+    Returns the cleaned, forward-slash path on success.
+    """
+    if raw_path is None:
+        raise UnsafePathError("path missing")
+    path = str(raw_path).strip().replace("\\", "/")
+    path = path.lstrip("/")
+    if not path:
+        raise UnsafePathError("path empty")
+    if path.startswith("~") or re.match(r"^[a-zA-Z]:", path):
+        raise UnsafePathError("absolute-looking path not allowed")
+
+    segments = path.split("/")
+    cleaned = []
+    for seg in segments:
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            raise UnsafePathError("path traversal ('..') not allowed")
+        cleaned.append(seg)
+    if not cleaned:
+        raise UnsafePathError("path empty after normalization")
+    if cleaned[0] == ".github":
+        raise UnsafePathError("writes under .github/ are not allowed via chat/codegen")
+
+    return "/".join(cleaned)
+
+
 # ════════════════════════════════════════════════════════════════
 #  DESTRUCTIVE-ACTION CONFIRMATION
 #  Same pattern as the single-user version, but the token binds
@@ -823,6 +881,7 @@ def confirm_token(cmd, value, user_id):
 def build_confirmation(cmd, params, user_id):
     value = json.dumps(params, sort_keys=True)
     token = confirm_token(cmd, value, user_id)
+    action_verb = "delete"  # default headline verb for the confirm prompt
 
     if cmd == "DELETE_REPO":
         target_desc = f"GitHub repo `{params.get('repo')}`"
@@ -840,6 +899,7 @@ def build_confirmation(cmd, params, user_id):
         target_desc = f"Render service `{params.get('service_id')}`"
         warn_text = "Service permanently delete ho jayegi — logs, deploy history, sab kuch. Wapas nahi aayega."
     elif cmd == "VERCEL_ROLLBACK":
+        action_verb = "rollback"
         dep_desc = f" deployment `{params.get('deployment_id')}`" if params.get("deployment_id") else " pichli production deployment"
         target_desc = f"Vercel project `{params.get('project_name')}`"
         warn_text = (f"Live traffic{dep_desc} pe switch ho jayega — abhi ki production deployment se hat jayega. "
@@ -848,12 +908,16 @@ def build_confirmation(cmd, params, user_id):
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."
 
+    headline = (f"{target_desc} delete karne wala hu." if action_verb == "delete"
+                else f"{target_desc} ko rollback karne wala hu.")
+
     return {
-        "reply": f"⚠️ **Pakka?**\n\n{target_desc} delete karne wala hu.\n\n{warn_text}",
+        "reply": f"⚠️ **Pakka?**\n\n{headline}\n\n{warn_text}",
         "action": "confirm_required",
         "pending_command": cmd,
         "pending_value": value,
         "confirm_token": token,
+        "confirm_verb": action_verb,
         "source": "direct",
     }
 
@@ -945,7 +1009,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"❌ File nahi mili: {r.json().get('message','')}", "action": "error"}
 
         elif cmd == "CREATE_FILE":
-            repo, path, content = params["repo"], params["path"], params["content"]
+            repo, content = params["repo"], params["content"]
+            try:
+                path = safe_repo_path(params["path"])
+            except UnsafePathError as e:
+                return {"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}
             message = params.get("message", f"Add {path} via DevOps Agent")
             content_b64 = base64.b64encode(content.encode()).decode()
             existing_sha = get_file_sha(repo, path, owner, gh_token)
@@ -962,7 +1030,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"❌ GitHub Error: {r.json().get('message','File nahi bani')}", "action": "error"}
 
         elif cmd == "EDIT_FILE":
-            repo, path, content = params["repo"], params["path"], params["content"]
+            repo, content = params["repo"], params["content"]
+            try:
+                path = safe_repo_path(params["path"])
+            except UnsafePathError as e:
+                return {"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}
             message = params.get("message", f"Update {path} via DevOps Agent")
             sha = get_file_sha(repo, path, owner, gh_token)
             if not sha:
@@ -977,7 +1049,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"❌ Update Error: {r.json().get('message','')}", "action": "error"}
 
         elif cmd == "DELETE_FILE":
-            repo, path = params["repo"], params["path"]
+            repo = params["repo"]
+            try:
+                path = safe_repo_path(params["path"])
+            except UnsafePathError as e:
+                return {"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}
             message = params.get("message", f"Delete {path} via DevOps Agent")
             sha = get_file_sha(repo, path, owner, gh_token)
             if not sha:
@@ -2181,8 +2257,17 @@ def handle_code_generate(params, owner, gh_token):
     skipped = []
 
     for f in files:
-        path = (f.get("path") or "").strip().lstrip("/")
-        if not path:
+        raw_path = (f.get("path") or "").strip()
+        if not raw_path:
+            continue
+        try:
+            path = safe_repo_path(raw_path)
+        except UnsafePathError:
+            # AI-generated path failed validation (traversal, .github/, etc.)
+            # — skip this one file rather than fail the whole multi-file
+            # commit, and surface it in the same "skipped" note the user
+            # already sees for snippet-match misses.
+            skipped.append(f"{raw_path} (unsafe path, skip ho gaya)")
             continue
         action = f.get("action")
         if action == "create" or path not in existing_set:
@@ -2677,7 +2762,7 @@ def upload_file():
     owner = user["github_login"]
 
     repo = (request.form.get("repo") or "").strip()
-    path = (request.form.get("path") or "").strip().lstrip("/")
+    path = (request.form.get("path") or "").strip()
     message = (request.form.get("message") or "").strip()
     f = request.files.get("file")
 
@@ -2687,6 +2772,10 @@ def upload_file():
         return safe_jsonify({"reply": "❌ Koi file select nahi hui.", "action": "error", "source": "direct"}), 400
     if not path:
         path = f.filename
+    try:
+        path = safe_repo_path(path)
+    except UnsafePathError as e:
+        return safe_jsonify({"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error", "source": "direct"}), 400
 
     raw = f.read()
     if len(raw) > MAX_UPLOAD_BYTES:
@@ -2747,7 +2836,7 @@ def upload_zip():
     owner = user["github_login"]
 
     repo = (request.form.get("repo") or "").strip()
-    dest_dir = (request.form.get("path") or "").strip().strip("/")
+    dest_dir_raw = (request.form.get("path") or "").strip().strip("/")
     message = (request.form.get("message") or "").strip()
     f = request.files.get("file")
 
@@ -2757,6 +2846,13 @@ def upload_zip():
         return safe_jsonify({"reply": "❌ Koi zip file select nahi hui.", "action": "error", "source": "direct"}), 400
     if not f.filename.lower().endswith(".zip"):
         return safe_jsonify({"reply": "❌ Ye zip file nahi lag rahi. `.zip` extension chahiye.", "action": "error", "source": "direct"}), 400
+
+    dest_dir = ""
+    if dest_dir_raw:
+        try:
+            dest_dir = safe_repo_path(dest_dir_raw)
+        except UnsafePathError as e:
+            return safe_jsonify({"reply": f"❌ Destination folder allowed nahi hai: {e}", "action": "error", "source": "direct"}), 400
 
     raw = f.read()
     if len(raw) > MAX_ZIP_BYTES:
@@ -2812,9 +2908,22 @@ def upload_zip():
     base_tree_sha = base_commit_r.json()["tree"]["sha"]
 
     tree_entries = []
+    zip_skipped = []
     for clean_path, orig_name in entries_map.items():
+        raw_full_path = f"{dest_dir}/{clean_path}" if dest_dir else clean_path
+        try:
+            full_path = safe_repo_path(raw_full_path)
+        except UnsafePathError:
+            # A zip entry name itself can contain "../" (this is the
+            # classic "zip slip" attack: a crafted archive whose internal
+            # entry names point outside the intended extraction root).
+            # Previously full_path was used as-is with no check, so such
+            # an entry would be committed exactly where its ".." pointed
+            # inside the repo tree. Skip just this entry rather than fail
+            # the whole upload.
+            zip_skipped.append(clean_path)
+            continue
         file_bytes = zf.read(orig_name)
-        full_path = f"{dest_dir}/{clean_path}" if dest_dir else clean_path
         content_b64 = base64.b64encode(file_bytes).decode()
         blob_r = gh_api("POST", f"/repos/{owner}/{repo}/git/blobs", gh_token,
                          json={"content": content_b64, "encoding": "base64"})
@@ -2824,6 +2933,10 @@ def upload_zip():
                                   "action": "error", "source": "direct"}), 500
         blob_sha = blob_r.json()["sha"]
         tree_entries.append({"path": full_path, "mode": "100644", "type": "blob", "sha": blob_sha})
+
+    if not tree_entries:
+        return safe_jsonify({"reply": "❌ Zip me koi safe/usable file nahi mili (saare entries unsafe paths the).",
+                              "action": "error", "source": "direct"}), 400
 
     tree_r = gh_api("POST", f"/repos/{owner}/{repo}/git/trees", gh_token,
                      json={"base_tree": base_tree_sha, "tree": tree_entries})
@@ -2849,10 +2962,11 @@ def upload_zip():
     dest_display = f"{repo}/{dest_dir}" if dest_dir else repo
     file_list_preview = "\n".join(f"• {p}" for p in sorted(entries_map.keys())[:15])
     more_note = f"\n… +{len(entries_map) - 15} more" if len(entries_map) > 15 else ""
+    skip_note = f"\n\n⚠️ Unsafe path hone ki wajah se skip hui: {', '.join(zip_skipped)}" if zip_skipped else ""
 
     return safe_jsonify({
-        "reply": f"✅ Zip extract ho gayi aur push ho gayi!\n**{len(entries_map)} files** → `{dest_display}`\n\n{file_list_preview}{more_note}\n\n🔗 {repo_url}/tree/{default_branch}/{dest_dir if dest_dir else ''}",
-        "action": "create_file", "repo": repo, "source": "direct", "file_count": len(entries_map)
+        "reply": f"✅ Zip extract ho gayi aur push ho gayi!\n**{len(tree_entries)} files** → `{dest_display}`\n\n{file_list_preview}{more_note}{skip_note}\n\n🔗 {repo_url}/tree/{default_branch}/{dest_dir if dest_dir else ''}",
+        "action": "create_file", "repo": repo, "source": "direct", "file_count": len(tree_entries)
     })
 
 

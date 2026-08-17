@@ -2975,6 +2975,11 @@ const COMMANDS = [
   { id: 'VERCEL_DELETE', tpl: 'delete vercel project {project_name}',         desc: 'Vercel · delete a project ⚠️',         kw: ['delete','uda','hata','vercel','project'], vercel: true },
   { id: 'VERCEL_ENV_GET', tpl: 'get env for {project_name} vercel',           desc: 'Vercel · view environment variables',  kw: ['env','environment','vars','get','show','vercel'], vercel: true },
   { id: 'VERCEL_ENV_SET', tpl: 'set vercel env {KEY}={value} for {project_name}', desc: 'Vercel · set an environment variable', kw: ['set','env','vercel','add','update'], vercel: true },
+  { id: 'VERCEL_LIST_DEPLOYMENTS', tpl: 'list deployments for {project_name} vercel', desc: 'Vercel · list recent production deployments', kw: ['deployments','history','list','vercel','recent'], vercel: true },
+  { id: 'VERCEL_ROLLBACK', tpl: 'rollback {project_name} to previous version', desc: 'Vercel · roll back to a previous deployment ⚠️', kw: ['rollback','revert','undo','previous','pichli','vercel'], vercel: true },
+
+  // ── AI CODE GENERATION (multi-file, no provider gate) ──
+  { id: 'CODE_GENERATE', tpl: 'build {feature} in {repo}',                    desc: 'AI · generate/edit code across the repo', kw: ['build','banao','code','editor','edit','fix','feature','create','refactor'] },
 
   // ── NETLIFY (only surfaced once connected) ──
   { id: 'NETLIFY_LIST',  tpl: 'list netlify sites',                          desc: 'Netlify · list all sites',             kw: ['list','netlify','sites','sare','dikhao'], netlify: true },
@@ -4164,7 +4169,8 @@ async function requestFileRowDelete(repo, path, btnEl) {
       addMessage('agent', data.reply, 'warning', {
         pending_command: data.pending_command,
         pending_value: data.pending_value,
-        confirm_token: data.confirm_token
+        confirm_token: data.confirm_token,
+        confirm_verb: data.confirm_verb
       });
     } else {
       addMessage('agent', data.reply, actionColorFor(data.action));
@@ -4510,9 +4516,16 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     const actions = document.createElement('div');
     actions.className = 'confirm-actions';
 
+    // Server tells us which verb this confirmation is actually for
+    // (confirm_verb: 'delete' | 'rollback', see build_confirmation in
+    // server.py) — previously this button always said "Delete" even for
+    // non-destructive-but-still-consequential actions like
+    // VERCEL_ROLLBACK, which is misleading about what's about to happen.
+    const isRollback = confirmData.confirm_verb === 'rollback';
+
     const yesBtn = document.createElement('button');
     yesBtn.className = 'confirm-btn danger';
-    yesBtn.textContent = 'Haan, Delete Karo';
+    yesBtn.textContent = isRollback ? 'Haan, Rollback Karo' : 'Haan, Delete Karo';
     yesBtn.onclick = () => runConfirmedAction(confirmData, yesBtn, noBtn);
 
     const noBtn = document.createElement('button');
@@ -4521,7 +4534,7 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     noBtn.onclick = () => {
       yesBtn.disabled = true;
       noBtn.disabled = true;
-      addMessage('agent', 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
+      addMessage('agent', isRollback ? 'Theek hai, cancel kar diya. Rollback nahi hua.' : 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
     };
 
     actions.appendChild(yesBtn);
@@ -4880,7 +4893,8 @@ async function sendMsg() {
       addMessage('agent', data.reply, 'warning', {
         pending_command: data.pending_command,
         pending_value: data.pending_value,
-        confirm_token: data.confirm_token
+        confirm_token: data.confirm_token,
+        confirm_verb: data.confirm_verb
       });
       return;
     }
@@ -5148,6 +5162,17 @@ function closeDrawer() {
 let deployTerminalPollTimer = null;
 let deployTerminalSince = 0;
 let deployTerminalActive = false;
+let deployTerminalConsecutiveErrors = 0;
+let deployTerminalPollCount = 0;
+
+// Safety caps so a bad deployment_id (e.g. one that 404s forever) or a
+// persistent network failure can't leave this polling silently forever
+// in the background: a fixed number of consecutive network-error retries
+// (with linear backoff), and a hard ceiling on total polls regardless of
+// state (covers "state never leaves UNKNOWN" — that's also not in
+// VERCEL_TERMINAL_STATES so `done` would never naturally become true).
+const DEPLOY_POLL_MAX_CONSECUTIVE_ERRORS = 5;
+const DEPLOY_POLL_MAX_TOTAL_POLLS = 240; // ~ safety ceiling regardless of interval/backoff
 
 // Heuristic for coloring a log line as an error in the terminal — Vercel's
 // build output doesn't tag lines with a severity, so this matches on the
@@ -5155,8 +5180,22 @@ let deployTerminalActive = false;
 const DEPLOY_ERROR_LINE_RE = /\b(error|failed|exception|traceback|fatal|cannot find module|enoent|npm err!)\b/i;
 
 function openDeployTerminal(deploymentId, projectName) {
+  // A previous deployment's poll loop may still have a pending setTimeout
+  // if this is called again before that one reached a terminal/closed
+  // state (e.g. user redeploys while the last terminal was still open).
+  // Without this, the old timer fires later with the OLD deploymentId
+  // still in its closure and both loops write into the same log/status
+  // DOM concurrently. Clearing it here guarantees only one loop is ever
+  // in flight.
+  if (deployTerminalPollTimer) {
+    clearTimeout(deployTerminalPollTimer);
+    deployTerminalPollTimer = null;
+  }
+
   deployTerminalActive = true;
   deployTerminalSince = 0;
+  deployTerminalConsecutiveErrors = 0;
+  deployTerminalPollCount = 0;
   errorAnalysisRequested = false;
 
   const overlay = document.getElementById('deploy-terminal-overlay');
@@ -5194,8 +5233,35 @@ function closeDeployTerminal() {
   document.getElementById('deploy-terminal').classList.remove('show');
 }
 
+// Ends the poll loop and shows a clear "give up" state, instead of the
+// loop just silently stopping — a stuck "Building…" bubble with polling
+// quietly dead in the background (or, before this fix, quietly running
+// forever) is worse than a message that says "we're not sure, check
+// Vercel directly."
+function stopDeployPollingWithMessage(text) {
+  deployTerminalActive = false;
+  if (deployTerminalPollTimer) {
+    clearTimeout(deployTerminalPollTimer);
+    deployTerminalPollTimer = null;
+  }
+  const panel = document.getElementById('deploy-terminal');
+  const statusEl = document.getElementById('deploy-terminal-status');
+  if (panel) panel.classList.add('state-error');
+  if (statusEl) {
+    statusEl.textContent = text;
+    statusEl.className = 'deploy-terminal-status is-error';
+  }
+  appendDeployLogLine(text, true);
+}
+
 async function pollDeployEvents(deploymentId) {
   if (!deployTerminalActive) return;
+
+  deployTerminalPollCount++;
+  if (deployTerminalPollCount > DEPLOY_POLL_MAX_TOTAL_POLLS) {
+    stopDeployPollingWithMessage('⏱️ Bahut der ho gayi status confirm karne me. Vercel dashboard pe seedha check karo.');
+    return;
+  }
 
   const log = document.getElementById('deploy-terminal-log');
   const panel = document.getElementById('deploy-terminal');
@@ -5206,15 +5272,25 @@ async function pollDeployEvents(deploymentId) {
   try {
     const url = `/api/vercel/deploy-events?deployment_id=${encodeURIComponent(deploymentId)}&since=${deployTerminalSince}`;
     const res = await fetch(url);
-    const data = await res.json();
 
     if (res.status === 401) {
       appendDeployLogLine('Session/Vercel connection expired.', true);
       statusEl.textContent = 'Connection expired';
       statusEl.className = 'deploy-terminal-status is-error';
       panel.classList.add('state-error');
+      deployTerminalActive = false;
       return;
     }
+
+    if (!res.ok) {
+      // Non-401 HTTP error (500, etc.) — treat like a network hiccup:
+      // retry with the same backoff/cap as a thrown fetch error, rather
+      // than trying to read a body that may not be the expected shape.
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    deployTerminalConsecutiveErrors = 0; // reset on any successful, well-formed response
 
     const emptyPlaceholder = log.querySelector('.deploy-log-empty');
     if (emptyPlaceholder && data.lines && data.lines.length) emptyPlaceholder.remove();
@@ -5245,10 +5321,19 @@ async function pollDeployEvents(deploymentId) {
       return; // terminal state reached — stop polling, leave panel open
     }
   } catch (err) {
-    appendDeployLogLine('Log stream se connect nahi ho paya, retry ho raha hai…', false);
+    deployTerminalConsecutiveErrors++;
+    if (deployTerminalConsecutiveErrors >= DEPLOY_POLL_MAX_CONSECUTIVE_ERRORS) {
+      stopDeployPollingWithMessage('❌ Log stream se baar-baar connect nahi ho paya. Ruk gaya — Vercel dashboard pe check karo.');
+      return;
+    }
+    appendDeployLogLine(`Log stream se connect nahi ho paya, retry ho raha hai… (${deployTerminalConsecutiveErrors}/${DEPLOY_POLL_MAX_CONSECUTIVE_ERRORS})`, false);
   }
 
-  deployTerminalPollTimer = setTimeout(() => pollDeployEvents(deploymentId), 2500);
+  // Linear backoff on consecutive network errors (2.5s → 5s → 7.5s...)
+  // instead of hammering a struggling connection/endpoint every 2.5s
+  // regardless of how many attempts have already failed.
+  const interval = 2500 + (deployTerminalConsecutiveErrors * 2500);
+  deployTerminalPollTimer = setTimeout(() => pollDeployEvents(deploymentId), interval);
 }
 
 // AI error troubleshooting — fires once per failed deployment. Collects the
