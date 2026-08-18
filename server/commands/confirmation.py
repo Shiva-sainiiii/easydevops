@@ -7,7 +7,8 @@ logged, shared in a bug report).
 import json
 import hashlib
 
-DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK"}
+DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK",
+                         "BULK_DELETE_FILES", "BULK_DELETE_REPOS", "BULK_DELETE_VERCEL_PROJECTS"}
 
 
 def confirm_token(cmd, value, user_id):
@@ -41,6 +42,18 @@ def build_confirmation(cmd, params, user_id):
         target_desc = f"Vercel project `{params.get('project_name')}`"
         warn_text = (f"Live traffic{dep_desc} pe switch ho jayega — abhi ki production deployment se hat jayega. "
                      f"Naye pushes bhi tab tak auto-deploy nahi honge jab tak wapas promote na karo.")
+    elif cmd == "BULK_DELETE_FILES":
+        paths = params.get("paths", [])
+        target_desc = f"{len(paths)} file{'s' if len(paths) != 1 else ''} in repo `{params.get('repo')}`"
+        warn_text = "Ye saari files repo se permanently hat jayengi. Wapas nahi aayengi."
+    elif cmd == "BULK_DELETE_REPOS":
+        repos = params.get("repos", [])
+        target_desc = f"{len(repos)} GitHub repo{'s' if len(repos) != 1 else ''} (`{', '.join(repos[:5])}{'…' if len(repos) > 5 else ''}`)"
+        warn_text = "Ye saare permanently delete ho jayenge — saara code, history, sab kuch. Wapas nahi aayenge."
+    elif cmd == "BULK_DELETE_VERCEL_PROJECTS":
+        projects = params.get("projects", [])
+        target_desc = f"{len(projects)} Vercel project{'s' if len(projects) != 1 else ''} (`{', '.join(projects[:5])}{'…' if len(projects) > 5 else ''}`)"
+        warn_text = "Ye saare Vercel projects aur unki deployments delete ho jayengi (GitHub repos safe rahenge)."
     else:
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."

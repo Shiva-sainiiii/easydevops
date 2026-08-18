@@ -194,7 +194,10 @@
 
     <div class="editor-body" id="editor-edit-pane">
       <div class="editor-gutter" id="editor-gutter"></div>
-      <textarea id="editor-textarea" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+      <div class="editor-highlight-wrap">
+        <pre id="editor-highlight" class="editor-highlight" aria-hidden="true"><code id="editor-highlight-code"></code></pre>
+        <textarea id="editor-textarea" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+      </div>
     </div>
 
     <div id="editor-diff-pane">
@@ -205,6 +208,31 @@
     <div class="editor-status-bar">
       <span id="editor-status-left">Loading…</span>
       <span class="editor-conflict" id="editor-conflict-note">⚠️ File changed elsewhere</span>
+    </div>
+  </div>
+
+  <!-- ═══ CARD DETAILS SHEET — repo/Vercel/Netlify/Render card tap ═══
+       Bottom sheet instead of an instant tap-to-redirect: shows name +
+       full meta, an explicit "Open live URL" action, and Delete. Same
+       DOM structure reused for all four activity kinds; content is
+       filled in by openCardDetailsSheet() in script.js. -->
+  <div id="card-details-overlay" class="card-details-overlay">
+    <div class="card-details-backdrop" id="card-details-backdrop"></div>
+    <div class="card-details-sheet">
+      <div class="card-details-handle"></div>
+      <div class="card-details-header">
+        <div class="card-details-icon" id="card-details-icon"></div>
+        <div class="card-details-titlewrap">
+          <div class="card-details-title" id="card-details-title"></div>
+          <div class="card-details-sub" id="card-details-sub"></div>
+        </div>
+      </div>
+      <div class="card-details-meta" id="card-details-meta"></div>
+      <div class="card-details-actions">
+        <a class="card-details-btn primary" id="card-details-open-btn" target="_blank" rel="noopener">Open live URL</a>
+        <button class="card-details-btn danger" id="card-details-delete-btn">Delete</button>
+        <button class="card-details-btn ghost" id="card-details-close-btn">Close</button>
+      </div>
     </div>
   </div>
 

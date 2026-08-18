@@ -2040,8 +2040,13 @@ function iconZip() {
 // Expects agentData.items = [{type, path, name}] from the server.
 function buildFileListBubble(repo, items) {
   const wrap = document.createElement('div');
+  wrap.className = 'file-list-bubble';
 
-  // Header line: repo name + a "download whole repo as zip" button.
+  // Header line: repo name + "select" toggle + "download as zip".
+  // Select-mode state lives on the wrap element itself (dataset flag)
+  // rather than a module-level variable, since multiple file-list
+  // bubbles can be open in the same chat history at once and each
+  // needs its own independent select state.
   const hdr = document.createElement('div');
   hdr.className = 'file-list-hdr';
 
@@ -2053,21 +2058,91 @@ function buildFileListBubble(repo, items) {
   hdrText.appendChild(document.createTextNode(' :'));
   hdr.appendChild(hdrText);
 
+  const hdrActions = document.createElement('div');
+  hdrActions.className = 'file-list-hdr-actions';
+
+  const selectBtn = document.createElement('button');
+  selectBtn.className = 'file-list-select-btn';
+  selectBtn.textContent = 'Select';
+  hdrActions.appendChild(selectBtn);
+
   const zipBtn = document.createElement('a');
   zipBtn.className = 'repo-zip-btn';
   zipBtn.href = `/download-repo-zip?repo=${encodeURIComponent(repo)}`;
   zipBtn.innerHTML = iconZip() + ' .zip';
   zipBtn.title = `Download ${repo} as zip`;
-  hdr.appendChild(zipBtn);
+  hdrActions.appendChild(zipBtn);
 
+  hdr.appendChild(hdrActions);
   wrap.appendChild(hdr);
+
+  // Bulk action bar — hidden until select-mode is on, then shows
+  // selected-count + "select all" + "delete selected".
+  const bulkBar = document.createElement('div');
+  bulkBar.className = 'file-list-bulk-bar';
+  const bulkCount = document.createElement('span');
+  bulkCount.className = 'file-list-bulk-count';
+  bulkCount.textContent = '0 selected';
+  const bulkSelectAllBtn = document.createElement('button');
+  bulkSelectAllBtn.className = 'file-list-bulk-selectall';
+  bulkSelectAllBtn.textContent = 'Select all';
+  const bulkDeleteBtn = document.createElement('button');
+  bulkDeleteBtn.className = 'file-list-bulk-delete';
+  bulkDeleteBtn.innerHTML = iconTrash() + ' Delete selected';
+  bulkDeleteBtn.disabled = true;
+  bulkBar.appendChild(bulkCount);
+  bulkBar.appendChild(bulkSelectAllBtn);
+  bulkBar.appendChild(bulkDeleteBtn);
+  wrap.appendChild(bulkBar);
 
   const list = document.createElement('div');
   list.className = 'file-list';
 
+  const checkboxes = []; // {checkbox, path} — only for file rows (dirs aren't selectable)
+
+  function updateBulkBar() {
+    const checked = checkboxes.filter(c => c.checkbox.checked);
+    bulkCount.textContent = `${checked.length} selected`;
+    bulkDeleteBtn.disabled = checked.length === 0;
+    bulkSelectAllBtn.textContent = checked.length === checkboxes.length && checkboxes.length > 0 ? 'Deselect all' : 'Select all';
+  }
+
+  function setSelectMode(on) {
+    wrap.classList.toggle('select-mode', on);
+    selectBtn.textContent = on ? 'Cancel' : 'Select';
+    if (!on) {
+      checkboxes.forEach(c => { c.checkbox.checked = false; });
+      updateBulkBar();
+    }
+  }
+
+  selectBtn.onclick = () => setSelectMode(!wrap.classList.contains('select-mode'));
+
+  bulkSelectAllBtn.onclick = () => {
+    const allChecked = checkboxes.every(c => c.checkbox.checked) && checkboxes.length > 0;
+    checkboxes.forEach(c => { c.checkbox.checked = !allChecked; });
+    updateBulkBar();
+  };
+
+  bulkDeleteBtn.onclick = () => {
+    const paths = checkboxes.filter(c => c.checkbox.checked).map(c => c.path);
+    if (paths.length) requestBulkFileDelete(repo, paths, bulkDeleteBtn, () => setSelectMode(false));
+  };
+
   items.forEach(item => {
     const row = document.createElement('div');
     row.className = 'file-row';
+
+    if (item.type !== 'dir') {
+      const checkboxWrap = document.createElement('label');
+      checkboxWrap.className = 'file-row-checkbox';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.onchange = updateBulkBar;
+      checkboxWrap.appendChild(checkbox);
+      row.appendChild(checkboxWrap);
+      checkboxes.push({ checkbox, path: item.path });
+    }
 
     const nameEl = document.createElement('div');
     nameEl.className = 'file-row-name';
@@ -2077,6 +2152,20 @@ function buildFileListBubble(repo, items) {
     if (item.type !== 'dir') {
       const rowActions = document.createElement('div');
       rowActions.className = 'file-row-actions';
+
+      const readBtn = document.createElement('button');
+      readBtn.className = 'file-read-btn';
+      readBtn.innerHTML = iconEye();
+      readBtn.title = 'Read ' + (item.path || '');
+      readBtn.onclick = () => resendMessage(`read file ${item.path} from ${repo}`);
+      rowActions.appendChild(readBtn);
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'file-edit-btn';
+      editBtn.innerHTML = iconEdit();
+      editBtn.title = 'Edit ' + (item.path || '');
+      editBtn.onclick = () => openCodeEditor(repo, item.path);
+      rowActions.appendChild(editBtn);
 
       const dlUrl = `/download?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(item.path)}`;
       const dlBtn = document.createElement('a');
@@ -2128,6 +2217,56 @@ function buildFileListBubble(repo, items) {
 
   wrap.appendChild(list);
   return wrap;
+}
+
+function iconEye() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+}
+
+// ── BULK FILE DELETE — multi-select delete via /api/bulk-action ──
+// Same two-phase confirm pattern as every other destructive action:
+// first call returns confirm_required, the Yes tap replays with
+// confirmed:true. Reuses the existing chat confirm-bubble UI by just
+// posting a normal agent message with the confirm data attached —
+// no separate confirm-dialog component needed for bulk ops.
+async function requestBulkFileDelete(repo, paths, btnEl, onDone) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  isLoading = true;
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+
+  try {
+    const res = await fetch('/api/bulk-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ op: 'delete_files', repo, paths }),
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command,
+        pending_value: data.pending_value,
+        confirm_token: data.confirm_token,
+        confirm_verb: data.confirm_verb,
+        bulk_op: 'delete_files',
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+    if (onDone) onDone();
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
 }
 
 // ── SWIPE-TO-ACTION GESTURE HANDLER (mobile file list rows) ──
@@ -2338,18 +2477,118 @@ function activityUrlFor(kind, item, owner) {
   return null;
 }
 
-// Builds the full bubble: header line ("Tere N repos:") + card grid.
-// `kind` is one of 'repo' | 'vercel' | 'netlify' | 'render'.
-// `onCardTap(item)` fires when a card without a direct URL is tapped
-// (e.g. Render services, which need an env/deploy command rather than
-// a link) — repo/Vercel/Netlify cards with a URL just open it directly.
+// Builds the full bubble: header line ("Tere N repos:") + select toggle
+// + bulk-action bar + card grid. `kind` is one of 'repo' | 'vercel' |
+// 'netlify' | 'render'.
+//
+// Cards no longer navigate on tap — tapping opens the details sheet
+// (openCardDetailsSheet) showing full meta with an explicit "Open live
+// URL" action and a Delete button, so a stray tap never leaves the app.
+// Render cards keep their special onCardTap behavior (env-var lookup)
+// since they don't have a single obvious live URL the way repo/Vercel/
+// Netlify do — that's passed straight through to the details sheet's
+// "primary" button slot instead of a URL.
 function buildActivityListBubble(kind, items, headerText, onCardTap) {
   const wrap = document.createElement('div');
+  wrap.className = 'activity-list-bubble';
 
   const hdr = document.createElement('div');
   hdr.className = 'activity-list-hdr';
-  hdr.textContent = headerText;
+  const hdrText = document.createElement('span');
+  hdrText.textContent = headerText;
+  hdr.appendChild(hdrText);
+
+  // Bulk select is only meaningful for repo and vercel kinds right now
+  // (bulk_actions.py only has delete/visibility ops for those two) —
+  // netlify/render keep the simple tap-to-details flow for now.
+  const supportsBulk = kind === 'repo' || kind === 'vercel';
+  let selectBtn = null;
+  if (supportsBulk) {
+    selectBtn = document.createElement('button');
+    selectBtn.className = 'activity-list-select-btn';
+    selectBtn.textContent = 'Select';
+    hdr.appendChild(selectBtn);
+  }
   wrap.appendChild(hdr);
+
+  const bulkBar = document.createElement('div');
+  bulkBar.className = 'activity-list-bulk-bar';
+  const checkboxes = []; // {checkbox, item}
+
+  let bulkCount, bulkSelectAllBtn, bulkPrivateBtn, bulkPublicBtn, bulkDeleteBtn;
+  if (supportsBulk) {
+    bulkCount = document.createElement('span');
+    bulkCount.className = 'activity-list-bulk-count';
+    bulkCount.textContent = '0 selected';
+    bulkBar.appendChild(bulkCount);
+
+    bulkSelectAllBtn = document.createElement('button');
+    bulkSelectAllBtn.className = 'activity-list-bulk-selectall';
+    bulkSelectAllBtn.textContent = 'Select all';
+    bulkBar.appendChild(bulkSelectAllBtn);
+
+    if (kind === 'repo') {
+      bulkPrivateBtn = document.createElement('button');
+      bulkPrivateBtn.className = 'activity-list-bulk-private';
+      bulkPrivateBtn.textContent = '🔒 Private';
+      bulkPrivateBtn.disabled = true;
+      bulkBar.appendChild(bulkPrivateBtn);
+
+      bulkPublicBtn = document.createElement('button');
+      bulkPublicBtn.className = 'activity-list-bulk-public';
+      bulkPublicBtn.textContent = '🌐 Public';
+      bulkPublicBtn.disabled = true;
+      bulkBar.appendChild(bulkPublicBtn);
+    }
+
+    bulkDeleteBtn = document.createElement('button');
+    bulkDeleteBtn.className = 'activity-list-bulk-delete';
+    bulkDeleteBtn.innerHTML = iconTrash() + ' Delete';
+    bulkDeleteBtn.disabled = true;
+    bulkBar.appendChild(bulkDeleteBtn);
+  }
+  wrap.appendChild(bulkBar);
+
+  function updateBulkBar() {
+    const checked = checkboxes.filter(c => c.checkbox.checked);
+    bulkCount.textContent = `${checked.length} selected`;
+    bulkDeleteBtn.disabled = checked.length === 0;
+    if (bulkPrivateBtn) bulkPrivateBtn.disabled = checked.length === 0;
+    if (bulkPublicBtn) bulkPublicBtn.disabled = checked.length === 0;
+    bulkSelectAllBtn.textContent = checked.length === checkboxes.length && checkboxes.length > 0 ? 'Deselect all' : 'Select all';
+  }
+
+  function setSelectMode(on) {
+    wrap.classList.toggle('select-mode', on);
+    selectBtn.textContent = on ? 'Cancel' : 'Select';
+    if (!on) {
+      checkboxes.forEach(c => { c.checkbox.checked = false; });
+      updateBulkBar();
+    }
+  }
+
+  if (supportsBulk) {
+    selectBtn.onclick = () => setSelectMode(!wrap.classList.contains('select-mode'));
+    bulkSelectAllBtn.onclick = () => {
+      const allChecked = checkboxes.every(c => c.checkbox.checked) && checkboxes.length > 0;
+      checkboxes.forEach(c => { c.checkbox.checked = !allChecked; });
+      updateBulkBar();
+    };
+    bulkDeleteBtn.onclick = () => {
+      const names = checkboxes.filter(c => c.checkbox.checked).map(c => c.item.name);
+      if (!names.length) return;
+      if (kind === 'repo') requestBulkRepoDelete(names, bulkDeleteBtn, () => setSelectMode(false));
+      else requestBulkVercelDelete(names, bulkDeleteBtn, () => setSelectMode(false));
+    };
+    if (bulkPrivateBtn) bulkPrivateBtn.onclick = () => {
+      const names = checkboxes.filter(c => c.checkbox.checked).map(c => c.item.name);
+      if (names.length) requestBulkRepoVisibility(names, true, bulkPrivateBtn);
+    };
+    if (bulkPublicBtn) bulkPublicBtn.onclick = () => {
+      const names = checkboxes.filter(c => c.checkbox.checked).map(c => c.item.name);
+      if (names.length) requestBulkRepoVisibility(names, false, bulkPublicBtn);
+    };
+  }
 
   const grid = document.createElement('div');
   grid.className = 'activity-grid';
@@ -2357,16 +2596,25 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   items.forEach(item => {
     const status = normalizeActivityStatus(kind, item.status);
     const url = activityUrlFor(kind, item);
-    const useLink = !!url;
 
-    const card = document.createElement(useLink ? 'a' : 'div');
+    const card = document.createElement('div');
     card.className = 'activity-card';
-    if (useLink) {
-      card.href = url;
-      card.target = '_blank';
-      card.rel = 'noopener';
-    } else if (onCardTap) {
-      card.onclick = () => onCardTap(item);
+    card.onclick = (e) => {
+      // A tap on the checkbox itself shouldn't also open the details
+      // sheet — let the checkbox's own change handler run instead.
+      if (e.target.closest('.activity-card-checkbox')) return;
+      openCardDetailsSheet(kind, item, url, onCardTap);
+    };
+
+    if (supportsBulk) {
+      const checkboxWrap = document.createElement('label');
+      checkboxWrap.className = 'activity-card-checkbox';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.onchange = updateBulkBar;
+      checkboxWrap.appendChild(checkbox);
+      card.appendChild(checkboxWrap);
+      checkboxes.push({ checkbox, item });
     }
 
     const icon = document.createElement('div');
@@ -2420,24 +2668,264 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
       card.appendChild(starsEl);
     }
 
-    if (useLink) {
-      const chevron = document.createElement('svg');
-      chevron.className = 'activity-card-chevron';
-      chevron.setAttribute('viewBox', '0 0 24 24');
-      chevron.setAttribute('fill', 'none');
-      chevron.setAttribute('stroke', 'currentColor');
-      chevron.setAttribute('stroke-width', '2');
-      chevron.setAttribute('stroke-linecap', 'round');
-      chevron.setAttribute('stroke-linejoin', 'round');
-      chevron.innerHTML = '<path d="M9 18l6-6-6-6"/>';
-      card.appendChild(chevron);
-    }
+    const chevron = document.createElement('svg');
+    chevron.className = 'activity-card-chevron';
+    chevron.setAttribute('viewBox', '0 0 24 24');
+    chevron.setAttribute('fill', 'none');
+    chevron.setAttribute('stroke', 'currentColor');
+    chevron.setAttribute('stroke-width', '2');
+    chevron.setAttribute('stroke-linecap', 'round');
+    chevron.setAttribute('stroke-linejoin', 'round');
+    chevron.innerHTML = '<path d="M9 18l6-6-6-6"/>';
+    card.appendChild(chevron);
 
     grid.appendChild(card);
   });
 
   wrap.appendChild(grid);
   return wrap;
+}
+
+// ── CARD DETAILS SHEET ──
+// Opened on tap for any repo/vercel/netlify/render card. Shows the full
+// meta the compact card doesn't have room for, an explicit "Open live
+// URL" button (nothing happens on tap without this — no more accidental
+// navigations), and Delete gated through the same confirm flow as
+// everywhere else in the app.
+function openCardDetailsSheet(kind, item, url, onCardTap) {
+  const overlay = document.getElementById('card-details-overlay');
+  document.getElementById('card-details-icon').textContent = activityIconFor(kind, item);
+  document.getElementById('card-details-title').textContent = item.name || 'unnamed';
+
+  const kindLabel = { repo: 'GitHub repo', vercel: 'Vercel project', netlify: 'Netlify site', render: 'Render service' }[kind] || kind;
+  document.getElementById('card-details-sub').textContent = kindLabel;
+
+  const metaEl = document.getElementById('card-details-meta');
+  metaEl.innerHTML = '';
+  const rows = cardDetailsMetaRows(kind, item);
+  rows.forEach(([k, v]) => {
+    if (!v) return;
+    const row = document.createElement('div');
+    row.className = 'card-details-meta-row';
+    const kEl = document.createElement('span');
+    kEl.className = 'card-details-meta-key';
+    kEl.textContent = k;
+    const vEl = document.createElement('span');
+    vEl.className = 'card-details-meta-val';
+    vEl.textContent = v;
+    row.appendChild(kEl);
+    row.appendChild(vEl);
+    metaEl.appendChild(row);
+  });
+
+  const openBtn = document.getElementById('card-details-open-btn');
+  if (url) {
+    openBtn.href = url;
+    openBtn.classList.remove('hidden');
+    openBtn.onclick = null;
+  } else if (onCardTap) {
+    // Render services without a direct URL fall back to their existing
+    // special action (env-var lookup via chat) instead of a link.
+    openBtn.removeAttribute('href');
+    openBtn.textContent = 'View env vars';
+    openBtn.classList.remove('hidden');
+    openBtn.onclick = (e) => { e.preventDefault(); closeCardDetailsSheet(); onCardTap(item); };
+  } else {
+    openBtn.classList.add('hidden');
+  }
+  if (url) openBtn.textContent = 'Open live URL';
+
+  const deleteBtn = document.getElementById('card-details-delete-btn');
+  deleteBtn.disabled = false;
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.onclick = () => requestCardDelete(kind, item, deleteBtn);
+
+  overlay.classList.add('show');
+}
+
+function closeCardDetailsSheet() {
+  document.getElementById('card-details-overlay').classList.remove('show');
+}
+
+function cardDetailsMetaRows(kind, item) {
+  if (kind === 'repo') {
+    return [
+      ['Visibility', item.visibility || (item.private ? 'private' : 'public')],
+      ['Language', item.language],
+      ['Stars', typeof item.stars === 'number' ? String(item.stars) : null],
+      ['Updated', timeAgoShort(item.updated_at) ? `${timeAgoShort(item.updated_at)} ago` : null],
+      ['URL', item.url],
+    ];
+  }
+  if (kind === 'vercel') {
+    return [
+      ['Framework', item.framework || 'static'],
+      ['Status', item.status],
+      ['URL', item.url],
+    ];
+  }
+  if (kind === 'netlify') {
+    return [
+      ['Status', item.status],
+      ['URL', item.url],
+    ];
+  }
+  if (kind === 'render') {
+    return [
+      ['Type', item.type],
+      ['Status', item.status],
+      ['URL', item.url],
+    ];
+  }
+  return [];
+}
+
+// Single-card delete from the details sheet — same natural-language +
+// confirm-token flow as requestFileRowDelete, just phrased per kind.
+async function requestCardDelete(kind, item, btnEl) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  btnEl.textContent = 'Deleting…';
+
+  const msgByKind = {
+    repo: `delete repo ${item.name}`,
+    vercel: `delete vercel project ${item.name}`,
+    netlify: `delete netlify site ${item.name}`,
+    render: `delete render service ${item.id || item.name}`,
+  };
+  const msg = msgByKind[kind];
+  if (!msg) { btnEl.disabled = false; return; }
+
+  addMessage('user', msg);
+  history.push({ role: 'user', content: msg });
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  isLoading = true;
+
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: history.slice(0, -1) })
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+    closeCardDetailsSheet();
+
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command,
+        pending_value: data.pending_value,
+        confirm_token: data.confirm_token,
+        confirm_verb: data.confirm_verb
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+  } catch (err) {
+    typing.classList.remove('show');
+    closeCardDetailsSheet();
+    addMessage('agent', '❌ Server se connect nahi ho paya. Page refresh karo.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
+}
+
+// ── BULK REPO / VERCEL ACTIONS — via /api/bulk-action ──
+async function requestBulkRepoDelete(repos, btnEl, onDone) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  isLoading = true;
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  try {
+    const res = await fetch('/api/bulk-action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ op: 'delete_repos', repos }),
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command, pending_value: data.pending_value,
+        confirm_token: data.confirm_token, confirm_verb: data.confirm_verb, bulk_op: 'delete_repos',
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+    if (onDone) onDone();
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
+}
+
+async function requestBulkVercelDelete(projects, btnEl, onDone) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  isLoading = true;
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  try {
+    const res = await fetch('/api/bulk-action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ op: 'delete_vercel_projects', projects }),
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command, pending_value: data.pending_value,
+        confirm_token: data.confirm_token, confirm_verb: data.confirm_verb, bulk_op: 'delete_vercel_projects',
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+    if (onDone) onDone();
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
+}
+
+// Not destructive (reversible) — runs immediately, no confirm step,
+// same as the backend route treats it.
+async function requestBulkRepoVisibility(repos, makePrivate, btnEl) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  isLoading = true;
+  const typing = document.getElementById('typing-indicator');
+  typing.classList.add('show');
+  scrollToBottom();
+  try {
+    const res = await fetch('/api/bulk-action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ op: 'set_repo_visibility', repos, private: makePrivate }),
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+    addMessage('agent', data.reply, actionColorFor(data.action));
+    history.push({ role: 'assistant', content: data.reply });
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
 }
 
 // ── RICH BUBBLE DISPATCH ──
@@ -2477,7 +2965,14 @@ function buildRichBubbleNode(entry) {
   }
 
   if (entry.action === 'read_file' && entry.repo && entry.path) {
-    return buildReadFileBubble(entry.repo, entry.path, replyText);
+    // entry.fileContent is the RAW file text (no markdown fence, no "📄
+    // path (N bytes):" prefix) saved alongside the reply specifically
+    // for this — entry.reply/content is the human-readable wrapped
+    // version meant for older/AI-narrated clients. The preview/full-
+    // screen viewer needs the raw text so line-splitting and syntax
+    // highlighting operate on actual file content, not fence markers.
+    const rawContent = entry.fileContent != null ? entry.fileContent : replyText;
+    return buildReadFileBubble(entry.repo, entry.path, rawContent);
   }
 
   const activityCfg = ACTIVITY_LIST_CONFIG[entry.action];
@@ -2493,10 +2988,48 @@ function buildRichBubbleNode(entry) {
   return null;
 }
 
-// ── BUILD READ-FILE BUBBLE with download + edit buttons ──
+// ── BUILD READ-FILE BUBBLE with a capped preview + full-screen view ──
+// Previously this rendered the ENTIRE file content inline via
+// renderMarkdown, so a large file turned the chat bubble into a
+// page-length wall of text — the only way to see all of it was
+// scrolling the whole page. Now the inline bubble shows a capped,
+// horizontally+vertically scrollable preview (READ_PREVIEW_MAX_LINES
+// lines) in its own bordered box, with a "View full screen" button
+// that opens the same overlay the editor uses, in read-only mode, for
+// the complete file — full-screen and independently scrollable so the
+// rest of the chat page never has to move.
+const READ_PREVIEW_MAX_LINES = 25;
+
 function buildReadFileBubble(repo, filePath, content) {
   const wrap = document.createElement('div');
-  wrap.innerHTML = renderMarkdown(content);
+
+  const allLines = content.split('\n');
+  const isTruncated = allLines.length > READ_PREVIEW_MAX_LINES;
+  const previewText = isTruncated ? allLines.slice(0, READ_PREVIEW_MAX_LINES).join('\n') : content;
+
+  const codeBox = document.createElement('pre');
+  codeBox.className = 'read-file-preview';
+  const codeEl = document.createElement('code');
+  codeEl.innerHTML = previewText.split('\n').map(l => highlightLine(l, detectEditorLang(filePath))).join('\n');
+  codeBox.appendChild(codeEl);
+  wrap.appendChild(codeBox);
+
+  if (isTruncated) {
+    const moreNote = document.createElement('div');
+    moreNote.className = 'read-file-more-note';
+    moreNote.textContent = `… ${allLines.length - READ_PREVIEW_MAX_LINES} more lines — pura file dekhne ke liye full screen kholo.`;
+    wrap.appendChild(moreNote);
+  }
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'read-file-actions';
+
+  const fullScreenBtn = document.createElement('button');
+  fullScreenBtn.className = 'read-fullscreen-btn';
+  fullScreenBtn.innerHTML = iconExpand() + ' Full screen';
+  fullScreenBtn.title = 'View full file';
+  fullScreenBtn.onclick = () => openCodeEditor(repo, filePath, { readOnly: true });
+  actionsRow.appendChild(fullScreenBtn);
 
   const dlUrl = `/download?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(filePath)}`;
   const fileName = filePath.split('/').pop();
@@ -2504,19 +3037,24 @@ function buildReadFileBubble(repo, filePath, content) {
   dlBtn.className = 'read-dl-btn';
   dlBtn.href = dlUrl;
   dlBtn.download = fileName;
-  dlBtn.innerHTML = iconDl() + ' Download ' + escHtml(fileName);
+  dlBtn.innerHTML = iconDl() + ' Download';
   dlBtn.title = 'Download ' + filePath;
-  wrap.appendChild(document.createElement('br'));
-  wrap.appendChild(dlBtn);
+  actionsRow.appendChild(dlBtn);
 
   const editBtn = document.createElement('button');
   editBtn.className = 'read-edit-btn';
   editBtn.innerHTML = iconEdit() + ' Edit';
   editBtn.title = 'Edit ' + filePath;
   editBtn.onclick = () => openCodeEditor(repo, filePath);
-  wrap.appendChild(editBtn);
+  actionsRow.appendChild(editBtn);
+
+  wrap.appendChild(actionsRow);
 
   return wrap;
+}
+
+function iconExpand() {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>`;
 }
 
 function iconEdit() {
@@ -2535,7 +3073,8 @@ function iconEdit() {
 // ══════════════════════════════════════════════════════════════════
 let editorState = null; // { repo, path, originalContent, sha, mode }
 
-async function openCodeEditor(repo, path) {
+async function openCodeEditor(repo, path, opts = {}) {
+  const readOnly = !!opts.readOnly;
   const overlay = document.getElementById('code-editor-overlay');
   const textarea = document.getElementById('editor-textarea');
   const statusLeft = document.getElementById('editor-status-left');
@@ -2548,9 +3087,11 @@ async function openCodeEditor(repo, path) {
   statusLeft.textContent = 'Loading…';
   conflictNote.classList.remove('show');
   saveBtn.disabled = true;
-  saveBtn.textContent = 'Review changes';
+  saveBtn.textContent = readOnly ? 'Edit this file' : 'Review changes';
   setEditorMode('editing');
   overlay.classList.add('show');
+  overlay.classList.toggle('view-only', readOnly);
+  textarea.readOnly = readOnly;
 
   try {
     const res = await fetch(`/api/file-source?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`, {
@@ -2561,15 +3102,31 @@ async function openCodeEditor(repo, path) {
       statusLeft.textContent = data.reply || 'File load nahi hui.';
       return;
     }
-    editorState = { repo, path, originalContent: data.content, sha: data.sha, mode: 'editing' };
+    editorState = { repo, path, originalContent: data.content, sha: data.sha, mode: 'editing', lang: detectEditorLang(path), readOnly };
     textarea.value = data.content;
     renderEditorGutter();
+    renderEditorHighlight();
     const lineCount = data.content.split('\n').length;
-    statusLeft.textContent = `${lineCount} lines`;
+    statusLeft.textContent = readOnly ? `${lineCount} lines · view only` : `${lineCount} lines`;
     saveBtn.disabled = false;
   } catch (e) {
     statusLeft.textContent = '❌ Server se connect nahi ho paya.';
   }
+}
+
+// Flips an open read-only viewer into an editable session in place —
+// no re-fetch needed, the content/sha are already loaded. Used by the
+// save button's click handler when editorState.readOnly is true (see
+// initCodeEditorHandlers), so "Edit this file" is a one-tap switch
+// rather than closing the viewer and reopening the editor from scratch.
+function switchEditorToEditable() {
+  if (!editorState) return;
+  editorState.readOnly = false;
+  document.getElementById('editor-textarea').readOnly = false;
+  document.getElementById('code-editor-overlay').classList.remove('view-only');
+  document.getElementById('editor-save-btn').textContent = 'Review changes';
+  document.getElementById('editor-status-left').textContent =
+    document.getElementById('editor-status-left').textContent.replace(' · view only', '');
 }
 
 function closeCodeEditor() {
@@ -2584,7 +3141,7 @@ function setEditorMode(mode) {
   if (mode === 'editing') {
     editPane.style.display = 'flex';
     diffPane.classList.remove('show');
-    saveBtn.textContent = 'Review changes';
+    saveBtn.textContent = (editorState && editorState.readOnly) ? 'Edit this file' : 'Review changes';
   } else {
     editPane.style.display = 'none';
     diffPane.classList.add('show');
@@ -2603,6 +3160,163 @@ function renderEditorGutter() {
   let html = '';
   for (let i = 1; i <= lineCount; i++) html += `<div class="editor-gutter-line">${i}</div>`;
   gutter.innerHTML = html;
+  gutter.scrollTop = textarea.scrollTop;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SYNTAX HIGHLIGHTING — lightweight regex tokenizer, no external lib.
+// Covers the common surface (keywords, strings, comments, numbers,
+// function-call names, HTML/JSX tags+attributes) across the language
+// family this app's users actually edit (JS/TS/Python/HTML/CSS/JSON/
+// YAML/shell) well enough to be genuinely useful, without pulling in
+// a real tokenizer+grammar engine for a single textarea overlay.
+// Deliberately NOT trying to be a correct parser (no nested-string-
+// interpolation handling, no multi-line-comment state machine across
+// re-renders) — good-enough coloring that fails safe: a token pattern
+// that doesn't match just stays plain-colored text, never breaks
+// rendering or throws.
+// ══════════════════════════════════════════════════════════════════
+function detectEditorLang(path) {
+  const ext = (path.split('.').pop() || '').toLowerCase();
+  const map = {
+    js: 'js', jsx: 'js', mjs: 'js', cjs: 'js', ts: 'js', tsx: 'js',
+    py: 'py', html: 'html', htm: 'html', css: 'css', scss: 'css',
+    json: 'json', yml: 'yaml', yaml: 'yaml',
+    sh: 'shell', bash: 'shell',
+    md: 'markdown',
+  };
+  return map[ext] || 'generic';
+}
+
+const EDITOR_KEYWORDS = {
+  js: ['const','let','var','function','return','if','else','for','while','do','switch','case','break','continue',
+       'class','extends','new','this','super','import','export','default','from','as','async','await','try',
+       'catch','finally','throw','typeof','instanceof','in','of','yield','static','get','set','null','undefined',
+       'true','false','void','delete'],
+  py: ['def','class','return','if','elif','else','for','while','break','continue','pass','import','from','as',
+       'try','except','finally','raise','with','lambda','yield','global','nonlocal','assert','del','is','in',
+       'not','and','or','None','True','False','async','await','self'],
+  yaml: ['true','false','null'],
+  shell: ['if','then','else','elif','fi','for','while','do','done','case','esac','function','return','export','local'],
+};
+
+// Tokenizes one line at a time (comments/strings don't span lines in
+// this simplified model — the one accuracy tradeoff of the "no state
+// machine" choice above) and returns highlighted HTML for that line.
+function highlightLine(line, lang) {
+  if (lang === 'generic' || !line) return escHtml(line);
+
+  if (lang === 'html') return highlightMarkupLine(line);
+  if (lang === 'markdown') return escHtml(line); // prose — not worth tokenizing
+
+  const kw = EDITOR_KEYWORDS[lang] || [];
+  const kwRe = kw.length ? new RegExp(`\\b(?<keyword>${kw.join('|')})\\b`) : null;
+
+  // Single combined regex per language, using NAMED capture groups so the
+  // class for a match is a direct lookup (groups.<name>) rather than
+  // guessing from a numeric index that shifts per-language — that
+  // index-guessing was the root cause of the JSON string-value
+  // mis-coloring bug (a plain string and a "key:" string used different
+  // group slots per language, and the class-assignment cascade below
+  // didn't account for that).
+  let pattern;
+  if (lang === 'py') {
+    pattern = /(?<comment>#.*$)|(?<string>"""[\s\S]*?"""|'''[\s\S]*?'''|"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')|(?<number>\b\d+\.?\d*\b)|(?<function>\b[a-zA-Z_]\w*(?=\())/;
+  } else if (lang === 'js') {
+    pattern = /(?<comment>\/\/.*$)|(?<string>`[^`]*`|"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')|(?<number>\b\d+\.?\d*\b)|(?<function>\b[a-zA-Z_$]\w*(?=\())/;
+  } else if (lang === 'css') {
+    pattern = /(?<comment>\/\*.*?\*\/)|(?<string>"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')|(?<number>\b\d+\.?\d*(?:px|em|rem|%|s|ms)?\b)|(?<tag>[.#][a-zA-Z_-][\w-]*)/;
+  } else if (lang === 'json') {
+    pattern = /(?<property>"[^"\\]*(?:\\.[^"\\]*)*"(?=\s*:))|(?<string>"[^"\\]*(?:\\.[^"\\]*)*")|(?<number>\b(?:true|false|null|-?\d+\.?\d*)\b)/;
+  } else if (lang === 'yaml') {
+    pattern = /(?<comment>#.*$)|(?<property>^\s*[\w.-]+(?=\s*:))|(?<string>"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')/;
+  } else if (lang === 'shell') {
+    pattern = /(?<comment>#.*$)|(?<string>"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*')|(?<property>\$\w+|\$\{[^}]*\})/;
+  } else {
+    pattern = kwRe;
+  }
+
+  const CLASS_BY_GROUP = {
+    comment: 'tok-comment', string: 'tok-string', number: 'tok-number',
+    function: 'tok-function', tag: 'tok-tag', property: 'tok-property', keyword: 'tok-keyword',
+  };
+
+  let out = '';
+  let rest = line;
+  let guard = 0;
+  while (rest.length && guard++ < 2000) {
+    const m = pattern ? rest.match(pattern) : null;
+    const kwM = kwRe ? rest.match(kwRe) : null;
+    // Pick whichever matches earliest in the remaining string; on a tie
+    // the language-specific pattern (comment/string/number/etc.) wins
+    // over a bare keyword match, since e.g. "class" inside a string
+    // shouldn't be colored as a keyword.
+    let use = null;
+    if (m && kwM) use = m.index <= kwM.index ? m : kwM;
+    else use = m || kwM;
+
+    if (!use) { out += escHtml(rest); break; }
+
+    if (use.index > 0) out += escHtml(rest.slice(0, use.index));
+
+    const token = use[0];
+    const groupName = use.groups ? Object.keys(use.groups).find(k => use.groups[k] !== undefined) : null;
+    const cls = CLASS_BY_GROUP[groupName] || 'tok-punct';
+
+    out += `<span class="${cls}">${escHtml(token)}</span>`;
+    rest = rest.slice(use.index + token.length);
+  }
+  if (guard >= 2000) out += escHtml(rest); // pathological line — bail to plain text rather than hang
+  return out;
+}
+
+function highlightMarkupLine(line) {
+  // Single-pass tokenizer rather than chained .replace() calls — the
+  // previous chained-replace version ran the attribute/string passes
+  // over text that already contained <span> markup from the tag pass,
+  // so later replacements matched inside earlier ones' output and
+  // corrupted it (e.g. an attr-name regex matching "class" inside
+  // class="tok-tag"). One combined regex avoids that entirely since
+  // each character of the original line is only ever considered once.
+  const pattern = /(?<tag><\/?[a-zA-Z][\w-]*)|(?<attr>\b[a-zA-Z-][\w-]*(?==))|(?<string>"[^"]*"|'[^']*')|(?<punct>[<>=\/])/;
+  const CLASS_BY_GROUP = { tag: 'tok-tag', attr: 'tok-attr', string: 'tok-string', punct: 'tok-tag' };
+
+  let out = '';
+  let rest = line;
+  let guard = 0;
+  while (rest.length && guard++ < 2000) {
+    const m = rest.match(pattern);
+    if (!m) { out += escHtml(rest); break; }
+    if (m.index > 0) out += escHtml(rest.slice(0, m.index));
+    const token = m[0];
+    const groupName = m.groups ? Object.keys(m.groups).find(k => m.groups[k] !== undefined) : null;
+    const cls = CLASS_BY_GROUP[groupName];
+    out += cls ? `<span class="${cls}">${escHtml(token)}</span>` : escHtml(token);
+    rest = rest.slice(m.index + token.length);
+  }
+  if (guard >= 2000) out += escHtml(rest);
+  return out;
+}
+
+
+function renderEditorHighlight() {
+  if (!editorState) return;
+  const textarea = document.getElementById('editor-textarea');
+  const codeEl = document.getElementById('editor-highlight-code');
+  const lines = textarea.value.split('\n');
+  // Rebuilding all lines on every keystroke is fine at the file sizes
+  // this editor targets (a few thousand lines, see MAX_EDITOR_FILE_BYTES
+  // server-side) — a real editor would diff just the changed line, but
+  // that optimization isn't worth the complexity here.
+  codeEl.innerHTML = lines.map(l => highlightLine(l, editorState.lang)).join('\n');
+}
+
+function syncHighlightScroll() {
+  const textarea = document.getElementById('editor-textarea');
+  const highlight = document.getElementById('editor-highlight');
+  const gutter = document.getElementById('editor-gutter');
+  highlight.scrollTop = textarea.scrollTop;
+  highlight.scrollLeft = textarea.scrollLeft;
   gutter.scrollTop = textarea.scrollTop;
 }
 
@@ -2768,8 +3482,8 @@ function initCodeEditorHandlers() {
   const saveBtn = document.getElementById('editor-save-btn');
   const closeBtn = document.getElementById('editor-close-btn');
 
-  textarea.addEventListener('input', renderEditorGutter);
-  textarea.addEventListener('scroll', () => { gutter.scrollTop = textarea.scrollTop; });
+  textarea.addEventListener('input', () => { renderEditorGutter(); renderEditorHighlight(); });
+  textarea.addEventListener('scroll', syncHighlightScroll);
   // Tab inserts two spaces instead of moving focus — expected editor
   // behavior, and without this a mobile keyboard's Tab key (if present)
   // would just jump focus away from the textarea.
@@ -2780,10 +3494,15 @@ function initCodeEditorHandlers() {
     textarea.value = textarea.value.slice(0, start) + '  ' + textarea.value.slice(end);
     textarea.selectionStart = textarea.selectionEnd = start + 2;
     renderEditorGutter();
+    renderEditorHighlight();
   });
 
   saveBtn.addEventListener('click', () => {
     if (!editorState) return;
+    if (editorState.readOnly) {
+      switchEditorToEditable();
+      return;
+    }
     if (editorState.mode === 'editing') {
       renderDiffPane();
       setEditorMode('diffing');
@@ -2804,6 +3523,12 @@ function initCodeEditorHandlers() {
   });
 }
 document.addEventListener('DOMContentLoaded', initCodeEditorHandlers);
+
+function initCardDetailsSheetHandlers() {
+  document.getElementById('card-details-close-btn').addEventListener('click', closeCardDetailsSheet);
+  document.getElementById('card-details-backdrop').addEventListener('click', closeCardDetailsSheet);
+}
+document.addEventListener('DOMContentLoaded', initCardDetailsSheetHandlers);
 
 function escHtml(t) {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -3047,16 +3772,24 @@ async function runConfirmedAction(confirmData, yesBtn, noBtn) {
   typing.classList.add('show');
   scrollToBottom();
 
+  // Bulk ops (multi-select delete etc.) were built and confirmed via
+  // /api/bulk-action, not /chat — the confirm token itself works the
+  // same way either endpoint, but the confirmed-replay call has to hit
+  // the endpoint that knows the op (delete_files/delete_repos/etc.),
+  // since /chat's replay path only recognizes single-item commands.
+  const endpoint = confirmData.bulk_op ? '/api/bulk-action' : '/chat';
+  const payload = confirmData.bulk_op
+    ? { op: confirmData.bulk_op, confirmed: true, pending_command: confirmData.pending_command,
+        pending_value: confirmData.pending_value, confirm_token: confirmData.confirm_token }
+    : { confirmed: true, pending_command: confirmData.pending_command,
+        pending_value: confirmData.pending_value, confirm_token: confirmData.confirm_token };
+
   try {
-    const res = await fetch('/chat', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        confirmed: true,
-        pending_command: confirmData.pending_command,
-        pending_value: confirmData.pending_value,
-        confirm_token: confirmData.confirm_token
-      })
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     typing.classList.remove('show');
@@ -3345,6 +4078,12 @@ async function sendMsg() {
           action: data.action, repo: data.repo, path: data.path,
           items: data.items, repos: data.repos, projects: data.projects,
           sites: data.sites, services: data.services,
+          // read_file's raw (unwrapped, un-fenced) file text — needed so
+          // the preview/full-screen viewer can re-render correctly after
+          // a page refresh instead of falling back to the markdown-fenced
+          // `reply` string, which would show fence markers as if they
+          // were file content.
+          fileContent: data.action === 'read_file' ? data.content : undefined,
         });
         history.push({ role: 'assistant', content: data.reply });
         scrollToBottom();

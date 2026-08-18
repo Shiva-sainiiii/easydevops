@@ -391,6 +391,111 @@
   .editor-topbar-save:disabled { opacity: 0.4; }
   .editor-topbar-save.saving { opacity: 0.7; }
 
+  /* View-only mode (opened from read_file's "Full screen" button) —
+     save button becomes a plain "Edit this file" affordance instead of
+     the gradient commit button, and the textarea gets a dashed focus
+     ring removed since it's non-interactive until the user opts in. */
+  #code-editor-overlay.view-only .editor-topbar-save {
+    background: rgba(61,220,151,0.14);
+    color: var(--green);
+    border: 1px solid rgba(61,220,151,0.35);
+  }
+  #code-editor-overlay.view-only #editor-textarea { cursor: default; }
+
+  /* ── CARD DETAILS SHEET (repo/Vercel/Netlify/Render card tap) ──
+     Replaces the old "whole card is a link, tap = instant redirect"
+     behavior — tapping a card now opens this bottom sheet showing full
+     details with an explicit "Open live URL" action plus Delete, so a
+     stray tap doesn't leave the app. */
+  .card-details-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 96;
+  }
+  .card-details-overlay.show { display: block; }
+  .card-details-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(2px);
+  }
+  .card-details-sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--bg-1);
+    border-top: 1px solid var(--border-2);
+    border-radius: 18px 18px 0 0;
+    padding: 10px 18px max(18px, env(safe-area-inset-bottom));
+    max-height: 70vh;
+    overflow-y: auto;
+    box-shadow: 0 -8px 30px rgba(0,0,0,0.4);
+  }
+  .card-details-handle {
+    width: 36px; height: 4px;
+    background: var(--border-2);
+    border-radius: 3px;
+    margin: 4px auto 14px;
+  }
+  .card-details-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .card-details-icon {
+    flex-shrink: 0;
+    width: 40px; height: 40px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 11px;
+  }
+  .card-details-titlewrap { flex: 1; min-width: 0; }
+  .card-details-title {
+    font-family: var(--font-mono); font-size: 15px; font-weight: 700;
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card-details-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card-details-meta {
+    display: flex; flex-direction: column; gap: 7px;
+    margin-bottom: 16px;
+    font-size: 12.5px;
+  }
+  .card-details-meta-row {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .card-details-meta-row:last-child { border-bottom: none; }
+  .card-details-meta-key { color: var(--muted); flex-shrink: 0; }
+  .card-details-meta-val {
+    color: var(--text); font-family: var(--font-mono);
+    text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card-details-actions { display: flex; flex-direction: column; gap: 9px; }
+  .card-details-btn {
+    display: flex; align-items: center; justify-content: center;
+    padding: 12px 16px;
+    border-radius: 11px;
+    font-family: var(--font-sans); font-size: 14px; font-weight: 600;
+    cursor: pointer; text-decoration: none;
+    border: 1px solid transparent;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .card-details-btn.primary {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: #04181c;
+  }
+  .card-details-btn.primary.hidden { display: none; }
+  .card-details-btn.danger {
+    background: rgba(255,107,107,0.10);
+    border-color: rgba(255,107,107,0.32);
+    color: var(--red);
+  }
+  .card-details-btn.ghost {
+    background: rgba(255,255,255,0.04);
+    border-color: var(--border-2);
+    color: var(--muted);
+  }
+  .card-details-btn:active { transform: scale(.98); }
+  .card-details-btn:disabled { opacity: .5; cursor: not-allowed; }
+
   .editor-body {
     flex: 1; min-height: 0;
     display: flex;
@@ -410,17 +515,67 @@
     white-space: pre;
   }
   .editor-gutter-line { padding-right: 8px; }
-  #editor-textarea {
+
+  /* ── SYNTAX HIGHLIGHTING (VS Code Dark+ palette) ──
+     Standard "invisible textarea over a colored <pre>" trick: the
+     textarea keeps real focus/selection/typing/undo (nothing about
+     input handling changes), but its TEXT is transparent — only the
+     caret is visible — while an absolutely-positioned <pre><code>
+     underneath, tokenized+colored by highlightEditorCode() in JS on
+     every input, shows through. Both share identical font/size/
+     line-height/padding/tab-size so characters land exactly on top of
+     each other, and scroll position is synced in JS on every scroll
+     event. This is why they're wrapped in one relatively-positioned
+     .editor-highlight-wrap rather than being siblings of the gutter. */
+  .editor-highlight-wrap {
+    position: relative;
     flex: 1; min-width: 0;
+    overflow: hidden;
+  }
+  .editor-highlight,
+  #editor-textarea {
+    position: absolute; inset: 0;
+    margin: 0;
     padding: 14px 14px;
-    background: transparent;
-    border: none; outline: none; resize: none;
-    color: var(--text);
     font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6;
     white-space: pre;
-    overflow: auto;
     tab-size: 2;
+    overflow: auto;
   }
+  .editor-highlight {
+    color: var(--text);
+    background: transparent;
+    pointer-events: none;
+    /* Textarea sits on top and scrolls; this layer's scroll is driven
+       to match it in JS (see syncHighlightScroll in script.js) rather
+       than scrolling independently, since two independently-scrollable
+       overlapping panes would drift out of sync on any scroll event
+       the other one didn't also receive. */
+  }
+  .editor-highlight code { font-family: inherit; }
+  #editor-textarea {
+    background: transparent;
+    border: none; outline: none; resize: none;
+    color: transparent;
+    caret-color: var(--text);
+  }
+  /* Text selection still needs to be visible even though the glyphs
+     themselves are transparent — browsers render the selection
+     highlight independent of text color, so this alone is enough. */
+  #editor-textarea::selection { background: rgba(110,231,255,0.25); }
+
+  /* Token colors — VS Code's default Dark+ theme mapping */
+  .tok-keyword   { color: #c586c0; }
+  .tok-string    { color: #ce9178; }
+  .tok-comment   { color: #6a9955; font-style: italic; }
+  .tok-number    { color: #b5cea8; }
+  .tok-function  { color: #dcdcaa; }
+  .tok-type      { color: #4ec9b0; }
+  .tok-tag       { color: #569cd6; }
+  .tok-attr      { color: #9cdcfe; }
+  .tok-punct     { color: #d4d4d4; }
+  .tok-property  { color: #9cdcfe; }
+
   .editor-status-bar {
     flex-shrink: 0;
     display: flex; align-items: center; justify-content: space-between;
@@ -479,20 +634,22 @@
   .diff-summary-bar .plus { color: var(--green); }
   .diff-summary-bar .minus { color: var(--red); }
 
-  /* Read-file bubble's Edit button — sits next to the existing Download
-     button (.read-dl-btn), same visual weight. */
+  /* Read-file bubble's Edit button — sits in .read-file-actions next to
+     Download/Full-screen, same visual weight. */
   .read-edit-btn {
     display: inline-flex; align-items: center; gap: 5px;
-    margin-top: 8px; margin-left: 8px;
-    padding: 6px 12px;
+    padding: 7px 14px;
     background: rgba(61,220,151,0.10);
     border: 1px solid rgba(61,220,151,0.30);
     border-radius: 8px;
     color: var(--green); font-family: var(--font-mono);
-    font-size: 11.5px; font-weight: 600;
+    font-size: 12px; font-weight: 600;
     cursor: pointer;
     text-decoration: none;
+    transition: background .15s, border-color .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
   }
+  .read-edit-btn:active { background: rgba(61,220,151,0.2); transform: scale(.97); }
   .read-edit-btn svg { width: 13px; height: 13px; }
 
   /* ── LOGIN GATE ── */
@@ -1868,10 +2025,44 @@
   .file-del-btn svg { width: 12px; height: 12px; }
   .file-del-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-  /* ── FILE-LIST HEADER (repo name + download-zip button) ── */
+  .file-read-btn, .file-edit-btn {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    border-radius: 6px;
+    color: var(--muted); cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s, color .15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .file-read-btn:active, .file-edit-btn:active { transform: scale(.94); }
+  .file-read-btn svg, .file-edit-btn svg { width: 12px; height: 12px; }
+  .file-read-btn:active { background: rgba(54,209,255,0.15); border-color: rgba(54,209,255,0.35); color: var(--accent); }
+  .file-edit-btn:active { background: rgba(61,220,151,0.15); border-color: rgba(61,220,151,0.35); color: var(--green); }
+
+  /* ── FILE-LIST HEADER (repo name + select toggle + download-zip button) ── */
   .file-list-hdr {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; margin-bottom: 8px; font-size: 13px;
+  }
+  .file-list-hdr-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .file-list-select-btn {
+    flex-shrink: 0;
+    padding: 5px 11px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    border-radius: 7px;
+    color: var(--muted); font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: background .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .file-list-select-btn:active { transform: scale(.96); }
+  .file-list-bubble.select-mode .file-list-select-btn {
+    background: rgba(54,209,255,0.12);
+    border-color: rgba(54,209,255,0.35);
+    color: var(--accent);
   }
   .repo-zip-btn {
     flex-shrink: 0;
@@ -1889,6 +2080,59 @@
   .repo-zip-btn:active { background: rgba(61,220,151,0.2); transform: scale(.96); }
   .repo-zip-btn svg { width: 12px; height: 12px; }
 
+  /* ── BULK SELECT BAR (multi-select delete) ── */
+  .file-list-bulk-bar {
+    display: none;
+    align-items: center; gap: 8px;
+    padding: 7px 10px;
+    margin-bottom: 8px;
+    background: rgba(54,209,255,0.06);
+    border: 1px solid rgba(54,209,255,0.18);
+    border-radius: 8px;
+    font-family: var(--font-mono); font-size: 11px;
+  }
+  .file-list-bubble.select-mode .file-list-bulk-bar { display: flex; }
+  .file-list-bulk-count { color: var(--muted); flex: 1; }
+  .file-list-bulk-selectall {
+    flex-shrink: 0;
+    padding: 4px 9px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-2);
+    border-radius: 6px;
+    color: var(--text); font-family: var(--font-mono);
+    font-size: 10.5px; font-weight: 600; cursor: pointer;
+  }
+  .file-list-bulk-delete {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px;
+    background: rgba(255,107,107,0.12);
+    border: 1px solid rgba(255,107,107,0.32);
+    border-radius: 6px;
+    color: var(--red); font-family: var(--font-mono);
+    font-size: 10.5px; font-weight: 700; cursor: pointer;
+  }
+  .file-list-bulk-delete svg { width: 11px; height: 11px; }
+  .file-list-bulk-delete:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Checkbox column — collapsed to zero width outside select-mode so
+     rows keep their normal layout; expands in select-mode. Using a
+     width transition (not display:none) so it animates smoothly. */
+  .file-row-checkbox {
+    flex-shrink: 0;
+    display: flex; align-items: center;
+    width: 0; overflow: hidden;
+    transition: width .15s ease, margin .15s ease;
+  }
+  .file-list-bubble.select-mode .file-row-checkbox { width: 18px; margin-right: 2px; }
+  .file-row-checkbox input {
+    width: 16px; height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+
+
   /* ── COMPACT ACTIVITY CARDS (list_repos / vercel_list / netlify_list /
      render_list replies) ── Replaces long text blocks with a scannable
      grid of small cards, each with a status badge, so results are
@@ -1896,9 +2140,80 @@
      paragraphs. Mirrors the .file-list row pattern already used for
      buildFileListBubble, but denser (two-line cards, not full rows). */
   .activity-list-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
     font-size: 13px; color: var(--muted);
     margin-bottom: 8px;
   }
+  .activity-list-select-btn {
+    flex-shrink: 0;
+    padding: 5px 11px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    border-radius: 7px;
+    color: var(--muted); font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: background .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .activity-list-select-btn:active { transform: scale(.96); }
+  .activity-list-bubble.select-mode .activity-list-select-btn {
+    background: rgba(54,209,255,0.12);
+    border-color: rgba(54,209,255,0.35);
+    color: var(--accent);
+  }
+  .activity-list-bulk-bar {
+    display: none;
+    align-items: center; gap: 8px;
+    padding: 7px 10px;
+    margin-bottom: 8px;
+    background: rgba(54,209,255,0.06);
+    border: 1px solid rgba(54,209,255,0.18);
+    border-radius: 8px;
+    font-family: var(--font-mono); font-size: 11px;
+    flex-wrap: wrap;
+  }
+  .activity-list-bubble.select-mode .activity-list-bulk-bar { display: flex; }
+  .activity-list-bulk-count { color: var(--muted); flex: 1; }
+  .activity-list-bulk-selectall,
+  .activity-list-bulk-private,
+  .activity-list-bulk-public {
+    flex-shrink: 0;
+    padding: 4px 9px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-2);
+    border-radius: 6px;
+    color: var(--text); font-family: var(--font-mono);
+    font-size: 10.5px; font-weight: 600; cursor: pointer;
+  }
+  .activity-list-bulk-delete {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px;
+    background: rgba(255,107,107,0.12);
+    border: 1px solid rgba(255,107,107,0.32);
+    border-radius: 6px;
+    color: var(--red); font-family: var(--font-mono);
+    font-size: 10.5px; font-weight: 700; cursor: pointer;
+  }
+  .activity-list-bulk-delete svg { width: 11px; height: 11px; }
+  .activity-list-bulk-delete:disabled,
+  .activity-list-bulk-private:disabled,
+  .activity-list-bulk-public:disabled { opacity: .4; cursor: not-allowed; }
+
+  .activity-card-checkbox {
+    flex-shrink: 0;
+    display: flex; align-items: center;
+    width: 0; overflow: hidden;
+    transition: width .15s ease, margin .15s ease;
+  }
+  .activity-list-bubble.select-mode .activity-card-checkbox { width: 18px; margin-right: 0; }
+  .activity-card-checkbox input {
+    width: 16px; height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
   .activity-grid {
     display: flex;
     flex-direction: column;
@@ -1988,7 +2303,7 @@
   /* ── INLINE DOWNLOAD BUTTON (read_file reply) ── */
   .read-dl-btn {
     display: inline-flex; align-items: center; gap: 6px;
-    margin-top: 10px; padding: 7px 14px;
+    padding: 7px 14px;
     background: rgba(54,209,255,0.10);
     border: 1px solid rgba(54,209,255,0.30);
     border-radius: 8px; color: var(--accent);
@@ -1999,6 +2314,48 @@
   }
   .read-dl-btn:active { background: rgba(54,209,255,0.2); transform: scale(.97); }
   .read-dl-btn svg { width: 13px; height: 13px; }
+
+  /* ── READ-FILE PREVIEW (capped, scrollable) + full-screen button ──
+     Previously the entire file was rendered inline via renderMarkdown,
+     so a large file turned the chat bubble into a page-length wall of
+     text with no way to see it all without scrolling the whole page.
+     Now only READ_PREVIEW_MAX_LINES lines render inline, in their own
+     bordered box with independent horizontal+vertical scroll — the
+     rest of the chat page never has to move to read a long file. */
+  .read-file-preview {
+    margin: 0 0 8px 0;
+    padding: 10px 12px;
+    max-height: 340px;
+    overflow-x: auto; overflow-y: auto;
+    background: var(--bg-1);
+    border: 1px solid var(--border-2);
+    border-radius: 9px;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+    white-space: pre;
+    -webkit-overflow-scrolling: touch;
+  }
+  .read-file-preview code { font-family: inherit; }
+  .read-file-more-note {
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 8px;
+    font-style: italic;
+  }
+  .read-file-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  }
+  .read-fullscreen-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-2);
+    border-radius: 8px; color: var(--text);
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .read-fullscreen-btn:active { background: rgba(255,255,255,0.1); transform: scale(.97); }
+  .read-fullscreen-btn svg { width: 13px; height: 13px; }
 
   /* ── ENV VAR FORM (interactive bubble) ── */
   .env-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }

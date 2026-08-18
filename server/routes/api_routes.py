@@ -6,6 +6,7 @@ AI error-analysis endpoint used by the deploy terminal drawer.
 """
 import requests
 import base64
+import json
 from flask import Blueprint, request
 
 from server.config import OPENROUTER_KEY
@@ -15,6 +16,10 @@ from server.security import safe_jsonify, redact, safe_repo_path, UnsafePathErro
 from server.providers.github import gh_api, get_file_sha
 from server.providers.vercel import vc_api, VERCEL_TERMINAL_STATES
 from server.commands.ai_fallback import OPENROUTER_MODEL
+from server.commands.confirmation import confirm_token, build_confirmation
+from server.commands.bulk_actions import (
+    bulk_delete_files, bulk_delete_repos, bulk_set_repo_visibility, bulk_delete_vercel_projects,
+)
 
 api_bp = Blueprint("api_routes", __name__)
 
@@ -194,6 +199,90 @@ def api_file_source_save():
         })
     err = r.json().get("message", "Save nahi hui") if r.content else "Save nahi hui"
     return safe_jsonify({"reply": f"❌ GitHub Error: {err}", "action": "error"}), r.status_code
+
+
+# ════════════════════════════════════════════════════════════════
+#  BULK ACTIONS — multi-select delete/visibility-toggle from the
+#  file-list / repo-list / Vercel-list UI. Two-phase like every other
+#  destructive action in this app: first call (no `confirmed`) returns
+#  a confirm_required prompt via build_confirmation(); the frontend's
+#  existing Yes/No confirm-bubble handler already knows how to replay
+#  a confirm_required response by resending with confirmed:true — no
+#  new frontend confirm UI needed, bulk ops reuse the same one.
+# ════════════════════════════════════════════════════════════════
+BULK_CMD_MAP = {
+    "delete_files": "BULK_DELETE_FILES",
+    "delete_repos": "BULK_DELETE_REPOS",
+    "set_repo_visibility": None,  # not destructive — no confirm needed, see below
+    "delete_vercel_projects": "BULK_DELETE_VERCEL_PROJECTS",
+}
+
+
+@api_bp.route("/api/bulk-action", methods=["POST"])
+def api_bulk_action():
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "🔒 Login chahiye.", "action": "error"}), 401
+    gh_token = decrypt_token(user["github_token_encrypted"])
+    owner = user["github_login"]
+
+    body = request.json or {}
+    op = (body.get("op") or "").strip()
+    if op not in BULK_CMD_MAP:
+        return safe_jsonify({"reply": "❌ Unknown bulk action.", "action": "error"}), 400
+
+    # ── Confirmed replay (second call, after the user tapped Yes) ──
+    if body.get("confirmed"):
+        cmd = body.get("pending_command")
+        value = body.get("pending_value")
+        token = body.get("confirm_token")
+        if token != confirm_token(cmd, value, user["id"]):
+            return safe_jsonify({"reply": "❌ Confirmation token match nahi hua. Dobara try kar.", "action": "error"})
+        try:
+            params = json.loads(value) if value else {}
+        except (json.JSONDecodeError, TypeError):
+            params = {}
+        return safe_jsonify(_run_bulk_op(op, params, owner, gh_token, user))
+
+    # ── set_repo_visibility is not destructive (reversible, no data loss) — runs immediately ──
+    if op == "set_repo_visibility":
+        repos = body.get("repos", [])
+        make_private = bool(body.get("private"))
+        if not repos:
+            return safe_jsonify({"reply": "Koi repo select nahi kiya gaya.", "action": "warning"})
+        return safe_jsonify(bulk_set_repo_visibility(repos, make_private, owner, gh_token))
+
+    # ── First call for a destructive bulk op — build confirm prompt ──
+    cmd = BULK_CMD_MAP[op]
+    if op == "delete_files":
+        params = {"repo": body.get("repo"), "paths": body.get("paths", [])}
+        if not params["repo"] or not params["paths"]:
+            return safe_jsonify({"reply": "Koi file select nahi ki gayi.", "action": "warning"})
+    elif op == "delete_repos":
+        params = {"repos": body.get("repos", [])}
+        if not params["repos"]:
+            return safe_jsonify({"reply": "Koi repo select nahi kiya gaya.", "action": "warning"})
+    elif op == "delete_vercel_projects":
+        params = {"projects": body.get("projects", [])}
+        if not params["projects"]:
+            return safe_jsonify({"reply": "Koi project select nahi kiya gaya.", "action": "warning"})
+    else:
+        return safe_jsonify({"reply": "❌ Unknown bulk action.", "action": "error"}), 400
+
+    return safe_jsonify(build_confirmation(cmd, params, user["id"]))
+
+
+def _run_bulk_op(op, params, owner, gh_token, user):
+    if op == "delete_files":
+        return bulk_delete_files(params.get("repo"), params.get("paths", []), owner, gh_token)
+    if op == "delete_repos":
+        return bulk_delete_repos(params.get("repos", []), owner, gh_token)
+    if op == "delete_vercel_projects":
+        vc_token = get_user_vercel_token(user)
+        if not vc_token:
+            return {"reply": "🔒 Pehle Vercel connect karo.", "action": "vercel_auth_required"}
+        return bulk_delete_vercel_projects(params.get("projects", []), vc_token)
+    return {"reply": "❌ Unknown bulk action.", "action": "error"}
 
 
 @api_bp.route("/api/vercel/deploy-events", methods=["GET"])
