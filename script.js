@@ -1139,7 +1139,7 @@ function buildCommandFormBubble(cmd, placeholders) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  // fieldRefs[name] = { input, kind, chipCtl? }
+  // fieldRefs[name] = { input, kind, datalist? }
   const fieldRefs = {};
 
   placeholders.forEach(name => {
@@ -1151,45 +1151,45 @@ function buildCommandFormBubble(cmd, placeholders) {
     fieldLabel.textContent = placeholderLabel(name);
     fieldWrap.appendChild(fieldLabel);
 
+    const listId = `field-list-${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const datalist = document.createElement('datalist');
+    datalist.id = listId;
+
     const inputEl = document.createElement('input');
     inputEl.type = 'text';
     inputEl.placeholder = placeholderLabel(name);
     inputEl.autocomplete = 'off';
-    inputEl.setAttribute('autocomplete', 'one-time-code');
-    inputEl.setAttribute('data-lpignore', 'true');
-    inputEl.setAttribute('data-form-type', 'other');
 
-    fieldWrap.appendChild(inputEl);
-    form.appendChild(fieldWrap);
-
-    let chipCtl = null;
     if (kind === 'repo') {
-      chipCtl = attachChipSuggest(inputEl, []);
-      getRepoNames().then(names => chipCtl.setItems(names));
+      inputEl.setAttribute('list', listId);
+      getRepoNames().then(names => fillDatalist(datalist, names));
     } else if (kind === 'vercel_project') {
-      chipCtl = attachChipSuggest(inputEl, []);
-      getVercelProjectNames().then(names => chipCtl.setItems(names));
+      inputEl.setAttribute('list', listId);
+      getVercelProjectNames().then(names => fillDatalist(datalist, names));
     } else if (kind === 'path') {
-      chipCtl = attachChipSuggest(inputEl, []);
+      inputEl.setAttribute('list', listId);
       inputEl.placeholder = 'file path (pick a repo first)';
     } else if (kind === 'new_path') {
       inputEl.placeholder = 'e.g. src/newfile.js';
     }
 
-    fieldRefs[name] = { input: inputEl, kind, chipCtl };
+    fieldWrap.appendChild(inputEl);
+    fieldWrap.appendChild(datalist);
+    form.appendChild(fieldWrap);
+    fieldRefs[name] = { input: inputEl, kind, datalist };
   });
 
   // If both a repo field and a real (existing-file) path field exist,
-  // refresh the path chip suggestions whenever the repo field changes —
-  // same live-lookup pattern as the upload flow's askUploadPath step.
-  // Skipped for CREATE_FILE's 'new_path' kind, which has no chip list.
+  // refresh the path datalist whenever the repo field changes — same
+  // live-lookup pattern as the upload flow's askUploadPath step. Skipped
+  // for CREATE_FILE's 'new_path' kind, which has no datalist to refresh.
   if (fieldRefs.repo && fieldRefs.path && fieldRefs.path.kind === 'path') {
     fieldRefs.repo.input.addEventListener('change', () => {
       const repo = fieldRefs.repo.input.value.trim();
       if (!repo) return;
       fetch(`/api/repo-files?repo=${encodeURIComponent(repo)}`)
         .then(r => r.json())
-        .then(data => fieldRefs.path.chipCtl && fieldRefs.path.chipCtl.setItems(data.files || []))
+        .then(data => fillDatalist(fieldRefs.path.datalist, data.files || []))
         .catch(() => {});
     });
   }
@@ -1452,139 +1452,13 @@ function getVercelProjectNames() {
   return vercelProjectNamesFetchPromise;
 }
 
-// ── Custom chip-based suggestions (replaces native <datalist>/autofill bar) ──
-// Renders a horizontally-scrollable row of chips directly above `inputEl`
-// (inserted right before it in the DOM). Shows all `items` on focus/empty,
-// filters live as the user types, and clicking/tapping a chip fills the
-// input. Returns a controller with `.setItems(items)` so callers can
-// populate the list asynchronously (e.g. after a fetch resolves).
-// ── Global chip-suggest bar (mimics the classic autofill strip, but ours) ──
-// One shared bar, fixed to the bottom of the viewport, pinned just above
-// the on-screen keyboard via the visualViewport API. Whichever chip-enabled
-// input currently has focus "owns" the bar's contents; the bar hides when
-// nothing owns it. This matches the native autofill-strip *position*
-// (screen bottom, above keyboard) while being fully our own styling.
-let _chipBarEl = null;
-let _chipBarOwner = null; // { inputEl, getItems() } for whichever field is focused
-
-function _ensureChipBar() {
-  if (_chipBarEl) return _chipBarEl;
-  const bar = document.createElement('div');
-  bar.id = 'global-chip-bar';
-  bar.className = 'global-chip-bar';
-  document.body.appendChild(bar);
-  _chipBarEl = bar;
-
-  const reposition = () => {
-    if (!bar.classList.contains('show')) return;
-    const vv = window.visualViewport;
-    if (vv) {
-      // Distance from the bottom of the layout viewport to the bottom of
-      // the visual viewport is roughly the keyboard height.
-      const kbHeight = Math.max(0, document.documentElement.clientHeight - vv.height - vv.offsetTop);
-      bar.style.bottom = kbHeight + 'px';
-    } else {
-      bar.style.bottom = '0px';
-    }
-  };
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', reposition);
-    window.visualViewport.addEventListener('scroll', reposition);
-  }
-  bar._reposition = reposition;
-
-  return bar;
-}
-
-function _renderChipBar() {
-  const bar = _ensureChipBar();
-  if (!_chipBarOwner) {
-    bar.classList.remove('show');
-    return;
-  }
-  const { inputEl, getItems } = _chipBarOwner;
-  const items = getItems();
-  const q = inputEl.value.trim().toLowerCase();
-  const matches = q ? items.filter(v => v.toLowerCase().includes(q)) : items;
-
-  bar.innerHTML = '';
-  if (!matches.length) {
-    if (q && items.length) {
-      const empty = document.createElement('span');
-      empty.className = 'fchip no-match';
-      empty.textContent = 'no match';
-      bar.appendChild(empty);
-      bar.classList.add('show');
-      bar._reposition();
-    } else {
-      bar.classList.remove('show');
-    }
-    return;
-  }
-
-  matches.slice(0, 10).forEach(v => {
-    const chip = document.createElement('span');
-    chip.className = 'fchip';
-    chip.textContent = v;
-    chip.onmousedown = (e) => e.preventDefault(); // keep input focused
-    chip.onclick = () => {
-      inputEl.value = v;
-      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-      _renderChipBar();
-      inputEl.focus();
-    };
-    bar.appendChild(chip);
+function fillDatalist(datalistEl, items) {
+  datalistEl.innerHTML = '';
+  items.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    datalistEl.appendChild(opt);
   });
-  bar.classList.add('show');
-  bar._reposition();
-}
-
-// Registers `inputEl` as a chip-suggest field. Items can start empty and be
-// filled later via the returned controller's setItems() (e.g. after an
-// async fetch). The bar only shows/updates while `inputEl` is focused.
-function attachChipSuggest(inputEl, initialItems) {
-  let items = initialItems || [];
-
-  // Chrome's payment/address/password autofill strip triggers based on its
-  // own heuristics for any plain text input, largely ignoring autocomplete
-  // hints. Keeping the field readonly until the user actually taps it
-  // stops Chrome from treating it as a fillable form field in the first
-  // place; we flip off readonly on focus so typing still works normally.
-  inputEl.setAttribute('readonly', 'readonly');
-  const unlockReadonly = () => {
-    setTimeout(() => inputEl.removeAttribute('readonly'), 50);
-  };
-  inputEl.addEventListener('focus', unlockReadonly, { once: true });
-  inputEl.addEventListener('touchstart', unlockReadonly, { once: true });
-
-  const becomeOwner = () => {
-    _chipBarOwner = { inputEl, getItems: () => items };
-    _renderChipBar();
-  };
-  const maybeReleaseOwner = () => {
-    // Defer so a chip's mousedown->click on the bar (which lives outside
-    // the input) isn't mistaken for a blur-to-elsewhere.
-    setTimeout(() => {
-      if (_chipBarOwner && _chipBarOwner.inputEl === inputEl && document.activeElement !== inputEl) {
-        _chipBarOwner = null;
-        _renderChipBar();
-      }
-    }, 120);
-  };
-
-  inputEl.addEventListener('focus', becomeOwner);
-  inputEl.addEventListener('input', () => {
-    if (_chipBarOwner && _chipBarOwner.inputEl === inputEl) _renderChipBar();
-  });
-  inputEl.addEventListener('blur', maybeReleaseOwner);
-
-  return {
-    setItems(newItems) {
-      items = newItems || [];
-      if (_chipBarOwner && _chipBarOwner.inputEl === inputEl) _renderChipBar();
-    }
-  };
 }
 
 // Step 1: ask which repo, as an in-chat form bubble (not a native prompt).
@@ -1610,17 +1484,18 @@ function askUploadRepo(files) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
+  const listId = 'repo-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
+  input.setAttribute('list', listId);
   input.autocomplete = 'off';
-  input.setAttribute('autocomplete', 'one-time-code');
-  input.setAttribute('data-lpignore', 'true');
-  input.setAttribute('data-form-type', 'other');
 
-  const chipCtl = attachChipSuggest(input, []);
-  getRepoNames().then(names => chipCtl.setItems(names));
+  getRepoNames().then(names => fillDatalist(datalist, names));
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -1655,6 +1530,7 @@ function askUploadRepo(files) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
+  form.appendChild(datalist);
   form.appendChild(actions);
   bubble.appendChild(form);
 
@@ -1682,19 +1558,20 @@ function askUploadPath(files, repo) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
+  const listId = 'folder-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
+  input.setAttribute('list', listId);
   input.autocomplete = 'off';
-  input.setAttribute('autocomplete', 'one-time-code');
-  input.setAttribute('data-lpignore', 'true');
-  input.setAttribute('data-form-type', 'other');
 
-  const chipCtl = attachChipSuggest(input, []);
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
     .then(r => r.json())
-    .then(data => chipCtl.setItems(data.folders || []))
+    .then(data => fillDatalist(datalist, data.folders || []))
     .catch(() => {});
 
   const hint = document.createElement('div');
@@ -1761,6 +1638,7 @@ function askUploadPath(files, repo) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
+  form.appendChild(datalist);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);
@@ -1973,17 +1851,18 @@ function askZipUploadRepo(file) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
+  const listId = 'zip-repo-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
+  input.setAttribute('list', listId);
   input.autocomplete = 'off';
-  input.setAttribute('autocomplete', 'one-time-code');
-  input.setAttribute('data-lpignore', 'true');
-  input.setAttribute('data-form-type', 'other');
 
-  const chipCtl = attachChipSuggest(input, []);
-  getRepoNames().then(names => chipCtl.setItems(names));
+  getRepoNames().then(names => fillDatalist(datalist, names));
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -2018,6 +1897,7 @@ function askZipUploadRepo(file) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
+  form.appendChild(datalist);
   form.appendChild(actions);
   bubble.appendChild(form);
 
@@ -2044,19 +1924,20 @@ function askZipUploadPath(file, repo) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
+  const listId = 'zip-folder-list-' + Date.now();
+  const datalist = document.createElement('datalist');
+  datalist.id = listId;
+
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
+  input.setAttribute('list', listId);
   input.autocomplete = 'off';
-  input.setAttribute('autocomplete', 'one-time-code');
-  input.setAttribute('data-lpignore', 'true');
-  input.setAttribute('data-form-type', 'other');
 
-  const chipCtl = attachChipSuggest(input, []);
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
     .then(r => r.json())
-    .then(data => chipCtl.setItems(data.folders || []))
+    .then(data => fillDatalist(datalist, data.folders || []))
     .catch(() => {});
 
   const hint = document.createElement('div');
@@ -2095,6 +1976,7 @@ function askZipUploadPath(file, repo) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
+  form.appendChild(datalist);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);

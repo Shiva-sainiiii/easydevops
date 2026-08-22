@@ -1636,66 +1636,6 @@
     outline: none;
     transition: border-color 0.15s;
   }
-  /* ── Custom global chip-suggest bar (replaces native <datalist> / ── */
-  /* ── autofill strip — fixed above the keyboard, same spot they used ── */
-  .global-chip-bar {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 999;
-    display: flex;
-    gap: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 10px 12px;
-    background: var(--surface, #14181c);
-    backdrop-filter: blur(16px);
-    border-top: 1px solid var(--border, rgba(255,255,255,0.1));
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x proximity;
-    transform: translateY(100%);
-    opacity: 0;
-    pointer-events: none;
-    transition: transform 0.16s ease, opacity 0.16s ease, bottom 0.1s ease;
-  }
-  .global-chip-bar.show {
-    transform: translateY(0);
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .global-chip-bar::-webkit-scrollbar { display: none; }
-  .global-chip-bar .fchip {
-    flex: 0 0 auto;
-    scroll-snap-align: start;
-    display: inline-flex;
-    align-items: center;
-    padding: 8px 15px;
-    background: var(--surface-2, rgba(255,255,255,0.06));
-    border: 1px solid var(--border, rgba(255,255,255,0.12));
-    border-radius: 100px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text, #eaf2f2);
-    white-space: nowrap;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
-  }
-  .global-chip-bar .fchip:active {
-    transform: scale(0.95);
-    background: rgba(54,209,255,0.14);
-    border-color: rgba(54,209,255,0.5);
-    color: var(--accent-2);
-  }
-  .global-chip-bar .fchip.no-match {
-    color: var(--muted);
-    opacity: 0.6;
-    cursor: default;
-  }
-  .global-chip-bar .fchip.no-match:active { transform: none; background: var(--surface-2, rgba(255,255,255,0.06)); border-color: var(--border); color: var(--muted); }
-
   .prompt-form input:focus { border-color: var(--accent); }
   .prompt-form .prompt-hint {
     font-size: 12px;
