@@ -1139,7 +1139,7 @@ function buildCommandFormBubble(cmd, placeholders) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  // fieldRefs[name] = { input, kind, datalist? }
+  // fieldRefs[name] = { input, kind, chipCtl? }
   const fieldRefs = {};
 
   placeholders.forEach(name => {
@@ -1151,45 +1151,42 @@ function buildCommandFormBubble(cmd, placeholders) {
     fieldLabel.textContent = placeholderLabel(name);
     fieldWrap.appendChild(fieldLabel);
 
-    const listId = `field-list-${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const datalist = document.createElement('datalist');
-    datalist.id = listId;
-
     const inputEl = document.createElement('input');
     inputEl.type = 'text';
     inputEl.placeholder = placeholderLabel(name);
     inputEl.autocomplete = 'off';
 
+    fieldWrap.appendChild(inputEl);
+    form.appendChild(fieldWrap);
+
+    let chipCtl = null;
     if (kind === 'repo') {
-      inputEl.setAttribute('list', listId);
-      getRepoNames().then(names => fillDatalist(datalist, names));
+      chipCtl = attachChipSuggest(inputEl, []);
+      getRepoNames().then(names => chipCtl.setItems(names));
     } else if (kind === 'vercel_project') {
-      inputEl.setAttribute('list', listId);
-      getVercelProjectNames().then(names => fillDatalist(datalist, names));
+      chipCtl = attachChipSuggest(inputEl, []);
+      getVercelProjectNames().then(names => chipCtl.setItems(names));
     } else if (kind === 'path') {
-      inputEl.setAttribute('list', listId);
+      chipCtl = attachChipSuggest(inputEl, []);
       inputEl.placeholder = 'file path (pick a repo first)';
     } else if (kind === 'new_path') {
       inputEl.placeholder = 'e.g. src/newfile.js';
     }
 
-    fieldWrap.appendChild(inputEl);
-    fieldWrap.appendChild(datalist);
-    form.appendChild(fieldWrap);
-    fieldRefs[name] = { input: inputEl, kind, datalist };
+    fieldRefs[name] = { input: inputEl, kind, chipCtl };
   });
 
   // If both a repo field and a real (existing-file) path field exist,
-  // refresh the path datalist whenever the repo field changes — same
-  // live-lookup pattern as the upload flow's askUploadPath step. Skipped
-  // for CREATE_FILE's 'new_path' kind, which has no datalist to refresh.
+  // refresh the path chip suggestions whenever the repo field changes —
+  // same live-lookup pattern as the upload flow's askUploadPath step.
+  // Skipped for CREATE_FILE's 'new_path' kind, which has no chip list.
   if (fieldRefs.repo && fieldRefs.path && fieldRefs.path.kind === 'path') {
     fieldRefs.repo.input.addEventListener('change', () => {
       const repo = fieldRefs.repo.input.value.trim();
       if (!repo) return;
       fetch(`/api/repo-files?repo=${encodeURIComponent(repo)}`)
         .then(r => r.json())
-        .then(data => fillDatalist(fieldRefs.path.datalist, data.files || []))
+        .then(data => fieldRefs.path.chipCtl && fieldRefs.path.chipCtl.setItems(data.files || []))
         .catch(() => {});
     });
   }
@@ -1452,13 +1449,63 @@ function getVercelProjectNames() {
   return vercelProjectNamesFetchPromise;
 }
 
-function fillDatalist(datalistEl, items) {
-  datalistEl.innerHTML = '';
-  items.forEach(v => {
-    const opt = document.createElement('option');
-    opt.value = v;
-    datalistEl.appendChild(opt);
-  });
+// ── Custom chip-based suggestions (replaces native <datalist>/autofill bar) ──
+// Renders a horizontally-scrollable row of chips directly above `inputEl`
+// (inserted right before it in the DOM). Shows all `items` on focus/empty,
+// filters live as the user types, and clicking/tapping a chip fills the
+// input. Returns a controller with `.setItems(items)` so callers can
+// populate the list asynchronously (e.g. after a fetch resolves).
+function attachChipSuggest(inputEl, initialItems) {
+  const row = document.createElement('div');
+  row.className = 'field-chip-suggest';
+  inputEl.parentNode.insertBefore(row, inputEl);
+
+  let items = initialItems || [];
+  const MAX_CHIPS = 8;
+
+  const render = () => {
+    row.innerHTML = '';
+    const q = inputEl.value.trim().toLowerCase();
+    const matches = q
+      ? items.filter(v => v.toLowerCase().includes(q))
+      : items;
+
+    if (!matches.length) {
+      if (q && items.length) {
+        const empty = document.createElement('span');
+        empty.className = 'fchip no-match';
+        empty.textContent = 'no match';
+        row.appendChild(empty);
+      }
+      return;
+    }
+
+    matches.slice(0, MAX_CHIPS).forEach(v => {
+      const chip = document.createElement('span');
+      chip.className = 'fchip';
+      chip.textContent = v;
+      chip.onmousedown = (e) => e.preventDefault(); // keep input focused
+      chip.onclick = () => {
+        inputEl.value = v;
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        render();
+        inputEl.focus();
+      };
+      row.appendChild(chip);
+    });
+  };
+
+  inputEl.addEventListener('input', render);
+  inputEl.addEventListener('focus', render);
+  render();
+
+  return {
+    setItems(newItems) {
+      items = newItems || [];
+      render();
+    }
+  };
 }
 
 // Step 1: ask which repo, as an in-chat form bubble (not a native prompt).
@@ -1484,18 +1531,14 @@ function askUploadRepo(files) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'repo-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
 
-  getRepoNames().then(names => fillDatalist(datalist, names));
+  const chipCtl = attachChipSuggest(input, []);
+  getRepoNames().then(names => chipCtl.setItems(names));
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -1530,7 +1573,6 @@ function askUploadRepo(files) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
-  form.appendChild(datalist);
   form.appendChild(actions);
   bubble.appendChild(form);
 
@@ -1558,20 +1600,16 @@ function askUploadPath(files, repo) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'folder-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
 
+  const chipCtl = attachChipSuggest(input, []);
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
     .then(r => r.json())
-    .then(data => fillDatalist(datalist, data.folders || []))
+    .then(data => chipCtl.setItems(data.folders || []))
     .catch(() => {});
 
   const hint = document.createElement('div');
@@ -1638,7 +1676,6 @@ function askUploadPath(files, repo) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
-  form.appendChild(datalist);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);
@@ -1851,18 +1888,14 @@ function askZipUploadRepo(file) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'zip-repo-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
 
-  getRepoNames().then(names => fillDatalist(datalist, names));
+  const chipCtl = attachChipSuggest(input, []);
+  getRepoNames().then(names => chipCtl.setItems(names));
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -1897,7 +1930,6 @@ function askZipUploadRepo(file) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
-  form.appendChild(datalist);
   form.appendChild(actions);
   bubble.appendChild(form);
 
@@ -1924,20 +1956,16 @@ function askZipUploadPath(file, repo) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'zip-folder-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
 
+  const chipCtl = attachChipSuggest(input, []);
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
     .then(r => r.json())
-    .then(data => fillDatalist(datalist, data.folders || []))
+    .then(data => chipCtl.setItems(data.folders || []))
     .catch(() => {});
 
   const hint = document.createElement('div');
@@ -1976,7 +2004,6 @@ function askZipUploadPath(file, repo) {
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
   form.appendChild(input);
-  form.appendChild(datalist);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);
