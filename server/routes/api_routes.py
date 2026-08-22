@@ -37,6 +37,28 @@ def api_list_repos():
     return safe_jsonify({"repos": names})
 
 
+@api_bp.route("/api/vercel-projects", methods=["GET"])
+def api_list_vercel_projects():
+    # Mirrors /api/repos above — powers the {project_name} datalist in the
+    # command-form bubble (VERCEL_DEPLOY, VERCEL_DELETE_PROJECT,
+    # VERCEL_GET_ENV, VERCEL_SET_ENV) the same way repo names autofill for
+    # GitHub commands. Silently returns an empty list (not an error) when
+    # the user hasn't connected Vercel, matching the GitHub route's
+    # not-logged-in behavior — the datalist just stays empty and the field
+    # falls back to plain typing, no broken-looking error state.
+    user = current_user()
+    if not user:
+        return safe_jsonify({"projects": []})
+    vc_token = get_user_vercel_token(user)
+    if not vc_token:
+        return safe_jsonify({"projects": []})
+    r = vc_api("GET", "/v9/projects", vc_token)
+    if r.status_code != 200:
+        return safe_jsonify({"projects": []})
+    names = [p["name"] for p in r.json().get("projects", [])]
+    return safe_jsonify({"projects": names})
+
+
 @api_bp.route("/api/repo-folders", methods=["GET"])
 def api_repo_folders():
     user = current_user()

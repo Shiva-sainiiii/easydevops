@@ -1079,6 +1079,7 @@ function highlightTemplate(tpl, queryWords) {
 // new live sources appear.
 function placeholderKind(name, cmdId) {
   if (name === 'repo') return 'repo';
+  if (name === 'project_name') return 'vercel_project';
   if (name === 'path') {
     // CREATE_FILE's {path} is a brand-new file that doesn't exist yet —
     // showing existing files as suggestions would be misleading, so it
@@ -1162,6 +1163,9 @@ function buildCommandFormBubble(cmd, placeholders) {
     if (kind === 'repo') {
       inputEl.setAttribute('list', listId);
       getRepoNames().then(names => fillDatalist(datalist, names));
+    } else if (kind === 'vercel_project') {
+      inputEl.setAttribute('list', listId);
+      getVercelProjectNames().then(names => fillDatalist(datalist, names));
     } else if (kind === 'path') {
       inputEl.setAttribute('list', listId);
       inputEl.placeholder = 'file path (pick a repo first)';
@@ -1429,6 +1433,23 @@ function getRepoNames() {
     .then(data => { cachedRepoNames = data.repos || []; return cachedRepoNames; })
     .catch(() => []);
   return repoNamesFetchPromise;
+}
+
+// Same cache-once pattern as getRepoNames() above, for the Vercel
+// {project_name} field. Only meaningful once Vercel is connected — the
+// endpoint itself returns an empty list otherwise, so this just quietly
+// yields no suggestions rather than erroring.
+let cachedVercelProjectNames = null;
+let vercelProjectNamesFetchPromise = null;
+
+function getVercelProjectNames() {
+  if (cachedVercelProjectNames) return Promise.resolve(cachedVercelProjectNames);
+  if (vercelProjectNamesFetchPromise) return vercelProjectNamesFetchPromise;
+  vercelProjectNamesFetchPromise = fetch('/api/vercel-projects')
+    .then(r => r.json())
+    .then(data => { cachedVercelProjectNames = data.projects || []; return cachedVercelProjectNames; })
+    .catch(() => []);
+  return vercelProjectNamesFetchPromise;
 }
 
 function fillDatalist(datalistEl, items) {
