@@ -800,7 +800,15 @@
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 51;
-    height: min(72vh, 560px);
+    /* Was a flat min(72vh, 560px) — the panel always claimed ~72% of the
+       screen even when the log had one line ("Connecting to Vercel…"),
+       which pushed the footer (status + Live URL button) all the way
+       down to the bottom edge with a big dead gap above it. Sizing to
+       content (max-height as a ceiling, not a fixed height) means the
+       panel is only as tall as it needs to be — it grows as log lines
+       stream in and caps out at 68vh so a long build doesn't take over
+       the whole screen. */
+    max-height: 68vh;
     background: #0a0f10;
     border-top: 1px solid var(--border-2);
     border-radius: 16px 16px 0 0;
@@ -886,6 +894,7 @@
 
   .deploy-terminal-log {
     flex: 1;
+    min-height: 90px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     padding: 12px 16px 16px;
