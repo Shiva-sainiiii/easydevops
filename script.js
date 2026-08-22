@@ -4591,6 +4591,20 @@ async function pollDeployEvents(deploymentId) {
 
     if (data.done) {
       deployTerminalPollTimer = null;
+      // A fast build can reach a terminal state (READY/ERROR/CANCELED)
+      // without ever streaming a single build-log line — Vercel's events
+      // API can lag behind or simply have nothing to report for a build
+      // that finished in a couple seconds. Without this, "Connecting to
+      // Vercel…" was left sitting in the log body forever even though the
+      // footer above it already said "Deployment live", which read as
+      // stuck/broken. If nothing ever arrived, swap the placeholder for a
+      // clear final line instead of leaving stale connecting-text behind.
+      const stillEmpty = body.querySelector('.deploy-log-empty');
+      if (stillEmpty) {
+        stillEmpty.textContent = data.state === 'READY'
+          ? 'Build itni jaldi complete hui ki koi log line stream nahi hui.'
+          : 'Koi build log nahi mili.';
+      }
       return; // terminal state reached — stop polling, leave card as-is in the thread
     }
   } catch (err) {
