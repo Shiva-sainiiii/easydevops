@@ -1503,7 +1503,7 @@
   }
 
   .msg-wrap.user  { align-items: flex-end; align-self: flex-end; }
-  .msg-wrap.agent { align-items: flex-start; align-self: flex-start; }
+  .msg-wrap.agent { align-items: stretch; align-self: stretch; width: 100%; }
 
   .time-divider {
     display: flex;
@@ -1581,30 +1581,52 @@
     word-break: break-word;
   }
 
+  /* User bubble now carries the old agent look — a quiet glass surface,
+     not the bright cyan fill. Agent replies below drop bubble chrome
+     entirely (see next rule), so this is the only "bubble" left in the
+     thread, which is also why it keeps the max-width/rounded-corner
+     treatment: it's still visually a bubble, just restyled. */
   .msg-wrap.user .msg-bubble {
-    background: linear-gradient(135deg, var(--accent) 0%, #1a9fd6 100%);
-    color: #04181c;
-    font-weight: 500;
-    border-bottom-right-radius: 5px;
-  }
-
-  .msg-wrap.agent .msg-bubble {
     background: var(--surface);
     backdrop-filter: blur(12px);
     border: 1px solid var(--border);
     color: var(--text);
-    border-bottom-left-radius: 5px;
+    font-weight: 400;
+    border-bottom-right-radius: 5px;
   }
 
-  .msg-bubble.success { border-color: rgba(61,220,151,0.4); }
-  .msg-bubble.error   { border-color: rgba(255,107,107,0.4); }
-  .msg-bubble.warning { border-color: rgba(255,200,87,0.4); }
-  .msg-bubble.info    { border-color: rgba(54,209,255,0.4); }
+  /* Agent replies render like a normal document flow (Claude/ChatGPT
+     style) instead of a chat bubble: full width, no fill, no border, no
+     padding constraining it — content decides its own width. This also
+     means every rich bubble (file-list cards, confirm prompts, upload
+     forms, deploy-terminal launch card, etc.) gets the full thread width
+     to lay out in, which is what gives their action buttons room to
+     breathe instead of being squeezed into ~86vw of a chat bubble. */
+  .msg-wrap.agent .msg-bubble {
+    max-width: 100%;
+    width: 100%;
+    padding: 2px 2px 0;
+    background: none;
+    backdrop-filter: none;
+    border: none;
+    border-radius: 0;
+    color: var(--text);
+  }
+
+  /* Status-colored replies (success/error/warning/info) no longer have a
+     bubble border to tint, so they get a left accent stripe instead —
+     same purpose (glanceable outcome color) without needing bubble chrome
+     to hang it on. */
+  .msg-wrap.agent .msg-bubble.success { border-left: 2px solid rgba(61,220,151,0.55); padding-left: 12px; }
+  .msg-wrap.agent .msg-bubble.error   { border-left: 2px solid rgba(255,107,107,0.55); padding-left: 12px; }
+  .msg-wrap.agent .msg-bubble.warning { border-left: 2px solid rgba(255,200,87,0.55); padding-left: 12px; }
+  .msg-wrap.agent .msg-bubble.info    { border-left: 2px solid rgba(54,209,255,0.4); padding-left: 12px; }
 
   .confirm-actions {
     display: flex;
     gap: 8px;
     margin-top: 12px;
+    max-width: 360px;
   }
   .confirm-btn {
     flex: 1;
@@ -1636,6 +1658,7 @@
     flex-direction: column;
     gap: 8px;
     margin-top: 12px;
+    max-width: 360px;
   }
   .prompt-form input {
     width: 100%;
@@ -1659,6 +1682,7 @@
     display: flex;
     gap: 8px;
     margin-top: 2px;
+    max-width: 360px;
   }
   .prompt-btn {
     flex: 1;
@@ -2006,50 +2030,49 @@
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .file-row-name svg { width: 13px; height: 13px; flex-shrink: 0; color: var(--muted); }
-  .file-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
+  .file-row-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; margin-left: auto; }
   .file-dl-btn {
     flex-shrink: 0;
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px;
     background: rgba(54,209,255,0.10);
     border: 1px solid rgba(54,209,255,0.28);
-    border-radius: 6px;
-    color: var(--accent); font-family: var(--font-mono);
-    font-size: 11px; font-weight: 500; cursor: pointer;
+    border-radius: 7px;
+    color: var(--accent); cursor: pointer;
     text-decoration: none;
     transition: background .15s, border-color .15s, transform .1s;
     -webkit-tap-highlight-color: transparent;
   }
   .file-dl-btn:active { background: rgba(54,209,255,0.2); transform: scale(.96); }
-  .file-dl-btn svg { width: 11px; height: 11px; }
+  .file-dl-btn svg { width: 14px; height: 14px; }
   .file-del-btn {
     flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 24px;
+    width: 30px; height: 30px;
     background: rgba(255,107,107,0.10);
     border: 1px solid rgba(255,107,107,0.28);
-    border-radius: 6px;
+    border-radius: 7px;
     color: var(--red); cursor: pointer;
     transition: background .15s, border-color .15s, transform .1s;
     -webkit-tap-highlight-color: transparent;
   }
   .file-del-btn:active { background: rgba(255,107,107,0.22); transform: scale(.94); }
-  .file-del-btn svg { width: 12px; height: 12px; }
+  .file-del-btn svg { width: 15px; height: 15px; }
   .file-del-btn:disabled { opacity: .5; cursor: not-allowed; }
 
   .file-read-btn, .file-edit-btn {
     flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 24px;
+    width: 30px; height: 30px;
     background: rgba(255,255,255,0.04);
     border: 1px solid var(--border-2);
-    border-radius: 6px;
+    border-radius: 7px;
     color: var(--muted); cursor: pointer;
     transition: background .15s, border-color .15s, transform .1s, color .15s;
     -webkit-tap-highlight-color: transparent;
   }
   .file-read-btn:active, .file-edit-btn:active { transform: scale(.94); }
-  .file-read-btn svg, .file-edit-btn svg { width: 12px; height: 12px; }
+  .file-read-btn svg, .file-edit-btn svg { width: 15px; height: 15px; }
   .file-read-btn:active { background: rgba(54,209,255,0.15); border-color: rgba(54,209,255,0.35); color: var(--accent); }
   .file-edit-btn:active { background: rgba(61,220,151,0.15); border-color: rgba(61,220,151,0.35); color: var(--green); }
 

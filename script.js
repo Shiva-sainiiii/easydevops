@@ -1986,10 +1986,17 @@ async function doZipUpload(file, repo, dir) {
 
     const { data } = await xhrUploadWithProgress('/upload-zip', form, (pct) => {
       // Upload itself is usually the fast part; once bytes are fully sent,
-      // the server is still extracting + pushing a commit, so switch the
-      // label instead of leaving the ring pinned at 100% looking stuck.
-      if (pct >= 100) ring.setLabel('Extracting & pushing…', true);
-      else ring.update(pct);
+      // the server is still extracting the zip and pushing a commit, so
+      // switch the label instead of leaving the ring pinned at 100%
+      // looking stuck. Two-phase label (extract → push) instead of one
+      // generic "Processing…" so it's clearer something is actually
+      // happening during the part of the request with no progress signal.
+      if (pct >= 100) {
+        ring.setLabel('Zip extract kar raha hu…', true);
+        setTimeout(() => ring.setLabel(`Files ${repo} me push kar raha hu…`, true), 1200);
+      } else {
+        ring.update(pct);
+      }
     });
     ring.remove();
 
@@ -2172,7 +2179,7 @@ function buildFileListBubble(repo, items) {
       dlBtn.className = 'file-dl-btn';
       dlBtn.href = dlUrl;
       dlBtn.download = (item.path || '').split('/').pop();
-      dlBtn.innerHTML = iconDl() + '↓';
+      dlBtn.innerHTML = iconDl();
       dlBtn.title = 'Download ' + (item.path || '');
       rowActions.appendChild(dlBtn);
 
@@ -2234,6 +2241,7 @@ async function requestBulkFileDelete(repo, paths, btnEl, onDone) {
   btnEl.disabled = true;
   isLoading = true;
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus('Files delete kar raha hu…');
   typing.classList.add('show');
   scrollToBottom();
 
@@ -2351,6 +2359,7 @@ async function requestFileRowDelete(repo, path, btnEl) {
   history.push({ role: 'user', content: msg });
 
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(guessStatusText(msg));
   typing.classList.add('show');
   scrollToBottom();
   isLoading = true;
@@ -2799,6 +2808,7 @@ async function requestCardDelete(kind, item, btnEl) {
   addMessage('user', msg);
   history.push({ role: 'user', content: msg });
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(guessStatusText(msg));
   typing.classList.add('show');
   scrollToBottom();
   isLoading = true;
@@ -2840,6 +2850,7 @@ async function requestBulkRepoDelete(repos, btnEl, onDone) {
   btnEl.disabled = true;
   isLoading = true;
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(`${repos.length} repo${repos.length !== 1 ? 's' : ''} delete kar raha hu…`);
   typing.classList.add('show');
   scrollToBottom();
   try {
@@ -2873,6 +2884,7 @@ async function requestBulkVercelDelete(projects, btnEl, onDone) {
   btnEl.disabled = true;
   isLoading = true;
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(`${projects.length} Vercel project${projects.length !== 1 ? 's' : ''} delete kar raha hu…`);
   typing.classList.add('show');
   scrollToBottom();
   try {
@@ -2908,6 +2920,7 @@ async function requestBulkRepoVisibility(repos, makePrivate, btnEl) {
   btnEl.disabled = true;
   isLoading = true;
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(`${repos.length} repo${repos.length !== 1 ? 's' : ''} ${makePrivate ? 'private' : 'public'} kar raha hu…`);
   typing.classList.add('show');
   scrollToBottom();
   try {
@@ -3762,6 +3775,18 @@ function vibrate(pattern) {
   } catch (e) { /* not supported — silently ignore */ }
 }
 
+const CONFIRM_ACTION_STATUS = {
+  DELETE_REPO: 'Repo delete kar raha hu…',
+  DELETE_FILE: 'File delete kar raha hu…',
+  VERCEL_DELETE_PROJECT: 'Vercel project delete kar raha hu…',
+  NETLIFY_DELETE_SITE: 'Netlify site delete kar raha hu…',
+  RENDER_DELETE_SERVICE: 'Render service delete kar raha hu…',
+  VERCEL_ROLLBACK: 'Vercel deployment rollback kar raha hu…',
+  BULK_DELETE_FILES: 'Files delete kar raha hu…',
+  BULK_DELETE_REPOS: 'Repos delete kar raha hu…',
+  BULK_DELETE_VERCEL_PROJECTS: 'Vercel projects delete kar raha hu…',
+};
+
 // ── CONFIRMED DESTRUCTIVE ACTION ──
 async function runConfirmedAction(confirmData, yesBtn, noBtn) {
   yesBtn.disabled = true;
@@ -3769,6 +3794,7 @@ async function runConfirmedAction(confirmData, yesBtn, noBtn) {
   yesBtn.textContent = 'Delete ho raha hai...';
 
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(CONFIRM_ACTION_STATUS[confirmData.pending_command] || 'Delete kar raha hu…');
   typing.classList.add('show');
   scrollToBottom();
 
@@ -3836,6 +3862,55 @@ const PROVIDER_NAMES = { github: 'GitHub', vercel: 'Vercel', netlify: 'Netlify',
 function providerBadgeHtml(key) {
   if (!key || !PROVIDER_ICONS[key]) return '';
   return `<span class="provider-badge-icon">${PROVIDER_ICONS[key]}</span>${PROVIDER_NAMES[key]}`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TASK-AWARE LOADING STATUS
+// The typing indicator used to always say "Sochte hue..." regardless of
+// what was actually happening, which felt like a black box even for
+// simple, fast commands. This guesses a short, specific status phrase
+// from the outgoing message text — same intent vocabulary as
+// PROVIDER_BADGES/actionColorFor above — and swaps it into the
+// #think-text span. It's a client-side guess (not fed by the server's
+// actual regex parser), so it's deliberately generic enough to stay
+// truthful even if the guess is imprecise: "Repo dhoondh raha hu" is
+// accurate whether the backend resolves it via regex or the AI fallback.
+// Falls back to the original "Sochte hue..." for anything unmatched
+// (free-form/AI-fallback requests, where there's no fast local guess).
+// ══════════════════════════════════════════════════════════════════
+const STATUS_PATTERNS = [
+  { re: /\bdelete\b.*\brepo|\brepo\b.*\b(delete|uda|hata)/i, text: 'Repo delete kar raha hu…' },
+  { re: /\b(create|bana|naya)\b.*\brepo/i, text: 'Naya repo bana raha hu…' },
+  { re: /\blist\b.*\brepo|\bsare\b.*\brepo|\bmere\b.*\brepo/i, text: 'Repos fetch kar raha hu…' },
+  { re: /\binfo\b.*\brepo|\brepo\b.*\binfo/i, text: 'Repo details laa raha hu…' },
+  { re: /\blist\b.*\bfiles?\b|\bfiles?\b.*\bin\b/i, text: 'Files list kar raha hu…' },
+  { re: /\bread\b.*\bfile|\bpadh/i, text: 'File padh raha hu…' },
+  { re: /\bdelete\b.*\bfile|\bfile\b.*\b(delete|uda|hata)/i, text: 'File delete kar raha hu…' },
+  { re: /\b(edit|update|badal)\b.*\bfile/i, text: 'File update kar raha hu…' },
+  { re: /\b(create|bana|naya)\b.*\bfile/i, text: 'File bana raha hu…' },
+  { re: /\bimport\b.*\bvercel|\bvercel\b.*\bimport/i, text: 'Vercel pe import kar raha hu…' },
+  { re: /\bdeploy\b.*\bvercel/i, text: 'Vercel pe deploy kar raha hu…' },
+  { re: /\bdelete\b.*\bvercel/i, text: 'Vercel project delete kar raha hu…' },
+  { re: /\bvercel\b.*\benv|\benv\b.*\bvercel/i, text: 'Vercel env vars check kar raha hu…' },
+  { re: /\blist\b.*\bvercel/i, text: 'Vercel projects fetch kar raha hu…' },
+  { re: /\bnetlify\b.*\bsite|\bsite\b.*\bnetlify/i, text: 'Netlify se baat kar raha hu…' },
+  { re: /\bnetlify/i, text: 'Netlify se baat kar raha hu…' },
+  { re: /\bdeploy\b.*\brender|\brender\b.*\bdeploy/i, text: 'Render deploy trigger kar raha hu…' },
+  { re: /\brender\b.*\bdelete|\bdelete\b.*\brender/i, text: 'Render service delete kar raha hu…' },
+  { re: /\brender/i, text: 'Render se baat kar raha hu…' },
+];
+
+function guessStatusText(userMessage) {
+  const msg = (userMessage || '').toLowerCase();
+  for (const p of STATUS_PATTERNS) {
+    if (p.re.test(msg)) return p.text;
+  }
+  return 'Sochte hue…';
+}
+
+function setThinkingStatus(text) {
+  const el = document.getElementById('think-text');
+  if (el) el.textContent = text || 'Sochte hue…';
 }
 
 function providerBadgeFor(action) {
@@ -4023,6 +4098,7 @@ async function sendMsg() {
   history.push({ role: 'user', content: msg });
 
   const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(guessStatusText(msg));
   typing.classList.add('show');
   scrollToBottom();
 
