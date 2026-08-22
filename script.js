@@ -1155,6 +1155,9 @@ function buildCommandFormBubble(cmd, placeholders) {
     inputEl.type = 'text';
     inputEl.placeholder = placeholderLabel(name);
     inputEl.autocomplete = 'off';
+    inputEl.setAttribute('autocomplete', 'one-time-code');
+    inputEl.setAttribute('data-lpignore', 'true');
+    inputEl.setAttribute('data-form-type', 'other');
 
     fieldWrap.appendChild(inputEl);
     form.appendChild(fieldWrap);
@@ -1536,6 +1539,9 @@ function askUploadRepo(files) {
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
   input.autocomplete = 'off';
+  input.setAttribute('autocomplete', 'one-time-code');
+  input.setAttribute('data-lpignore', 'true');
+  input.setAttribute('data-form-type', 'other');
 
   const chipCtl = attachChipSuggest(input, []);
   getRepoNames().then(names => chipCtl.setItems(names));
@@ -1605,6 +1611,9 @@ function askUploadPath(files, repo) {
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
   input.autocomplete = 'off';
+  input.setAttribute('autocomplete', 'one-time-code');
+  input.setAttribute('data-lpignore', 'true');
+  input.setAttribute('data-form-type', 'other');
 
   const chipCtl = attachChipSuggest(input, []);
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
@@ -1893,6 +1902,9 @@ function askZipUploadRepo(file) {
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
   input.autocomplete = 'off';
+  input.setAttribute('autocomplete', 'one-time-code');
+  input.setAttribute('data-lpignore', 'true');
+  input.setAttribute('data-form-type', 'other');
 
   const chipCtl = attachChipSuggest(input, []);
   getRepoNames().then(names => chipCtl.setItems(names));
@@ -1961,6 +1973,9 @@ function askZipUploadPath(file, repo) {
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
   input.autocomplete = 'off';
+  input.setAttribute('autocomplete', 'one-time-code');
+  input.setAttribute('data-lpignore', 'true');
+  input.setAttribute('data-form-type', 'other');
 
   const chipCtl = attachChipSuggest(input, []);
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
