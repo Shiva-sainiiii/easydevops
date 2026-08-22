@@ -1458,39 +1458,93 @@ function getVercelProjectNames() {
 // filters live as the user types, and clicking/tapping a chip fills the
 // input. Returns a controller with `.setItems(items)` so callers can
 // populate the list asynchronously (e.g. after a fetch resolves).
-function attachChipSuggest(inputEl, initialItems) {
-  const row = document.createElement('div');
-  row.className = 'field-chip-suggest';
+// ── Global chip-suggest bar (mimics the classic autofill strip, but ours) ──
+// One shared bar, fixed to the bottom of the viewport, pinned just above
+// the on-screen keyboard via the visualViewport API. Whichever chip-enabled
+// input currently has focus "owns" the bar's contents; the bar hides when
+// nothing owns it. This matches the native autofill-strip *position*
+// (screen bottom, above keyboard) while being fully our own styling.
+let _chipBarEl = null;
+let _chipBarOwner = null; // { inputEl, getItems() } for whichever field is focused
 
-  // The input may not be attached to the DOM yet at call time (several
-  // call sites build the field, wire it up, and only append it to the
-  // form afterward). insertBefore() would throw on a null parentNode and
-  // silently abort the whole flow, so if there's no parent yet we defer
-  // insertion of the chip row until the input actually lands in the DOM.
-  const insertRow = () => {
-    if (inputEl.parentNode && !inputEl.parentNode.contains(row)) {
-      inputEl.parentNode.insertBefore(row, inputEl);
+function _ensureChipBar() {
+  if (_chipBarEl) return _chipBarEl;
+  const bar = document.createElement('div');
+  bar.id = 'global-chip-bar';
+  bar.className = 'global-chip-bar';
+  document.body.appendChild(bar);
+  _chipBarEl = bar;
+
+  const reposition = () => {
+    if (!bar.classList.contains('show')) return;
+    const vv = window.visualViewport;
+    if (vv) {
+      // Distance from the bottom of the layout viewport to the bottom of
+      // the visual viewport is roughly the keyboard height.
+      const kbHeight = Math.max(0, document.documentElement.clientHeight - vv.height - vv.offsetTop);
+      bar.style.bottom = kbHeight + 'px';
+    } else {
+      bar.style.bottom = '0px';
     }
   };
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', reposition);
+    window.visualViewport.addEventListener('scroll', reposition);
+  }
+  bar._reposition = reposition;
 
-  if (inputEl.parentNode) {
-    insertRow();
-  } else {
-    // Retry on next tick(s) until the caller appends the input.
-    let attempts = 0;
-    const tryInsert = () => {
-      attempts++;
-      if (inputEl.parentNode) {
-        insertRow();
-      } else if (attempts < 20) {
-        setTimeout(tryInsert, 0);
-      }
-    };
-    setTimeout(tryInsert, 0);
+  return bar;
+}
+
+function _renderChipBar() {
+  const bar = _ensureChipBar();
+  if (!_chipBarOwner) {
+    bar.classList.remove('show');
+    return;
+  }
+  const { inputEl, getItems } = _chipBarOwner;
+  const items = getItems();
+  const q = inputEl.value.trim().toLowerCase();
+  const matches = q ? items.filter(v => v.toLowerCase().includes(q)) : items;
+
+  bar.innerHTML = '';
+  if (!matches.length) {
+    if (q && items.length) {
+      const empty = document.createElement('span');
+      empty.className = 'fchip no-match';
+      empty.textContent = 'no match';
+      bar.appendChild(empty);
+      bar.classList.add('show');
+      bar._reposition();
+    } else {
+      bar.classList.remove('show');
+    }
+    return;
   }
 
+  matches.slice(0, 10).forEach(v => {
+    const chip = document.createElement('span');
+    chip.className = 'fchip';
+    chip.textContent = v;
+    chip.onmousedown = (e) => e.preventDefault(); // keep input focused
+    chip.onclick = () => {
+      inputEl.value = v;
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+      _renderChipBar();
+      inputEl.focus();
+    };
+    bar.appendChild(chip);
+  });
+  bar.classList.add('show');
+  bar._reposition();
+}
+
+// Registers `inputEl` as a chip-suggest field. Items can start empty and be
+// filled later via the returned controller's setItems() (e.g. after an
+// async fetch). The bar only shows/updates while `inputEl` is focused.
+function attachChipSuggest(inputEl, initialItems) {
   let items = initialItems || [];
-  const MAX_CHIPS = 8;
 
   // Chrome's payment/address/password autofill strip triggers based on its
   // own heuristics for any plain text input, largely ignoring autocomplete
@@ -1504,48 +1558,31 @@ function attachChipSuggest(inputEl, initialItems) {
   inputEl.addEventListener('focus', unlockReadonly, { once: true });
   inputEl.addEventListener('touchstart', unlockReadonly, { once: true });
 
-  const render = () => {
-    if (!row.isConnected) insertRow();
-    row.innerHTML = '';
-    const q = inputEl.value.trim().toLowerCase();
-    const matches = q
-      ? items.filter(v => v.toLowerCase().includes(q))
-      : items;
-
-    if (!matches.length) {
-      if (q && items.length) {
-        const empty = document.createElement('span');
-        empty.className = 'fchip no-match';
-        empty.textContent = 'no match';
-        row.appendChild(empty);
+  const becomeOwner = () => {
+    _chipBarOwner = { inputEl, getItems: () => items };
+    _renderChipBar();
+  };
+  const maybeReleaseOwner = () => {
+    // Defer so a chip's mousedown->click on the bar (which lives outside
+    // the input) isn't mistaken for a blur-to-elsewhere.
+    setTimeout(() => {
+      if (_chipBarOwner && _chipBarOwner.inputEl === inputEl && document.activeElement !== inputEl) {
+        _chipBarOwner = null;
+        _renderChipBar();
       }
-      return;
-    }
-
-    matches.slice(0, MAX_CHIPS).forEach(v => {
-      const chip = document.createElement('span');
-      chip.className = 'fchip';
-      chip.textContent = v;
-      chip.onmousedown = (e) => e.preventDefault(); // keep input focused
-      chip.onclick = () => {
-        inputEl.value = v;
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-        render();
-        inputEl.focus();
-      };
-      row.appendChild(chip);
-    });
+    }, 120);
   };
 
-  inputEl.addEventListener('input', render);
-  inputEl.addEventListener('focus', render);
-  render();
+  inputEl.addEventListener('focus', becomeOwner);
+  inputEl.addEventListener('input', () => {
+    if (_chipBarOwner && _chipBarOwner.inputEl === inputEl) _renderChipBar();
+  });
+  inputEl.addEventListener('blur', maybeReleaseOwner);
 
   return {
     setItems(newItems) {
       items = newItems || [];
-      render();
+      if (_chipBarOwner && _chipBarOwner.inputEl === inputEl) _renderChipBar();
     }
   };
 }
