@@ -1461,12 +1461,51 @@ function getVercelProjectNames() {
 function attachChipSuggest(inputEl, initialItems) {
   const row = document.createElement('div');
   row.className = 'field-chip-suggest';
-  inputEl.parentNode.insertBefore(row, inputEl);
+
+  // The input may not be attached to the DOM yet at call time (several
+  // call sites build the field, wire it up, and only append it to the
+  // form afterward). insertBefore() would throw on a null parentNode and
+  // silently abort the whole flow, so if there's no parent yet we defer
+  // insertion of the chip row until the input actually lands in the DOM.
+  const insertRow = () => {
+    if (inputEl.parentNode && !inputEl.parentNode.contains(row)) {
+      inputEl.parentNode.insertBefore(row, inputEl);
+    }
+  };
+
+  if (inputEl.parentNode) {
+    insertRow();
+  } else {
+    // Retry on next tick(s) until the caller appends the input.
+    let attempts = 0;
+    const tryInsert = () => {
+      attempts++;
+      if (inputEl.parentNode) {
+        insertRow();
+      } else if (attempts < 20) {
+        setTimeout(tryInsert, 0);
+      }
+    };
+    setTimeout(tryInsert, 0);
+  }
 
   let items = initialItems || [];
   const MAX_CHIPS = 8;
 
+  // Chrome's payment/address/password autofill strip triggers based on its
+  // own heuristics for any plain text input, largely ignoring autocomplete
+  // hints. Keeping the field readonly until the user actually taps it
+  // stops Chrome from treating it as a fillable form field in the first
+  // place; we flip off readonly on focus so typing still works normally.
+  inputEl.setAttribute('readonly', 'readonly');
+  const unlockReadonly = () => {
+    setTimeout(() => inputEl.removeAttribute('readonly'), 50);
+  };
+  inputEl.addEventListener('focus', unlockReadonly, { once: true });
+  inputEl.addEventListener('touchstart', unlockReadonly, { once: true });
+
   const render = () => {
+    if (!row.isConnected) insertRow();
     row.innerHTML = '';
     const q = inputEl.value.trim().toLowerCase();
     const matches = q
