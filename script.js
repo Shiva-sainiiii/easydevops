@@ -4001,6 +4001,17 @@ async function sendMsg() {
   const msg = input.value.trim();
   if (!msg) return;
 
+  // Mobile keyboards only reopen on a real user gesture — calling
+  // .focus() after an `await` (i.e. once the response comes back) is a
+  // *programmatic* focus with no gesture behind it, so most mobile
+  // browsers move the cursor back into the field but keep the keyboard
+  // hidden, forcing a manual tap to type again. Remembering whether the
+  // field was actually focused (keyboard likely open) at send-time lets
+  // the `finally` block below skip the no-op refocus when it wouldn't
+  // bring the keyboard back anyway, and keeps it for desktop/hardware-
+  // keyboard users where refocusing is still the right call.
+  const wasInputFocused = document.activeElement === input;
+
   isLoading = true;
   userCancelled = false;
   input.value = '';
@@ -4149,7 +4160,15 @@ async function sendMsg() {
     userCancelled = false;
     activeController = null;
     setSendBtnState(false);
-    input.focus();
+    // See the comment above wasInputFocused: only refocus if the field
+    // was genuinely focused (soft keyboard open) when send happened, and
+    // do it on the next frame — still not a "real" gesture, but this at
+    // least avoids yanking focus back onto a field the user had already
+    // moved away from (e.g. tapped a confirm button, opened the drawer)
+    // while the request was in flight, which was its own small bug.
+    if (wasInputFocused) {
+      requestAnimationFrame(() => input.focus());
+    }
   }
 }
 

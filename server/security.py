@@ -16,7 +16,10 @@ than response bodies.
 import re
 from flask import jsonify
 
-from server.config import GITHUB_CLIENT_SECRET, OPENROUTER_KEY, FERNET_KEY, FLASK_SECRET_KEY, DATABASE_URL
+from server.config import (
+    GITHUB_CLIENT_SECRET, OPENROUTER_KEY, FERNET_KEY, FLASK_SECRET_KEY,
+    DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_JSON,
+)
 from server.auth import current_user
 from server.db import decrypt_token, get_user_vercel_token, get_user_netlify_token, get_user_render_token
 
@@ -28,9 +31,14 @@ _SECRET_PATTERNS = [
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
     re.compile(r"Bearer\s+[A-Za-z0-9\-_\.]{15,}", re.I),
     re.compile(r"rnd_[A-Za-z0-9]{20,}"),
+    re.compile(r"nfp_[A-Za-z0-9]{20,}"),          # Netlify personal access tokens
+    re.compile(r"-----BEGIN PRIVATE KEY-----[\s\S]+?-----END PRIVATE KEY-----"),  # Firebase/GCP service-account keys
 ]
 
-_APP_SECRETS = [s for s in [GITHUB_CLIENT_SECRET, OPENROUTER_KEY, FERNET_KEY, FLASK_SECRET_KEY, DATABASE_URL] if s]
+_APP_SECRETS = [s for s in [
+    GITHUB_CLIENT_SECRET, OPENROUTER_KEY, FERNET_KEY, FLASK_SECRET_KEY,
+    DATABASE_URL, FIREBASE_SERVICE_ACCOUNT_JSON,
+] if s]
 
 
 def redact(text, extra_secrets=None):

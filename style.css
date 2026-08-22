@@ -709,12 +709,17 @@
   }
   .login-error-banner.show { display: block; }
 
-  /* ── SCROLL-TO-LATEST FAB ── */
+  /* ── SCROLL-TO-LATEST FAB ──
+     bottom offset is calc'd (not a flat px) so it clears the docked
+     input bar + footnote + safe-area on every device instead of a fixed
+     92px, which sat too low on some phones and overlapped the send
+     button (it's on top of #dock, not inside its flex flow, so it can't
+     just inherit the dock's real height). */
   #scroll-fab {
     display: none;
     position: fixed;
     right: 16px;
-    bottom: 92px;
+    bottom: calc(128px + env(safe-area-inset-bottom));
     z-index: 30;
     align-items: center;
     justify-content: center;
@@ -1989,12 +1994,19 @@
     -webkit-tap-highlight-color: transparent;
   }
   .file-row-name {
+    /* flex:1 makes this consistently claim all the leftover width every
+       row, instead of only its own content width — without it,
+       `.file-row`'s `justify-content: space-between` let the actions
+       cluster's position drift row-to-row depending on filename length
+       (short name → actions pulled way right with a big gap; long name →
+       actions crammed close), which is what read as "misaligned". */
+    flex: 1 1 auto;
     font-family: var(--font-mono); font-size: 12.5px;
     color: var(--text); display: flex; align-items: center; gap: 7px;
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .file-row-name svg { width: 13px; height: 13px; flex-shrink: 0; color: var(--muted); }
-  .file-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .file-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
   .file-dl-btn {
     flex-shrink: 0;
     display: inline-flex; align-items: center; gap: 4px;
