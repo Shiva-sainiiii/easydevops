@@ -256,37 +256,9 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
   </button>
 
-  <!-- ═══ LIVE DEPLOY TERMINAL — slide-up build log panel ═══ -->
-  <div id="deploy-terminal-overlay" onclick="closeDeployTerminal()"></div>
-  <div id="deploy-terminal">
-    <div class="deploy-terminal-drag"></div>
-    <div class="deploy-terminal-header">
-      <div class="deploy-terminal-dot" id="deploy-terminal-dot"></div>
-      <div class="deploy-terminal-title">
-        Deploying<span id="deploy-terminal-project"></span>
-        <div class="deploy-terminal-title-sub" id="deploy-terminal-sub">Vercel · build shuru ho raha hai…</div>
-      </div>
-      <button class="deploy-terminal-close" onclick="closeDeployTerminal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
-    <div class="deploy-terminal-log" id="deploy-terminal-log">
-      <div class="deploy-log-empty">Connecting to Vercel…</div>
-    </div>
-    <div class="deploy-terminal-ai" id="deploy-terminal-ai">
-      <div class="deploy-terminal-ai-head">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.2H22l-6 4.6 2.3 7.2-6.3-4.6-6.3 4.6 2.3-7.2-6-4.6h7.6z"/></svg>
-        AI ne error dekha
-      </div>
-      <div class="deploy-terminal-ai-body" id="deploy-terminal-ai-body">
-        <span class="deploy-terminal-ai-loading">Analyze ho raha hai…</span>
-      </div>
-    </div>
-    <div class="deploy-terminal-footer">
-      <div class="deploy-terminal-status" id="deploy-terminal-status">Build chal raha hai…</div>
-      <a class="deploy-terminal-link" id="deploy-terminal-link" href="#" target="_blank" rel="noopener" style="display:none;">Live URL kholo →</a>
-    </div>
-  </div>
+  <!-- Live deploy log now renders inline in the chat thread (see
+       buildDeployLogCard() in script.js) instead of a fixed slide-up
+       panel — no static markup needed here anymore. -->
 
   <!-- ═══ FULL-SCREEN DRAG & DROP OVERLAY ═══ -->
   <div id="dropzone-overlay">

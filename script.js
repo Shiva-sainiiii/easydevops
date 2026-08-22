@@ -4373,6 +4373,17 @@ function closeDrawer() {
 // a deployment_id. Manual close (X button or overlay tap) just hides the
 // panel and stops polling — it doesn't cancel the actual Vercel build.
 // ══════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
+// INLINE DEPLOY LOG CARD
+// Used to be a fixed slide-up drawer covering most of the screen; now
+// it's a normal rich agent-message card appended straight into the chat
+// thread (same insertion pattern as buildRichBubbleNode's other cards),
+// so a live Vercel build shows up like any other agent response instead
+// of taking over the screen. Only used for the 'vercel_deploy_pending'
+// case (server's own 25s synchronous poll timed out while still
+// building) — a deploy that already finished synchronously just gets
+// its normal text/success bubble, no card needed.
+// ══════════════════════════════════════════════════════════════════
 let deployTerminalPollTimer = null;
 let deployTerminalSince = 0;
 let deployTerminalActive = false;
@@ -4388,19 +4399,81 @@ let deployTerminalPollCount = 0;
 const DEPLOY_POLL_MAX_CONSECUTIVE_ERRORS = 5;
 const DEPLOY_POLL_MAX_TOTAL_POLLS = 240; // ~ safety ceiling regardless of interval/backoff
 
-// Heuristic for coloring a log line as an error in the terminal — Vercel's
+// Heuristic for coloring a log line as an error in the card — Vercel's
 // build output doesn't tag lines with a severity, so this matches on the
 // same keywords a developer would visually scan for in a real terminal.
 const DEPLOY_ERROR_LINE_RE = /\b(error|failed|exception|traceback|fatal|cannot find module|enoent|npm err!)\b/i;
 
+// Holds references to the currently-live card's elements so the poll
+// loop (a single global loop, same as before — only one deploy is
+// tracked live at a time) can update them without re-querying the DOM
+// by ID every tick. Only one card is ever "live" at once: opening a new
+// one clears the previous poll loop first (same guard as before).
+let liveDeployCard = null;
+
+function buildDeployLogCard(deploymentId, projectName) {
+  const card = document.createElement('div');
+  card.className = 'deploy-log-card';
+
+  const header = document.createElement('div');
+  header.className = 'deploy-log-header';
+  const dot = document.createElement('div');
+  dot.className = 'deploy-log-dot';
+  const title = document.createElement('div');
+  title.className = 'deploy-log-title';
+  title.textContent = 'Deploying' + (projectName ? ` — ${projectName}` : '');
+  const sub = document.createElement('div');
+  sub.className = 'deploy-log-title-sub';
+  sub.textContent = 'Vercel · live build logs';
+  title.appendChild(sub);
+  header.appendChild(dot);
+  header.appendChild(title);
+
+  const body = document.createElement('div');
+  body.className = 'deploy-log-body';
+  body.innerHTML = '<div class="deploy-log-empty">Connecting to Vercel…</div>';
+
+  const aiBlock = document.createElement('div');
+  aiBlock.className = 'deploy-log-ai';
+  const aiHead = document.createElement('div');
+  aiHead.className = 'deploy-log-ai-head';
+  aiHead.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.2H22l-6 4.6 2.3 7.2-6.3-4.6-6.3 4.6 2.3-7.2-6-4.6h7.6z"/></svg> AI ne error dekha';
+  const aiBody = document.createElement('div');
+  aiBody.className = 'deploy-log-ai-body';
+  aiBody.innerHTML = '<span class="deploy-log-ai-loading">Analyze ho raha hai…</span>';
+  aiBlock.appendChild(aiHead);
+  aiBlock.appendChild(aiBody);
+
+  const footer = document.createElement('div');
+  footer.className = 'deploy-log-footer';
+  const status = document.createElement('div');
+  status.className = 'deploy-log-status';
+  status.textContent = 'Build chal raha hai…';
+  const link = document.createElement('a');
+  link.className = 'deploy-log-link';
+  link.href = '#';
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.style.display = 'none';
+  link.textContent = 'Live URL kholo →';
+  footer.appendChild(status);
+  footer.appendChild(link);
+
+  card.appendChild(header);
+  card.appendChild(body);
+  card.appendChild(aiBlock);
+  card.appendChild(footer);
+
+  return { card, dot, body, aiBlock, aiBody, status, link };
+}
+
 function openDeployTerminal(deploymentId, projectName) {
   // A previous deployment's poll loop may still have a pending setTimeout
-  // if this is called again before that one reached a terminal/closed
-  // state (e.g. user redeploys while the last terminal was still open).
-  // Without this, the old timer fires later with the OLD deploymentId
-  // still in its closure and both loops write into the same log/status
-  // DOM concurrently. Clearing it here guarantees only one loop is ever
-  // in flight.
+  // if this is called again before that one reached a terminal state
+  // (e.g. user redeploys while the last card was still live). Without
+  // this, the old timer fires later with the OLD deploymentId still in
+  // its closure and both loops write into the same card DOM concurrently.
+  // Clearing it here guarantees only one loop is ever in flight.
   if (deployTerminalPollTimer) {
     clearTimeout(deployTerminalPollTimer);
     deployTerminalPollTimer = null;
@@ -4412,43 +4485,35 @@ function openDeployTerminal(deploymentId, projectName) {
   deployTerminalPollCount = 0;
   errorAnalysisRequested = false;
 
-  const overlay = document.getElementById('deploy-terminal-overlay');
-  const panel = document.getElementById('deploy-terminal');
-  const log = document.getElementById('deploy-terminal-log');
-  const statusEl = document.getElementById('deploy-terminal-status');
-  const linkEl = document.getElementById('deploy-terminal-link');
-  const projectEl = document.getElementById('deploy-terminal-project');
-  const subEl = document.getElementById('deploy-terminal-sub');
-  const aiBlock = document.getElementById('deploy-terminal-ai');
+  const refs = buildDeployLogCard(deploymentId, projectName);
+  liveDeployCard = refs;
 
-  panel.classList.remove('state-ready', 'state-error');
-  log.innerHTML = '<div class="deploy-log-empty">Connecting to Vercel…</div>';
-  aiBlock.classList.remove('show');
-  statusEl.textContent = 'Build chal raha hai…';
-  statusEl.className = 'deploy-terminal-status';
-  linkEl.style.display = 'none';
-  projectEl.textContent = projectName ? ` — ${projectName}` : '';
-  subEl.textContent = 'Vercel · live build logs';
-
-  overlay.classList.add('show');
-  panel.classList.add('show');
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+  const badge = document.createElement('span');
+  badge.className = 'provider-badge';
+  badge.innerHTML = providerBadgeHtml('vercel');
+  label.appendChild(badge);
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  bubble.appendChild(refs.card);
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
   vibrate(8);
 
   pollDeployEvents(deploymentId);
 }
 
-function closeDeployTerminal() {
-  deployTerminalActive = false;
-  if (deployTerminalPollTimer) {
-    clearTimeout(deployTerminalPollTimer);
-    deployTerminalPollTimer = null;
-  }
-  document.getElementById('deploy-terminal-overlay').classList.remove('show');
-  document.getElementById('deploy-terminal').classList.remove('show');
-}
-
 // Ends the poll loop and shows a clear "give up" state, instead of the
-// loop just silently stopping — a stuck "Building…" bubble with polling
+// loop just silently stopping — a stuck "Building…" card with polling
 // quietly dead in the background (or, before this fix, quietly running
 // forever) is worse than a message that says "we're not sure, check
 // Vercel directly."
@@ -4458,18 +4523,16 @@ function stopDeployPollingWithMessage(text) {
     clearTimeout(deployTerminalPollTimer);
     deployTerminalPollTimer = null;
   }
-  const panel = document.getElementById('deploy-terminal');
-  const statusEl = document.getElementById('deploy-terminal-status');
-  if (panel) panel.classList.add('state-error');
-  if (statusEl) {
-    statusEl.textContent = text;
-    statusEl.className = 'deploy-terminal-status is-error';
+  if (liveDeployCard) {
+    liveDeployCard.card.classList.add('state-error');
+    liveDeployCard.status.textContent = text;
+    liveDeployCard.status.className = 'deploy-log-status is-error';
   }
   appendDeployLogLine(text, true);
 }
 
 async function pollDeployEvents(deploymentId) {
-  if (!deployTerminalActive) return;
+  if (!deployTerminalActive || !liveDeployCard) return;
 
   deployTerminalPollCount++;
   if (deployTerminalPollCount > DEPLOY_POLL_MAX_TOTAL_POLLS) {
@@ -4477,11 +4540,7 @@ async function pollDeployEvents(deploymentId) {
     return;
   }
 
-  const log = document.getElementById('deploy-terminal-log');
-  const panel = document.getElementById('deploy-terminal');
-  const statusEl = document.getElementById('deploy-terminal-status');
-  const linkEl = document.getElementById('deploy-terminal-link');
-  const dot = document.getElementById('deploy-terminal-dot');
+  const { card, body, status, link } = liveDeployCard;
 
   try {
     const url = `/api/vercel/deploy-events?deployment_id=${encodeURIComponent(deploymentId)}&since=${deployTerminalSince}`;
@@ -4489,9 +4548,9 @@ async function pollDeployEvents(deploymentId) {
 
     if (res.status === 401) {
       appendDeployLogLine('Session/Vercel connection expired.', true);
-      statusEl.textContent = 'Connection expired';
-      statusEl.className = 'deploy-terminal-status is-error';
-      panel.classList.add('state-error');
+      status.textContent = 'Connection expired';
+      status.className = 'deploy-log-status is-error';
+      card.classList.add('state-error');
       deployTerminalActive = false;
       return;
     }
@@ -4506,33 +4565,33 @@ async function pollDeployEvents(deploymentId) {
     const data = await res.json();
     deployTerminalConsecutiveErrors = 0; // reset on any successful, well-formed response
 
-    const emptyPlaceholder = log.querySelector('.deploy-log-empty');
+    const emptyPlaceholder = body.querySelector('.deploy-log-empty');
     if (emptyPlaceholder && data.lines && data.lines.length) emptyPlaceholder.remove();
 
     (data.lines || []).forEach(line => appendDeployLogLine(line, DEPLOY_ERROR_LINE_RE.test(line)));
     if (typeof data.since === 'number') deployTerminalSince = data.since;
 
     if (data.state === 'READY') {
-      panel.classList.add('state-ready');
-      statusEl.textContent = '✓ Deployment live';
-      statusEl.className = 'deploy-terminal-status is-ready';
+      card.classList.add('state-ready');
+      status.textContent = '✓ Deployment live';
+      status.className = 'deploy-log-status is-ready';
       if (data.live_url) {
-        linkEl.href = data.live_url;
-        linkEl.style.display = '';
+        link.href = data.live_url;
+        link.style.display = '';
       }
     } else if (data.state === 'ERROR' || data.state === 'CANCELED') {
-      panel.classList.add('state-error');
-      statusEl.textContent = data.error_message || 'Build fail ho gaya';
-      statusEl.className = 'deploy-terminal-status is-error';
+      card.classList.add('state-error');
+      status.textContent = data.error_message || 'Build fail ho gaya';
+      status.className = 'deploy-log-status is-error';
       if (data.error_message) appendDeployLogLine(data.error_message, true);
       if (data.state === 'ERROR') requestErrorAnalysis(data.error_message);
     } else {
-      statusEl.textContent = `Building… (${data.state || 'BUILDING'})`;
+      status.textContent = `Building… (${data.state || 'BUILDING'})`;
     }
 
     if (data.done) {
       deployTerminalPollTimer = null;
-      return; // terminal state reached — stop polling, leave panel open
+      return; // terminal state reached — stop polling, leave card as-is in the thread
     }
   } catch (err) {
     deployTerminalConsecutiveErrors++;
@@ -4553,23 +4612,18 @@ async function pollDeployEvents(deploymentId) {
 // AI error troubleshooting — fires once per failed deployment. Collects the
 // error-highlighted lines currently in the log DOM (cheap, avoids a second
 // server round-trip to re-fetch them) and sends them + the error_message to
-// the backend for a short diagnosis, rendered in the terminal's AI block.
+// the backend for a short diagnosis, rendered in the card's AI block.
 let errorAnalysisRequested = false;
 
 function requestErrorAnalysis(errorMessage) {
-  if (errorAnalysisRequested) return;
+  if (errorAnalysisRequested || !liveDeployCard) return;
   errorAnalysisRequested = true;
 
-  const aiBlock = document.getElementById('deploy-terminal-ai');
-  const aiBody = document.getElementById('deploy-terminal-ai-body');
+  const { body, aiBlock, aiBody } = liveDeployCard;
   aiBlock.classList.add('show');
-  aiBody.innerHTML = '<span class="deploy-terminal-ai-loading">Analyze ho raha hai…</span>';
+  aiBody.innerHTML = '<span class="deploy-log-ai-loading">Analyze ho raha hai…</span>';
 
-  const log = document.getElementById('deploy-terminal-log');
-  const errorLines = Array.from(log.querySelectorAll('.deploy-log-line')).map(el => el.textContent);
-  const allLines = Array.from(log.querySelectorAll('.deploy-log-line')).length
-    ? Array.from(log.querySelectorAll('.deploy-log-line')).map(el => el.textContent)
-    : errorLines;
+  const allLines = Array.from(body.querySelectorAll('.deploy-log-line')).map(el => el.textContent);
 
   fetch('/api/vercel/analyze-error', {
     method: 'POST',
@@ -4588,7 +4642,8 @@ function requestErrorAnalysis(errorMessage) {
 }
 
 function appendDeployLogLine(text, isError) {
-  const log = document.getElementById('deploy-terminal-log');
+  if (!liveDeployCard) return;
+  const body = liveDeployCard.body;
   const line = document.createElement('div');
   line.className = 'deploy-log-line' + (isError ? ' is-error' : '');
   line.textContent = text;
@@ -4601,9 +4656,13 @@ function appendDeployLogLine(text, isError) {
       vibrate(6);
     };
   }
-  const wasNearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
-  log.appendChild(line);
-  if (wasNearBottom) log.scrollTop = log.scrollHeight;
+  const wasNearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 60;
+  body.appendChild(line);
+  if (wasNearBottom) body.scrollTop = body.scrollHeight;
+  // The card lives inside the normal chat scroll area now (it didn't
+  // before, as a fixed overlay) — keep the thread scrolled down as log
+  // lines stream in, same as any other growing agent message would.
+  scrollToBottom();
 }
 
 function renderDrawerProfile() {
