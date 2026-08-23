@@ -46,6 +46,11 @@ def favicon_48():
     return send_from_directory(".", "favicon-48x48.png", mimetype="image/png")
 
 
+@static_bp.route("/logo-mark.png")
+def logo_mark():
+    return send_from_directory(".", "logo-mark.png", mimetype="image/png")
+
+
 @static_bp.route("/apple-touch-icon.png")
 def apple_touch_icon():
     return send_from_directory(".", "apple-touch-icon.png", mimetype="image/png")
