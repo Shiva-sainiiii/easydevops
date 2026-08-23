@@ -16,7 +16,7 @@ from server.commands.executor import execute_command
 # ════════════════════════════════════════════════════════════════
 OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
-SYSTEM_PROMPT_TEMPLATE = """You are a DevOps Agent helping GitHub user: {login}.
+SYSTEM_PROMPT_TEMPLATE = """You are a Easy DevOps helping GitHub user: {login}.
 You control ONLY this user's own GitHub account{vercel_clause}{netlify_clause}{render_clause}. You act by outputting EXACTLY ONE command per response.
 
 COMMANDS:
@@ -179,7 +179,7 @@ def handle_create_or_edit_file(cmd, params, user_message, owner, gh_token):
         "repo": params["repo"],
         "path": params["path"],
         "content": ai_content,
-        "message": f"{'Update' if cmd == 'EDIT_FILE' else 'Add'} {params['path']} via DevOps Agent",
+        "message": f"{'Update' if cmd == 'EDIT_FILE' else 'Add'} {params['path']} via Easy DevOps",
     }
     result = execute_command(cmd, full_params, owner, gh_token)
     result["source"] = "hybrid"

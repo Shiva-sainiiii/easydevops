@@ -331,7 +331,7 @@ def handle_code_generate(params, owner, gh_token):
         return {"reply": reply_text + note, "action": "message", "source": "hybrid"}
 
     n = len(file_map)
-    commit_msg = f"{instruction[:60]} via DevOps Agent ({n} file{'s' if n != 1 else ''})"
+    commit_msg = f"{instruction[:60]} via Easy DevOps ({n} file{'s' if n != 1 else ''})"
     ok, err_or_empty, repo_link = commit_files_to_repo(owner, repo, gh_token, file_map, commit_msg)
     if not ok:
         return {"reply": f"❌ {err_or_empty}", "action": "error", "source": "hybrid"}

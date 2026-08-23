@@ -1754,7 +1754,7 @@ async function doUpload(file, repo, path) {
     form.append('file', file);
     form.append('repo', repo);
     form.append('path', path);
-    form.append('message', `Upload ${path} via DevOps Agent`);
+    form.append('message', `Upload ${path} via Easy DevOps`);
 
     const { status, data } = await xhrUploadWithProgress('/upload', form, ring.update);
     ring.remove();
@@ -1796,7 +1796,7 @@ async function doUploadMany(files, repo, paths) {
       form.append('file', files[i]);
       form.append('repo', repo);
       form.append('path', paths[i]);
-      form.append('message', `Upload ${paths[i]} via DevOps Agent`);
+      form.append('message', `Upload ${paths[i]} via Easy DevOps`);
 
       const { status, data } = await xhrUploadWithProgress('/upload', form, ring.update);
       ring.remove();
@@ -2003,7 +2003,7 @@ async function doZipUpload(file, repo, dir) {
     form.append('file', file);
     form.append('repo', repo);
     form.append('path', dir);
-    form.append('message', `Extract ${file.name} via DevOps Agent`);
+    form.append('message', `Extract ${file.name} via Easy DevOps`);
 
     const { data } = await xhrUploadWithProgress('/upload-zip', form, (pct) => {
       // Upload itself is usually the fast part; once bytes are fully sent,
@@ -4997,39 +4997,11 @@ function createHexLoader(canvasId, opts = {}) {
   if (indicator.classList.contains('show')) loader.start();
 })();
 
-// Header brand mark: a plain static hexagon outline — no animation, no
-// orbiting nodes. Just a small themed mark next to the "DevOps Agent"
-// title, drawn once.
-function drawStaticHexMark(canvasId, size) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas || !canvas.getContext) return;
-  const ctx = canvas.getContext('2d');
-  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-  canvas.width = size * dpr;
-  canvas.height = size * dpr;
-  ctx.scale(dpr, dpr);
-
-  const cx = size / 2, cy = size / 2;
-  const r = size * 0.42;
-  ctx.beginPath();
-  for (let i = 0; i < 6; i++) {
-    const a = (Math.PI / 3) * i - Math.PI / 2;
-    const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.strokeStyle = '#36d1ff';
-  ctx.lineWidth = Math.max(1.4, size * 0.06);
-  ctx.stroke();
-}
-
 // Empty-state emblem + login-gate emblem: these run continuously as the
 // app's idle mark (not a loading state), pausing only when the tab is
-// backgrounded to save battery. The header brand mark stays a plain
-// static hexagon (drawn above) — no looping animation there.
+// backgrounded to save battery. The header brand mark is now a static
+// logo image (set directly in index.html) — no canvas draw needed here.
 (function initBrandLoaders() {
-  drawStaticHexMark('brand-canvas', 20);
-
   const loaders = [
     createHexLoader('emblem-canvas', { size: 56, speed: 0.85 }),
     createHexLoader('login-emblem-canvas', { size: 30, speed: 0.85 }),

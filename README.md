@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ DevOps Agent
+# ⚡ Easy DevOps
 
 ### Chat karke apna GitHub, Vercel, Netlify aur Render control karo — Hinglish me, phone se.
 

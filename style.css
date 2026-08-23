@@ -98,6 +98,7 @@
   .brand .mark {
     width: 20px; height: 20px;
     display: block;
+    border-radius: 4px;
   }
 
   .status {

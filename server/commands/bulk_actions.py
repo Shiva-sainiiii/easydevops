@@ -41,7 +41,7 @@ def bulk_delete_files(repo, paths, owner, gh_token):
             failed.append((path, "exist nahi karti"))
             continue
         r = gh_api("DELETE", f"/repos/{owner}/{repo}/contents/{path}", gh_token,
-                   json={"message": f"Bulk delete {path} via DevOps Agent", "sha": sha})
+                   json={"message": f"Bulk delete {path} via Easy DevOps", "sha": sha})
         if r.status_code == 200:
             ok.append(path)
         else:

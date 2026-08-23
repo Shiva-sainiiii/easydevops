@@ -103,7 +103,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 path = safe_repo_path(params["path"])
             except UnsafePathError as e:
                 return {"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}
-            message = params.get("message", f"Add {path} via DevOps Agent")
+            message = params.get("message", f"Add {path} via Easy DevOps")
             content_b64 = base64.b64encode(content.encode()).decode()
             existing_sha = get_file_sha(repo, path, owner, gh_token)
             payload = {"message": message, "content": content_b64}
@@ -124,7 +124,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 path = safe_repo_path(params["path"])
             except UnsafePathError as e:
                 return {"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}
-            message = params.get("message", f"Update {path} via DevOps Agent")
+            message = params.get("message", f"Update {path} via Easy DevOps")
             sha = get_file_sha(repo, path, owner, gh_token)
             if not sha:
                 return {"reply": f"❌ File `{path}` exist nahi karti repo `{repo}` me.", "action": "error"}
@@ -143,7 +143,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 path = safe_repo_path(params["path"])
             except UnsafePathError as e:
                 return {"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}
-            message = params.get("message", f"Delete {path} via DevOps Agent")
+            message = params.get("message", f"Delete {path} via Easy DevOps")
             sha = get_file_sha(repo, path, owner, gh_token)
             if not sha:
                 return {"reply": f"❌ File `{path}` exist nahi karti.", "action": "error"}

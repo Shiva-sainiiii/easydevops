@@ -125,7 +125,7 @@ def upload_file():
         }), 413
 
     if not message:
-        message = f"Upload {path} via DevOps Agent"
+        message = f"Upload {path} via Easy DevOps"
 
     content_b64 = base64.b64encode(raw).decode()
     existing_sha = get_file_sha(repo, path, owner, gh_token)
@@ -224,7 +224,7 @@ def upload_zip():
         }), 413
 
     if not message:
-        message = f"Extract {f.filename} via DevOps Agent ({len(entries_map)} files)"
+        message = f"Extract {f.filename} via Easy DevOps ({len(entries_map)} files)"
 
     repo_r = gh_api("GET", f"/repos/{owner}/{repo}", gh_token)
     if repo_r.status_code != 200:

@@ -180,8 +180,8 @@ def generate_render_yaml(repo, owner, gh_token):
 
     existing_sha = get_file_sha(repo, path, owner, gh_token)
     content_b64 = base64.b64encode(yaml_content.encode()).decode()
-    message = ("Regenerate render.yaml via DevOps Agent" if existing_sha
-               else "Add render.yaml (auto-generated) via DevOps Agent")
+    message = ("Regenerate render.yaml via Easy DevOps" if existing_sha
+               else "Add render.yaml (auto-generated) via Easy DevOps")
     payload = {"message": message, "content": content_b64}
     if existing_sha:
         payload["sha"] = existing_sha
