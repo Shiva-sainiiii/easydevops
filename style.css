@@ -483,6 +483,7 @@
     color: #04181c;
   }
   .card-details-btn.primary.hidden { display: none; }
+  .card-details-btn.ghost.hidden { display: none; }
   .card-details-btn.danger {
     background: rgba(255,107,107,0.10);
     border-color: rgba(255,107,107,0.32);
@@ -1616,6 +1617,23 @@
   }
   .confirm-btn:disabled { opacity: .5; cursor: not-allowed; }
 
+  /* ── POST-UPLOAD "DEPLOY TO VERCEL" SHORTCUT ── */
+  .post-upload-actions { margin-top: 12px; max-width: 360px; }
+  .post-upload-deploy-btn {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(54,209,255,0.4);
+    background: rgba(54,209,255,0.10);
+    color: var(--accent);
+    font-size: 13px; font-weight: 600; font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s, transform .1s, background .15s;
+  }
+  .post-upload-deploy-btn:active { opacity: .8; transform: scale(.97); }
+  .post-upload-deploy-btn:disabled { opacity: .5; cursor: not-allowed; }
+
   .prompt-form {
     display: flex;
     flex-direction: column;
@@ -1671,6 +1689,31 @@
     color: var(--muted);
   }
   .prompt-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ── PROMPT CHIP ROW (e.g. env-import platform picker) ── */
+  .prompt-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+    max-width: 360px;
+  }
+  .prompt-chip {
+    padding: 9px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border-2);
+    background: rgba(255,255,255,0.04);
+    color: var(--text, #eaf2f2);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s, transform .1s, border-color .15s;
+  }
+  .prompt-chip:active { opacity: .8; transform: scale(.96); }
+  .prompt-chip:not(:disabled):hover { border-color: var(--accent); }
+  .prompt-chip:disabled { opacity: .35; cursor: not-allowed; }
 
   .msg-bubble strong { font-weight: 600; color: var(--accent-2); }
   .msg-bubble code {
@@ -2038,6 +2081,35 @@
   .file-read-btn svg, .file-edit-btn svg { width: 15px; height: 15px; }
   .file-read-btn:active { background: rgba(54,209,255,0.15); border-color: rgba(54,209,255,0.35); color: var(--accent); }
   .file-edit-btn:active { background: rgba(61,220,151,0.15); border-color: rgba(61,220,151,0.35); color: var(--green); }
+
+  /* ── FILE-LIST BREADCRUMB (repo root + one crumb per folder level) ──
+     Clicking any non-current crumb re-fetches that level in place via
+     navigateTo(); the current (last) crumb is unclickable and dimmed
+     differently to read as "you are here". */
+  .file-list-breadcrumb {
+    display: flex; align-items: center; flex-wrap: wrap;
+    gap: 2px; margin-bottom: 8px;
+    font-family: var(--font-mono); font-size: 11.5px;
+  }
+  .file-list-crumb {
+    color: var(--accent); cursor: pointer;
+    padding: 2px 3px; border-radius: 4px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .file-list-crumb:active { background: rgba(54,209,255,0.12); }
+  .file-list-crumb.current {
+    color: var(--muted); cursor: default; font-weight: 600;
+  }
+  .file-list-crumb-sep { color: var(--muted-2); margin: 0 1px; }
+  .file-list-bubble.file-list-loading { opacity: 0.55; pointer-events: none; }
+
+  /* ── DIR ROW (clickable, descends into the folder) ── */
+  .file-row-dir {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .15s;
+  }
+  .file-row-dir:active { background: rgba(255,255,255,0.06); }
 
   /* ── FILE-LIST HEADER (repo name + select toggle + download-zip button) ── */
   .file-list-hdr {

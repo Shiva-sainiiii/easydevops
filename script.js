@@ -959,6 +959,7 @@ const COMMANDS = [
 
   // ── RENDER (only surfaced once connected) ──
   { id: 'RENDER_LIST',  tpl: 'list render services',                         desc: 'Render · list all services',           kw: ['list','render','services','sare','dikhao'], render: true },
+  { id: 'RENDER_CREATE', tpl: 'create a new render service for {repo}',      desc: 'Render · create a new web service',    kw: ['create','new','naya','banao','render','service'], render: true },
   { id: 'RENDER_DELETE', tpl: 'delete service {service_id}',                 desc: 'Render · delete a service ⚠️',         kw: ['delete','uda','hata','render','service'], render: true },
   { id: 'RENDER_ENV_GET', tpl: 'get env for {service_id} render',            desc: 'Render · view environment variables',  kw: ['env','environment','vars','get','show','render'], render: true },
   { id: 'RENDER_ENV_SET', tpl: 'set render env {KEY}={value} for {service_id}', desc: 'Render · set an environment variable', kw: ['set','env','render','add','update'], render: true },
@@ -1107,11 +1108,14 @@ function applySuggestion(cmd) {
 
   const placeholders = [...new Set((cmd.tpl.match(/\{([a-zA-Z_]+)\}/g) || []).map(p => p.slice(1, -1)))];
 
-  // No placeholders at all (e.g. "list all my repos") — just send it.
+  // No placeholders at all (e.g. "list all my repos") — one tap should
+  // be enough. Filling the input and waiting for a second manual tap
+  // on send was the reported "2 taps to run a suggestion" bug; since
+  // there's nothing left for the user to fill in, send immediately.
   if (placeholders.length === 0) {
     input.value = cmd.tpl;
     autoResize(input);
-    input.focus();
+    sendMsg();
     return;
   }
 
@@ -1419,6 +1423,204 @@ function onZipPicked(event) {
     return;
   }
   askZipUploadRepo(file);
+}
+
+// .env picker — separate 2-step flow (pick platform, then pick target
+// project/site/service) since /upload-env needs both, unlike GitHub
+// upload's single repo field. Any text/plain-ish file is accepted, not
+// just literally-named ".env", since real .env files often have no
+// extension at all (".env" itself, or ".env.production" etc.) and
+// browsers vary on how they filter those via the accept attribute.
+function onEnvPicked(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = '';
+  if (!files.length) return;
+  askEnvPlatform(files[0]);
+}
+
+let lastEnvPlatform = '';
+let lastEnvTarget = '';
+
+// Step 1: which platform (Vercel / Netlify / Render) to import into —
+// shown as tappable chips rather than a text field since there are only
+// ever exactly three valid values.
+function askEnvPlatform(file) {
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  const sizeKb = (file.size / 1024).toFixed(1);
+  bubble.innerHTML = `📄 <strong>${escHtml(file.name)}</strong> (${sizeKb} KB) select hui hai. Kis platform pe import karni hai?`;
+
+  const chipRow = document.createElement('div');
+  chipRow.className = 'prompt-chip-row';
+
+  const platforms = [
+    { id: 'vercel', label: '▲ Vercel', connected: !!(authedUser && authedUser.vercelConnected) },
+    { id: 'netlify', label: '◆ Netlify', connected: !!(authedUser && authedUser.netlifyConnected) },
+    { id: 'render', label: '● Render', connected: !!(authedUser && authedUser.renderConnected) },
+  ];
+
+  let anyConnected = false;
+  platforms.forEach(p => {
+    const chip = document.createElement('button');
+    chip.className = 'prompt-chip';
+    chip.textContent = p.label;
+    if (!p.connected) {
+      chip.disabled = true;
+      chip.title = `Pehle ${p.label.replace(/^\S+\s/, '')} connect karo`;
+    } else {
+      anyConnected = true;
+      chip.onclick = () => {
+        chipRow.querySelectorAll('.prompt-chip').forEach(c => c.disabled = true);
+        askEnvTarget(file, p.id);
+      };
+    }
+    chipRow.appendChild(chip);
+  });
+
+  bubble.appendChild(chipRow);
+
+  if (!anyConnected) {
+    const hint = document.createElement('div');
+    hint.className = 'prompt-hint';
+    hint.textContent = 'Koi bhi deploy platform connected nahi hai — pehle user menu se Vercel, Netlify, ya Render connect karo.';
+    bubble.appendChild(hint);
+  }
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+}
+
+const ENV_PLATFORM_LABELS = { vercel: 'Vercel project', netlify: 'Netlify site', render: 'Render service' };
+
+// Step 2: target project/site/service name. Vercel gets the existing
+// live-fetched project-name datalist for free (getVercelProjectNames());
+// Netlify/Render don't have an equivalent name-list endpoint yet, so
+// those stay plain text entry for now — still functional, just no
+// autocomplete until that's added.
+function askEnvTarget(file, platform) {
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+  const targetLabel = ENV_PLATFORM_LABELS[platform];
+  bubble.innerHTML = `Kis <strong>${escHtml(targetLabel)}</strong> me import karni hai?`;
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = platform === 'render' ? 'srv-xxxxxxxxxxxx' : `${platform}-project-name`;
+  input.value = lastEnvPlatform === platform ? lastEnvTarget : '';
+  input.autocomplete = 'off';
+
+  if (platform === 'vercel') {
+    const listId = 'env-target-list-' + Date.now();
+    const datalist = document.createElement('datalist');
+    datalist.id = listId;
+    input.setAttribute('list', listId);
+    getVercelProjectNames().then(names => fillDatalist(datalist, names));
+    form.appendChild(datalist);
+  }
+
+  const hint = document.createElement('div');
+  hint.className = 'prompt-hint';
+  hint.textContent = platform === 'render'
+    ? 'Render service ID chahiye (list render services se mil jayegi), naam se nahi.'
+    : `Existing ${targetLabel} ka exact naam.`;
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = 'Import env vars';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+
+  const submit = () => {
+    const target = input.value.trim();
+    if (!target) { input.focus(); return; }
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    lastEnvPlatform = platform;
+    lastEnvTarget = target;
+    doEnvUpload(file, platform, target);
+  };
+
+  goBtn.onclick = submit;
+  input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  cancelBtn.onclick = () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    input.disabled = true;
+    addMessage('agent', 'Theek hai, env import cancel kar diya.', '');
+  };
+
+  actions.appendChild(goBtn);
+  actions.appendChild(cancelBtn);
+  form.appendChild(input);
+  form.appendChild(hint);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+  input.focus();
+}
+
+async function doEnvUpload(file, platform, target) {
+  addMessage('user', `📄 Importing "${file.name}" → ${ENV_PLATFORM_LABELS[platform]} (${target})`);
+
+  isLoading = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  const ring = showUploadProgress(file.name);
+  scrollToBottom();
+
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('platform', platform);
+    form.append('target', target);
+
+    const { data } = await xhrUploadWithProgress('/upload-env', form, ring.update);
+    ring.remove();
+
+    const cls = actionColorFor(data.action);
+    addMessage('agent', data.reply, cls, null, data.action);
+    history.push({ role: 'assistant', content: data.reply });
+  } catch (err) {
+    ring.remove();
+    addMessage('agent', '❌ Env import fail ho gaya. Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
 }
 
 // Cache repo names once per page load (refreshed lazily on each upload flow start).
@@ -1760,7 +1962,8 @@ async function doUpload(file, repo, path) {
     ring.remove();
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls, null, data.action);
+    const msgRef = addMessage('agent', data.reply, cls, null, data.action);
+    if (status >= 200 && status < 300) appendPostUploadDeployAction(msgRef, repo);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
     ring.remove();
@@ -1822,7 +2025,8 @@ async function doUploadMany(files, repo, paths) {
   const summary = failed.length === 0
     ? `✅ Saari ${okCount} files upload ho gayin!`
     : `⚠️ ${okCount}/${files.length} files upload hui. Fail hui: ${failed.join(', ')}`;
-  addMessage('agent', summary, failed.length === 0 ? 'success' : 'warning');
+  const msgRef = addMessage('agent', summary, failed.length === 0 ? 'success' : 'warning');
+  if (okCount > 0) appendPostUploadDeployAction(msgRef, repo);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2022,7 +2226,8 @@ async function doZipUpload(file, repo, dir) {
     ring.remove();
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls, null, data.action);
+    const msgRef = addMessage('agent', data.reply, cls, null, data.action);
+    if (data.action === 'create_file') appendPostUploadDeployAction(msgRef, repo);
     history.push({ role: 'assistant', content: data.reply });
   } catch (err) {
     ring.remove();
@@ -2063,12 +2268,39 @@ function iconZip() {
 // ── BUILD FILE-LIST BUBBLE (for list_files action) ──
 // Returns a DOM element with each file on its own row + download button,
 // plus a delete button that routes through the same confirm-token flow
-// as chat-typed delete commands. Files that are type=dir get a folder
-// icon and no download/delete buttons (dir delete isn't a single API call).
-// Expects agentData.items = [{type, path, name}] from the server.
-function buildFileListBubble(repo, items) {
+// as chat-typed delete commands. Files that are type=dir are clickable —
+// tapping one descends into that folder via /api/list-files and swaps
+// this same bubble's contents in place (no new chat message), with a
+// breadcrumb row above the list to jump back to any parent level.
+// Expects agentData.items = [{type, path, name}] from the server, and
+// `path` = the folder currently being viewed ("" for repo root).
+function buildFileListBubble(repo, items, path) {
+  path = (path || '').replace(/^\/+|\/+$/g, '');
   const wrap = document.createElement('div');
   wrap.className = 'file-list-bubble';
+  wrap.dataset.repo = repo;
+  wrap.dataset.path = path;
+
+  // Navigates this bubble to a new folder in place: fetches the listing
+  // and re-renders the same wrap element's contents, so folder-browsing
+  // doesn't spam the chat with a new bubble per level.
+  async function navigateTo(newPath) {
+    wrap.classList.add('file-list-loading');
+    try {
+      const r = await fetch(`/api/list-files?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(newPath)}`);
+      const data = await r.json();
+      if (!r.ok || data.action === 'error') {
+        addMessage('agent', data.reply || '❌ Folder open nahi hui.', 'error');
+        return;
+      }
+      const fresh = buildFileListBubble(repo, data.items || [], data.path || newPath);
+      wrap.replaceWith(fresh);
+    } catch (e) {
+      addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+    } finally {
+      wrap.classList.remove('file-list-loading');
+    }
+  }
 
   // Header line: repo name + "select" toggle + "download as zip".
   // Select-mode state lives on the wrap element itself (dataset flag)
@@ -2103,6 +2335,34 @@ function buildFileListBubble(repo, items) {
 
   hdr.appendChild(hdrActions);
   wrap.appendChild(hdr);
+
+  // Breadcrumb — always shown (root crumb + one per path segment) so
+  // there's a visible "where am I" and a one-tap way back to any
+  // ancestor folder, not just the immediate parent.
+  const crumbBar = document.createElement('div');
+  crumbBar.className = 'file-list-breadcrumb';
+  const segments = path ? path.split('/').filter(Boolean) : [];
+
+  const rootCrumb = document.createElement('span');
+  rootCrumb.className = 'file-list-crumb' + (segments.length === 0 ? ' current' : '');
+  rootCrumb.textContent = repo;
+  if (segments.length > 0) rootCrumb.onclick = () => navigateTo('');
+  crumbBar.appendChild(rootCrumb);
+
+  segments.forEach((seg, i) => {
+    const sep = document.createElement('span');
+    sep.className = 'file-list-crumb-sep';
+    sep.textContent = '/';
+    crumbBar.appendChild(sep);
+
+    const crumbPath = segments.slice(0, i + 1).join('/');
+    const crumb = document.createElement('span');
+    crumb.className = 'file-list-crumb' + (i === segments.length - 1 ? ' current' : '');
+    crumb.textContent = seg;
+    if (i !== segments.length - 1) crumb.onclick = () => navigateTo(crumbPath);
+    crumbBar.appendChild(crumb);
+  });
+  wrap.appendChild(crumbBar);
 
   // Bulk action bar — hidden until select-mode is on, then shows
   // selected-count + "select all" + "delete selected".
@@ -2240,6 +2500,10 @@ function buildFileListBubble(repo, items) {
       return;
     }
 
+    // Dir row: whole row is a tap target that descends into the folder
+    // via navigateTo(), same as clicking a breadcrumb segment.
+    row.classList.add('file-row-dir');
+    row.onclick = () => navigateTo(item.path);
     list.appendChild(row);
   });
 
@@ -2765,12 +3029,70 @@ function openCardDetailsSheet(kind, item, url, onCardTap) {
   }
   if (url) openBtn.textContent = 'Open live URL';
 
+  // Env download — only meaningful for the three deploy platforms (a
+  // plain GitHub repo card has no platform env store to pull from).
+  // Render always downloads real values; Vercel/Netlify downloads are a
+  // key-only scaffold (their APIs never return values — see
+  // env_transfer.py) so the click handler surfaces that as a toast via
+  // the X-Env-Export-Warning response header instead of pretending it's
+  // a full backup.
+  const envBtn = document.getElementById('card-details-env-btn');
+  if (kind === 'vercel' || kind === 'netlify' || kind === 'render') {
+    envBtn.classList.remove('hidden');
+    envBtn.disabled = false;
+    envBtn.textContent = '⬇ Download .env';
+    // Render's env-vars endpoint is keyed by service ID (srv-xxx), not
+    // the display name — Vercel/Netlify's lookup-by-name helpers
+    // (vercel_find_project / netlify_find_site) resolve the name
+    // themselves server-side, so those two pass item.name as-is.
+    const envTarget = kind === 'render' ? item.id : item.name;
+    envBtn.onclick = () => downloadEnvFile(kind, envTarget);
+  } else {
+    envBtn.classList.add('hidden');
+  }
+
   const deleteBtn = document.getElementById('card-details-delete-btn');
   deleteBtn.disabled = false;
   deleteBtn.textContent = 'Delete';
   deleteBtn.onclick = () => requestCardDelete(kind, item, deleteBtn);
 
   overlay.classList.add('show');
+}
+
+// Triggers a .env download for a Vercel project / Netlify site / Render
+// service, and — unlike the plain <a href> used for GitHub file
+// downloads — goes through fetch() first because the warning about
+// Vercel/Netlify only ever containing key names (never values, a
+// platform-API limitation — see env_transfer.py) rides on a response
+// header that a plain link click can't read.
+async function downloadEnvFile(platform, target) {
+  const url = `/download-env?platform=${encodeURIComponent(platform)}&target=${encodeURIComponent(target)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      addMessage('agent', data.reply || '❌ Env file download nahi hui.', 'error');
+      return;
+    }
+    const warning = res.headers.get('X-Env-Export-Warning');
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : `${target}.env`;
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+
+    if (warning) addMessage('agent', `⚠️ ${warning}`, 'warning');
+  } catch (err) {
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  }
 }
 
 function closeCardDetailsSheet() {
@@ -2995,7 +3317,7 @@ function buildRichBubbleNode(entry) {
   const replyText = entry.reply != null ? entry.reply : entry.content;
 
   if (entry.action === 'list_files' && entry.items && entry.repo) {
-    return buildFileListBubble(entry.repo, entry.items);
+    return buildFileListBubble(entry.repo, entry.items, entry.path);
   }
 
   if (entry.action === 'read_file' && entry.repo && entry.path) {
@@ -3715,6 +4037,36 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
   }
 
   scrollToBottom();
+  return { wrap, bubble };
+}
+
+// ── POST-UPLOAD "DEPLOY TO VERCEL" SHORTCUT ──
+// After a successful GitHub push (single file, multi-file, or zip
+// extract-and-push), the very next thing most users do is deploy that
+// repo — so offer it right in the same success bubble instead of making
+// them go find the command. Only shown when Vercel is connected; the
+// button just fills+sends the existing "deploy {project_name} to
+// vercel" command sentence, so it goes through the normal VERCEL_DEPLOY
+// path (project-doesn't-exist-yet handling, confirm flow, etc. all stay
+// exactly as they already work for that command).
+function appendPostUploadDeployAction(bubbleRef, repo) {
+  if (!bubbleRef || !repo) return;
+  if (!(authedUser && authedUser.vercelConnected)) return;
+
+  const { bubble } = bubbleRef;
+  const actions = document.createElement('div');
+  actions.className = 'post-upload-actions';
+
+  const deployBtn = document.createElement('button');
+  deployBtn.className = 'post-upload-deploy-btn';
+  deployBtn.textContent = `Deploy ${repo} to Vercel →`;
+  deployBtn.onclick = () => {
+    deployBtn.disabled = true;
+    resendMessage(`deploy ${repo} to vercel`);
+  };
+
+  actions.appendChild(deployBtn);
+  bubble.appendChild(actions);
 }
 
 // ── COPY / RETRY buttons under a message ──
@@ -3874,7 +4226,7 @@ const PROVIDER_BADGES = {
   vercel_env: 'vercel', vercel_env_set: 'vercel',
   netlify_list: 'netlify', netlify_site_info: 'netlify', netlify_delete_site: 'netlify',
   netlify_env: 'netlify', netlify_env_set: 'netlify',
-  render_list: 'render', render_delete_service: 'render',
+  render_list: 'render', render_create_service: 'render', render_delete_service: 'render',
   render_env: 'render', render_env_update: 'render', render_deploy: 'render',
 };
 const PROVIDER_NAMES = { github: 'GitHub', vercel: 'Vercel', netlify: 'Netlify', render: 'Render' };
@@ -3918,6 +4270,7 @@ const STATUS_PATTERNS = [
   { re: /\bnetlify/i, text: 'Netlify se baat kar raha hu…' },
   { re: /\bdeploy\b.*\brender|\brender\b.*\bdeploy/i, text: 'Render deploy trigger kar raha hu…' },
   { re: /\brender\b.*\bdelete|\bdelete\b.*\brender/i, text: 'Render service delete kar raha hu…' },
+  { re: /\b(create|bana|naya)\b.*\brender\b.*\bservice/i, text: 'Render service bana raha hu…' },
   { re: /\brender/i, text: 'Render se baat kar raha hu…' },
 ];
 
@@ -3949,7 +4302,7 @@ function actionColorFor(action) {
     vercel_rollback: 'success', vercel_deployments: 'info',
     netlify_list: 'info', netlify_site_info: 'info', netlify_delete_site: 'success',
     netlify_env: 'info', netlify_env_set: 'success',
-    render_list: 'info', render_delete_service: 'success',
+    render_list: 'info', render_create_service: 'success', render_delete_service: 'success',
     render_env: 'info', render_env_update: 'success', render_deploy: 'success',
     confirm_required: 'warning', auth_required: 'warning',
     vercel_auth_required: 'warning', netlify_auth_required: 'warning', render_auth_required: 'warning',

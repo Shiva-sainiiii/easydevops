@@ -14,11 +14,166 @@ import mimetypes
 from flask import Blueprint, request, Response
 
 from server.auth import current_user
-from server.db import decrypt_token
+from server.db import decrypt_token, get_user_vercel_token, get_user_netlify_token, get_user_render_token
 from server.security import safe_jsonify, safe_repo_path, UnsafePathError
 from server.providers.github import gh_api, get_file_sha
+from server.commands.env_transfer import parse_env_file, import_env_vars, export_env_file, EnvParseError
 
 file_bp = Blueprint("file_routes", __name__)
+
+MAX_ENV_UPLOAD_BYTES = 256 * 1024  # .env files are tiny text — generous but not unbounded
+
+
+@file_bp.route("/api/list-files", methods=["GET"])
+def api_list_files():
+    """
+    JSON folder-listing endpoint used by the file-list bubble's folder
+    rows (clicking a dir descends into it) and its breadcrumb (clicking
+    a crumb jumps back up). Deliberately bypasses the chat/regex intent
+    parser — LIST_FILES's SLUG-based regex has no way to carry an
+    arbitrary "repo/sub/folder" path typed by a user, but this is a
+    direct button click with the exact path already known client-side,
+    so there's nothing to parse. Mirrors executor.py's LIST_FILES
+    branch (same GitHub contents endpoint, same item shape) so the
+    frontend's buildFileListBubble() can treat both response sources
+    identically.
+    """
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "❌ Login chahiye.", "action": "error"}), 401
+    gh_token = decrypt_token(user["github_token_encrypted"])
+    owner = user["github_login"]
+
+    repo = (request.args.get("repo") or "").strip()
+    path = (request.args.get("path") or "").strip().strip("/")
+    if not repo:
+        return safe_jsonify({"reply": "❌ Repo naam chahiye.", "action": "error"}), 400
+
+    try:
+        path = safe_repo_path(path) if path else ""
+    except UnsafePathError as e:
+        return safe_jsonify({"reply": f"❌ Ye path allowed nahi hai: {e}", "action": "error"}), 400
+
+    endpoint = f"/repos/{owner}/{repo}/contents/{path}" if path else f"/repos/{owner}/{repo}/contents"
+    r = gh_api("GET", endpoint, gh_token)
+    if r.status_code != 200:
+        msg = r.json().get("message", "Files fetch nahi hue") if r.content else "Files fetch nahi hue"
+        return safe_jsonify({"reply": f"❌ GitHub: {msg}", "action": "error"}), r.status_code
+
+    items = r.json()
+    if not isinstance(items, list):
+        # A file path (not a folder) was clicked/passed — nothing to list.
+        return safe_jsonify({"reply": "❌ Ye path ek folder nahi hai.", "action": "error"}), 400
+
+    item_list = [{"type": item["type"], "path": item["path"], "name": item["name"]} for item in items]
+    return safe_jsonify({
+        "reply": f"Files in `{repo}/{path or ''}`:", "action": "list_files",
+        "repo": repo, "path": path, "items": item_list,
+    })
+
+
+_ENV_PLATFORM_TOKEN_GETTERS = {
+    "vercel": get_user_vercel_token,
+    "netlify": get_user_netlify_token,
+    "render": get_user_render_token,
+}
+
+
+@file_bp.route("/upload-env", methods=["POST"])
+def upload_env():
+    """
+    Bulk env-var import: user picks a .env file + a platform (vercel/
+    netlify/render) + the target project/site/service name, and every
+    KEY=value line gets pushed via that platform's existing set-env API
+    call, one request per key (see env_transfer.import_env_vars for why
+    there's no true multi-key bulk endpoint to use instead). Mirrors the
+    /upload route's shape (multipart form, same error-reply style) but
+    targets a deploy platform's env store instead of a GitHub repo path.
+    """
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "❌ Login chahiye.", "action": "error"}), 401
+
+    platform = (request.form.get("platform") or "").strip().lower()
+    target = (request.form.get("target") or "").strip()
+    f = request.files.get("file")
+
+    if platform not in _ENV_PLATFORM_TOKEN_GETTERS:
+        return safe_jsonify({"reply": "❌ Platform vercel/netlify/render me se ek honi chahiye.", "action": "error"}), 400
+    if not target:
+        return safe_jsonify({"reply": "❌ Project/site/service naam nahi diya.", "action": "error"}), 400
+    if not f or f.filename == "":
+        return safe_jsonify({"reply": "❌ Koi .env file select nahi hui.", "action": "error"}), 400
+
+    raw = f.read()
+    if len(raw) > MAX_ENV_UPLOAD_BYTES:
+        return safe_jsonify({"reply": "❌ File bahut badi hai — ye .env file jaisi nahi lagti.", "action": "error"}), 413
+
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return safe_jsonify({"reply": "❌ File text nahi hai (UTF-8 decode fail hui).", "action": "error"}), 400
+
+    try:
+        env_dict = parse_env_file(text)
+    except EnvParseError as e:
+        return safe_jsonify({"reply": f"❌ .env parse nahi hui: {e}", "action": "error"}), 400
+
+    token_kwargs = {}
+    getter = _ENV_PLATFORM_TOKEN_GETTERS[platform]
+    token_kwargs[{"vercel": "vc_token", "netlify": "nl_token", "render": "rd_token"}[platform]] = getter(user)
+
+    result = import_env_vars(platform, target, env_dict, **token_kwargs)
+    status = 200 if result.get("action") != "error" and "auth_required" not in result.get("action", "") else 400
+    return safe_jsonify(result), status
+
+
+@file_bp.route("/download-env", methods=["GET"])
+def download_env():
+    """
+    Env-var export as a downloadable .env file. For Render this is a real
+    KEY=value backup (Render's API returns plaintext values). For Vercel/
+    Netlify this can only ever be a KEY= scaffold — see the long comment
+    in env_transfer.export_env_file for why (their APIs don't return
+    values, full stop, not something this app can work around).
+    """
+    user = current_user()
+    if not user:
+        return safe_jsonify({"reply": "❌ Login chahiye.", "action": "error"}), 401
+
+    platform = (request.args.get("platform") or "").strip().lower()
+    target = (request.args.get("target") or "").strip()
+
+    if platform not in _ENV_PLATFORM_TOKEN_GETTERS:
+        return safe_jsonify({"reply": "❌ Platform vercel/netlify/render me se ek honi chahiye.", "action": "error"}), 400
+    if not target:
+        return safe_jsonify({"reply": "❌ Project/site/service naam nahi diya.", "action": "error"}), 400
+
+    token_kwargs = {}
+    getter = _ENV_PLATFORM_TOKEN_GETTERS[platform]
+    token_kwargs[{"vercel": "vc_token", "netlify": "nl_token", "render": "rd_token"}[platform]] = getter(user)
+
+    result = export_env_file(platform, target, **token_kwargs)
+    if isinstance(result, dict) and "error" in result:
+        return safe_jsonify({"reply": f"❌ {result['error']}", "action": "error"}), 400
+
+    filename, text, warning = result
+    resp = Response(
+        text, status=200,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Length": str(len(text.encode("utf-8"))),
+        }
+    )
+    if warning:
+        # Surfaced as a response header rather than baked into the file
+        # body, so the downloaded .env stays clean/parseable — the
+        # frontend reads this header and shows the warning as a toast
+        # instead of a comment line the user would have to notice and
+        # strip themselves.
+        resp.headers["X-Env-Export-Warning"] = warning
+    return resp
 
 
 @file_bp.route("/download", methods=["GET"])

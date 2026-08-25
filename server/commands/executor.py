@@ -17,6 +17,7 @@ from server.providers.netlify import nl_api, netlify_find_site
 from server.providers.render import rd_api
 from server.security import safe_repo_path, UnsafePathError
 from server.commands.render_blueprint import generate_render_yaml
+from server.commands.render_create_service import create_render_service
 
 
 def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, rd_token=None):
@@ -81,7 +82,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 lines = [f"{'📁' if item['type'] == 'dir' else '📄'} {item['path']}" for item in items]
                 reply = f"Files in `{repo}/{path or ''}`:\n\n" + "\n".join(lines)
                 item_list = [{"type": item["type"], "path": item["path"], "name": item["name"]} for item in items]
-                return {"reply": reply, "action": "list_files", "repo": repo, "items": item_list}
+                return {"reply": reply, "action": "list_files", "repo": repo, "path": path, "items": item_list}
             else:
                 return {"reply": f"❌ Files fetch nahi hue: {r.json().get('message','')}", "action": "error"}
 
@@ -528,6 +529,15 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"❌ Env set Error: {r.text[:200]}", "action": "error"}
 
         # ──────────────── RENDER ────────────────
+        elif cmd == "RENDER_CREATE_SERVICE":
+            if not rd_token:
+                return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
+            repo = params["repo"]
+            plan = params.get("plan")
+            branch = params.get("branch")
+            region = params.get("region")
+            return create_render_service(repo, owner, gh_token, rd_token, plan=plan, branch=branch, region=region)
+
         elif cmd == "RENDER_LIST_SERVICES":
             if not rd_token:
                 return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}

@@ -25,7 +25,12 @@ from server.security import safe_repo_path, UnsafePathError
 # where stacks could plausibly co-exist in one repo (e.g. a Python repo
 # that also ships a package.json for frontend tooling): more specific /
 # more likely-to-be-the-actual-app markers are listed first.
-def _detect_stack(root_names):
+#
+# Public name (also used by render_create_service.py's RENDER_CREATE_SERVICE
+# flow, so the "what stack is this repo" logic has exactly one
+# implementation instead of drifting between the two commands). `_detect_stack`
+# kept as an alias for anything still referencing the old private name.
+def detect_stack(root_names):
     if "requirements.txt" in root_names or "Pipfile" in root_names or "pyproject.toml" in root_names:
         return "python"
     if "go.mod" in root_names:
@@ -37,6 +42,9 @@ def _detect_stack(root_names):
     if any(n.lower() == "dockerfile" for n in root_names):
         return "docker"
     return None
+
+
+_detect_stack = detect_stack
 
 
 def _python_service(repo, has_flask_app_py):

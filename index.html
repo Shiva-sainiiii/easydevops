@@ -228,6 +228,7 @@
       <div class="card-details-meta" id="card-details-meta"></div>
       <div class="card-details-actions">
         <a class="card-details-btn primary" id="card-details-open-btn" target="_blank" rel="noopener">Open live URL</a>
+        <button class="card-details-btn ghost hidden" id="card-details-env-btn">⬇ Download .env</button>
         <button class="card-details-btn danger" id="card-details-delete-btn">Delete</button>
         <button class="card-details-btn ghost" id="card-details-close-btn">Close</button>
       </div>
@@ -362,6 +363,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M9 7h1M9 11h1M9 15h1"/></svg>
         <div><div class="attach-menu-label">Upload zip</div><div class="attach-menu-sub">Auto-extract ho jayegi</div></div>
       </div>
+      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('envInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/><line x1="7" y1="14" x2="17" y2="14"/><line x1="7" y1="17" x2="12" y2="17"/></svg>
+        <div><div class="attach-menu-label">Upload .env</div><div class="attach-menu-sub">Vercel/Netlify/Render pe bulk import</div></div>
+      </div>
     </div>
     <div id="chatbar">
       <button class="clip-btn" title="Attach" onclick="toggleAttachMenu()">
@@ -378,6 +383,9 @@
       <input type="file" id="zipInput" accept=".zip,application/zip,application/x-zip-compressed"
         style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
         onchange="onZipPicked(event)" />
+      <input type="file" id="envInput" accept=".env,text/plain"
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onEnvPicked(event)" />
       <textarea id="userInput"
         placeholder="Message Easy DevOps…"
         rows="1"
@@ -389,7 +397,7 @@
         <svg id="stopIcon" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
     </div>
-    
+    <div class="footnote">Easy DevOps can make mistakes. Verify deployments before relying on them.</div>
   </div>
 
 </div>

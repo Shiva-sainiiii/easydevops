@@ -143,6 +143,12 @@ INTENT_RULES = [
     ], lambda m: {"site_name": _g(m, 3), "key": _g(m, 1), "value": _g(m, 2)}),
 
     # ── RENDER ──
+    ("RENDER_CREATE_SERVICE", [
+        rf"(?:create|bana|banao|bana\s*do|new|naya|deploy)\s+(?:a\s+|ek\s+)?(?:new\s+)?render\s+service\s+(?:for|from|of)\s+({SLUG})",
+        rf"({SLUG})\s+(?:ka|ke\s+liye)\s+(?:naya\s+)?render\s+service\s+(?:banao|bana\s*do|create)",
+        rf"({SLUG})\s+(?:pe|par|ko)\s+render\s+(?:pe|par)\s+(?:naya\s+)?service\s+(?:banao|bana\s*do|create)",
+    ], lambda m: {"repo": _g(m, 1)}),
+
     ("RENDER_LIST_SERVICES", [
         r"(?:list|sare|show|dikhao|dikha)\s+.*render.*services?\b",
         r"(?:list|sare|show|dikhao|dikha)\s+.*services?.*render\b",
