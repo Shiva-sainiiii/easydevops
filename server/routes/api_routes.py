@@ -11,10 +11,12 @@ from flask import Blueprint, request
 
 from server.config import OPENROUTER_KEY
 from server.auth import current_user
-from server.db import decrypt_token, get_user_vercel_token
+from server.db import decrypt_token, get_user_vercel_token, get_user_netlify_token, get_user_render_token
 from server.security import safe_jsonify, redact, safe_repo_path, UnsafePathError
 from server.providers.github import gh_api, get_file_sha
 from server.providers.vercel import vc_api, VERCEL_TERMINAL_STATES
+from server.providers.netlify import nl_api
+from server.providers.render import rd_api
 from server.commands.ai_fallback import OPENROUTER_MODEL
 from server.commands.confirmation import confirm_token, build_confirmation
 from server.commands.bulk_actions import (
@@ -57,6 +59,56 @@ def api_list_vercel_projects():
         return safe_jsonify({"projects": []})
     names = [p["name"] for p in r.json().get("projects", [])]
     return safe_jsonify({"projects": names})
+
+
+@api_bp.route("/api/netlify-sites", methods=["GET"])
+def api_list_netlify_sites():
+    # Same shape as /api/vercel-projects, powers the {site_name} field's
+    # autocomplete (NETLIFY_INFO, NETLIFY_DELETE, env commands) — this
+    # previously didn't exist, so those fields were plain text with no
+    # suggestions at all.
+    user = current_user()
+    if not user:
+        return safe_jsonify({"sites": []})
+    nl_token = get_user_netlify_token(user)
+    if not nl_token:
+        return safe_jsonify({"sites": []})
+    r = nl_api("GET", "/sites?per_page=50", nl_token)
+    if r.status_code != 200:
+        return safe_jsonify({"sites": []})
+    names = [s["name"] for s in r.json()]
+    return safe_jsonify({"sites": names})
+
+
+@api_bp.route("/api/render-services", methods=["GET"])
+def api_list_render_services():
+    # Same shape again, for {service_id}. Render services don't have a
+    # human-friendly lookup-by-name the way Vercel/Netlify do (the
+    # RENDER_DEPLOY / RENDER_ENV commands all take the raw service ID,
+    # e.g. srv-xxxx) — so this returns "name (id)" pairs and the form's
+    # submit handler already knows to extract just the id from that
+    # (see fieldRefs[name].kind === 'render_service' in script.js),
+    # matching the same "name (id)" display convention render_list
+    # already uses in its chat-bubble replies.
+    user = current_user()
+    if not user:
+        return safe_jsonify({"services": []})
+    rd_token = get_user_render_token(user)
+    if not rd_token:
+        return safe_jsonify({"services": []})
+    r = rd_api("GET", "/services?limit=50", rd_token)
+    if r.status_code != 200:
+        return safe_jsonify({"services": []})
+    # Render's list response wraps each entry as {"service": {...}} in
+    # some API versions and returns the service object directly in
+    # others — same defensive unwrap RENDER_LIST_SERVICES already uses
+    # in executor.py, kept consistent here rather than assuming one shape.
+    items = []
+    for entry in r.json():
+        svc = entry.get("service", entry)
+        if svc.get("name") and svc.get("id"):
+            items.append(f"{svc['name']} ({svc['id']})")
+    return safe_jsonify({"services": items})
 
 
 @api_bp.route("/api/repo-folders", methods=["GET"])

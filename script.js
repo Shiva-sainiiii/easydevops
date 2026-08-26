@@ -857,6 +857,42 @@ function deleteSession(id) {
   _syncDelete(`/api/sessions/${encodeURIComponent(id)}`);
 }
 
+let chatSearchQuery = '';
+
+function onChatSearchInput(e) {
+  chatSearchQuery = e.target.value.trim();
+  document.getElementById('chat-search-clear').classList.toggle('hidden', !chatSearchQuery);
+  renderChatHistoryList();
+}
+
+function clearChatSearch() {
+  chatSearchQuery = '';
+  const input = document.getElementById('chat-search-input');
+  if (input) input.value = '';
+  document.getElementById('chat-search-clear').classList.add('hidden');
+  renderChatHistoryList();
+}
+
+// Finds the first message in a session whose content contains the query
+// (case-insensitive) and returns a short "...around the match..." snippet
+// — same idea as a browser's Ctrl+F result preview, so picking the right
+// chat out of a search result doesn't require opening each one first.
+function findMatchSnippet(session, query) {
+  const q = query.toLowerCase();
+  for (const m of session.messages) {
+    const content = (m.content || '');
+    const idx = content.toLowerCase().indexOf(q);
+    if (idx === -1) continue;
+    const start = Math.max(0, idx - 24);
+    const end = Math.min(content.length, idx + q.length + 32);
+    let snippet = content.slice(start, end).replace(/\s+/g, ' ').trim();
+    if (start > 0) snippet = '…' + snippet;
+    if (end < content.length) snippet = snippet + '…';
+    return snippet;
+  }
+  return null;
+}
+
 function renderChatHistoryList() {
   const list = document.getElementById('chat-hist-list');
   if (!list) return;
@@ -864,12 +900,37 @@ function renderChatHistoryList() {
 
   const sorted = [...sessionsState.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
+  const query = chatSearchQuery;
+  // No query: original behavior, every session shown, meta line is the
+  // message count. With a query: only sessions matching by title OR by
+  // some message's content are shown, and a message match replaces the
+  // meta line with a highlighted-context snippet instead of the count —
+  // that's the part a session list alone (title-only) can't give you,
+  // and is the actual point of searching message content rather than
+  // just filtering titles.
+  let visible = sorted;
+  let snippets = null;
+  if (query) {
+    const q = query.toLowerCase();
+    snippets = new Map();
+    visible = sorted.filter(s => {
+      if ((s.title || '').toLowerCase().includes(q)) return true;
+      const snip = findMatchSnippet(s, query);
+      if (snip) { snippets.set(s.id, snip); return true; }
+      return false;
+    });
+  }
+
   if (!sorted.length) {
     list.innerHTML = '<div class="chat-hist-empty">Koi purani chat nahi hai.</div>';
     return;
   }
+  if (query && !visible.length) {
+    list.innerHTML = `<div class="chat-hist-empty">"${escHtml(query)}" ke liye kuch nahi mila.</div>`;
+    return;
+  }
 
-  sorted.forEach(s => {
+  visible.forEach(s => {
     const item = document.createElement('div');
     item.className = 'chat-hist-item' + (s.id === sessionsState.activeSessionId ? ' active' : '');
     item.onclick = () => switchToSession(s.id);
@@ -885,7 +946,13 @@ function renderChatHistoryList() {
     title.textContent = s.title || 'Nayi Chat';
     const meta = document.createElement('div');
     meta.className = 'chat-hist-meta';
-    meta.textContent = `${s.messages.length} messages · ${timeAgo(s.updatedAt)}`;
+    const snip = snippets && snippets.get(s.id);
+    if (snip) {
+      meta.className += ' chat-hist-snippet';
+      meta.textContent = snip;
+    } else {
+      meta.textContent = `${s.messages.length} messages · ${timeAgo(s.updatedAt)}`;
+    }
     info.appendChild(title);
     info.appendChild(meta);
 
@@ -952,6 +1019,7 @@ const COMMANDS = [
 
   // ── NETLIFY (only surfaced once connected) ──
   { id: 'NETLIFY_LIST',  tpl: 'list netlify sites',                          desc: 'Netlify · list all sites',             kw: ['list','netlify','sites','sare','dikhao'], netlify: true },
+  { id: 'NETLIFY_DEPLOY', tpl: 'deploy netlify site {site_name}',            desc: 'Netlify · trigger a deploy',           kw: ['deploy','netlify','site','build'], netlify: true },
   { id: 'NETLIFY_INFO',  tpl: 'info about netlify site {site_name}',         desc: 'Netlify · get site details',           kw: ['info','information','details','netlify','site'], netlify: true },
   { id: 'NETLIFY_DELETE', tpl: 'delete netlify site {site_name}',            desc: 'Netlify · delete a site ⚠️',           kw: ['delete','uda','hata','netlify','site'], netlify: true },
   { id: 'NETLIFY_ENV_GET', tpl: 'get env for {site_name} netlify',           desc: 'Netlify · view environment variables', kw: ['env','environment','vars','get','show','netlify'], netlify: true },
@@ -1081,6 +1149,8 @@ function highlightTemplate(tpl, queryWords) {
 function placeholderKind(name, cmdId) {
   if (name === 'repo') return 'repo';
   if (name === 'project_name') return 'vercel_project';
+  if (name === 'site_name') return 'netlify_site';
+  if (name === 'service_id') return 'render_service';
   if (name === 'path') {
     // CREATE_FILE's {path} is a brand-new file that doesn't exist yet —
     // showing existing files as suggestions would be misleading, so it
@@ -1094,7 +1164,8 @@ function placeholderKind(name, cmdId) {
 function placeholderLabel(name) {
   const labels = {
     repo: 'Repository', path: 'File path', message: 'Message',
-    project_name: 'Vercel project', KEY: 'Env key', value: 'Env value',
+    project_name: 'Vercel project', site_name: 'Netlify site',
+    service_id: 'Render service', KEY: 'Env key', value: 'Env value',
   };
   return labels[name] || name.replace(/_/g, ' ');
 }
@@ -1155,45 +1226,47 @@ function buildCommandFormBubble(cmd, placeholders) {
     fieldLabel.textContent = placeholderLabel(name);
     fieldWrap.appendChild(fieldLabel);
 
-    const listId = `field-list-${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const datalist = document.createElement('datalist');
-    datalist.id = listId;
-
     const inputEl = document.createElement('input');
     inputEl.type = 'text';
     inputEl.placeholder = placeholderLabel(name);
     inputEl.autocomplete = 'off';
+    fieldWrap.appendChild(inputEl);
 
+    let dropdownCtl = null;
     if (kind === 'repo') {
-      inputEl.setAttribute('list', listId);
-      getRepoNames().then(names => fillDatalist(datalist, names));
+      dropdownCtl = attachSuggestDropdown(inputEl, fieldWrap, getRepoNames);
     } else if (kind === 'vercel_project') {
-      inputEl.setAttribute('list', listId);
-      getVercelProjectNames().then(names => fillDatalist(datalist, names));
+      dropdownCtl = attachSuggestDropdown(inputEl, fieldWrap, getVercelProjectNames);
+    } else if (kind === 'netlify_site') {
+      dropdownCtl = attachSuggestDropdown(inputEl, fieldWrap, getNetlifySiteNames);
+    } else if (kind === 'render_service') {
+      dropdownCtl = attachSuggestDropdown(inputEl, fieldWrap, getRenderServiceNames);
     } else if (kind === 'path') {
-      inputEl.setAttribute('list', listId);
       inputEl.placeholder = 'file path (pick a repo first)';
+      // Starts with an empty source — populated once a repo is picked,
+      // via the repo->path refresh listener below. No point fetching
+      // "files in no particular repo".
+      dropdownCtl = attachSuggestDropdown(inputEl, fieldWrap, () => Promise.resolve([]));
     } else if (kind === 'new_path') {
       inputEl.placeholder = 'e.g. src/newfile.js';
     }
 
-    fieldWrap.appendChild(inputEl);
-    fieldWrap.appendChild(datalist);
     form.appendChild(fieldWrap);
-    fieldRefs[name] = { input: inputEl, kind, datalist };
+    fieldRefs[name] = { input: inputEl, kind, dropdownCtl };
   });
 
   // If both a repo field and a real (existing-file) path field exist,
-  // refresh the path datalist whenever the repo field changes — same
+  // refresh the path suggestions whenever the repo field changes — same
   // live-lookup pattern as the upload flow's askUploadPath step. Skipped
-  // for CREATE_FILE's 'new_path' kind, which has no datalist to refresh.
+  // for CREATE_FILE's 'new_path' kind, which has no suggestion source to
+  // refresh.
   if (fieldRefs.repo && fieldRefs.path && fieldRefs.path.kind === 'path') {
     fieldRefs.repo.input.addEventListener('change', () => {
       const repo = fieldRefs.repo.input.value.trim();
       if (!repo) return;
       fetch(`/api/repo-files?repo=${encodeURIComponent(repo)}`)
         .then(r => r.json())
-        .then(data => fillDatalist(fieldRefs.path.datalist, data.files || []))
+        .then(data => fieldRefs.path.dropdownCtl.setNames(data.files || []))
         .catch(() => {});
     });
   }
@@ -1527,20 +1600,17 @@ function askEnvTarget(file, platform) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
+  const fieldWrap = document.createElement('div');
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = platform === 'render' ? 'srv-xxxxxxxxxxxx' : `${platform}-project-name`;
   input.value = lastEnvPlatform === platform ? lastEnvTarget : '';
   input.autocomplete = 'off';
+  fieldWrap.appendChild(input);
 
-  if (platform === 'vercel') {
-    const listId = 'env-target-list-' + Date.now();
-    const datalist = document.createElement('datalist');
-    datalist.id = listId;
-    input.setAttribute('list', listId);
-    getVercelProjectNames().then(names => fillDatalist(datalist, names));
-    form.appendChild(datalist);
-  }
+  const namesFetcher = { vercel: getVercelProjectNames, netlify: getNetlifySiteNames, render: getRenderServiceNames }[platform];
+  if (namesFetcher) attachSuggestDropdown(input, fieldWrap, namesFetcher);
+  form.appendChild(fieldWrap);
 
   const hint = document.createElement('div');
   hint.className = 'prompt-hint';
@@ -1581,7 +1651,6 @@ function askEnvTarget(file, platform) {
 
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
-  form.appendChild(input);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);
@@ -1654,13 +1723,117 @@ function getVercelProjectNames() {
   return vercelProjectNamesFetchPromise;
 }
 
-function fillDatalist(datalistEl, items) {
-  datalistEl.innerHTML = '';
-  items.forEach(v => {
-    const opt = document.createElement('option');
-    opt.value = v;
-    datalistEl.appendChild(opt);
+// Same pattern, for the Netlify {site_name} field.
+let cachedNetlifySiteNames = null;
+let netlifySiteNamesFetchPromise = null;
+
+function getNetlifySiteNames() {
+  if (cachedNetlifySiteNames) return Promise.resolve(cachedNetlifySiteNames);
+  if (netlifySiteNamesFetchPromise) return netlifySiteNamesFetchPromise;
+  netlifySiteNamesFetchPromise = fetch('/api/netlify-sites')
+    .then(r => r.json())
+    .then(data => { cachedNetlifySiteNames = data.sites || []; return cachedNetlifySiteNames; })
+    .catch(() => []);
+  return netlifySiteNamesFetchPromise;
+}
+
+// Same pattern, for the Render {service_id} field. Items come back as
+// "name (id)" strings — buildCommandFormBubble's submit handler already
+// extracts just the id for kind === 'render_service' (Render's commands
+// all key off the raw service id, not the display name).
+let cachedRenderServiceNames = null;
+let renderServiceNamesFetchPromise = null;
+
+function getRenderServiceNames() {
+  if (cachedRenderServiceNames) return Promise.resolve(cachedRenderServiceNames);
+  if (renderServiceNamesFetchPromise) return renderServiceNamesFetchPromise;
+  renderServiceNamesFetchPromise = fetch('/api/render-services')
+    .then(r => r.json())
+    .then(data => { cachedRenderServiceNames = data.services || []; return cachedRenderServiceNames; })
+    .catch(() => []);
+  return renderServiceNamesFetchPromise;
+}
+
+// ── CUSTOM 1-TAP SUGGESTION DROPDOWN ──
+// Native <input list> + <datalist> is what repo/project/service fields
+// used before this — but on mobile (Android Chrome especially) tapping a
+// datalist option is unreliable: the first tap just closes the on-screen
+// keyboard/suggestion tray without committing a value, so the field
+// needs a second tap to actually pick something. That's a platform
+// quirk of native datalist on touch, not fixable by tweaking it — the
+// fix is a hand-rolled dropdown that responds to one real click/touch
+// event, same as any custom autocomplete widget.
+//
+// attachSuggestDropdown(inputEl, fetchNamesFn) wires:
+//   - focus/input on inputEl -> fetch names (cached by fetchNamesFn
+//     itself, e.g. getRepoNames()) -> render a filtered list underneath
+//   - one tap/click on an item -> fills the input, closes the list,
+//     fires a synthetic 'change' event (existing listeners like the
+//     repo->path datalist refresh in buildCommandFormBubble already key
+//     off 'change', so they keep working unmodified)
+//   - tap outside -> closes the list without changing the value
+// fieldWrap must be position:relative (all call sites below create it
+// that way) since the list is positioned absolute against it.
+function attachSuggestDropdown(inputEl, fieldWrap, fetchNamesFn) {
+  let allNames = [];
+  let namesLoaded = false;
+  const list = document.createElement('div');
+  list.className = 'suggest-dropdown';
+  fieldWrap.appendChild(list);
+
+  function render(filterText) {
+    const q = (filterText || '').toLowerCase();
+    const matches = (q ? allNames.filter(n => n.toLowerCase().includes(q)) : allNames).slice(0, 30);
+    list.innerHTML = '';
+    if (!matches.length) { list.classList.remove('open'); return; }
+    matches.forEach(name => {
+      const item = document.createElement('div');
+      item.className = 'suggest-dropdown-item';
+      item.textContent = name;
+      // touchend fires (and is handled) before the input's blur can close
+      // the list out from under it — this is what makes selection a
+      // single tap instead of needing the list to survive a second one.
+      const pick = (e) => {
+        e.preventDefault();
+        inputEl.value = name;
+        list.classList.remove('open');
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      item.addEventListener('touchend', pick);
+      item.addEventListener('mousedown', pick);
+      list.appendChild(item);
+    });
+    list.classList.add('open');
+  }
+
+  function openWithNames() {
+    if (namesLoaded) { render(inputEl.value); return; }
+    fetchNamesFn().then(names => {
+      allNames = names || [];
+      namesLoaded = true;
+      render(inputEl.value);
+    });
+  }
+
+  inputEl.addEventListener('focus', openWithNames);
+  inputEl.addEventListener('input', () => render(inputEl.value));
+  inputEl.addEventListener('blur', () => {
+    // Delay so a touchend/mousedown on a list item (which doesn't itself
+    // steal focus) still lands before the list gets torn down.
+    setTimeout(() => list.classList.remove('open'), 150);
   });
+
+  // Returns a controller so callers with a dynamic source (the {path}
+  // field, whose valid values depend on which repo was picked) can push
+  // a fresh name list in without re-attaching the whole widget — used by
+  // buildCommandFormBubble's repo->path refresh below.
+  return {
+    setNames(names) {
+      allNames = names || [];
+      namesLoaded = true;
+      render(inputEl.value);
+    },
+  };
 }
 
 // Step 1: ask which repo, as an in-chat form bubble (not a native prompt).
@@ -1686,18 +1859,14 @@ function askUploadRepo(files) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'repo-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
+  const fieldWrap = document.createElement('div');
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
-
-  getRepoNames().then(names => fillDatalist(datalist, names));
+  fieldWrap.appendChild(input);
+  attachSuggestDropdown(input, fieldWrap, getRepoNames);
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -1731,8 +1900,7 @@ function askUploadRepo(files) {
 
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
-  form.appendChild(input);
-  form.appendChild(datalist);
+  form.appendChild(fieldWrap);
   form.appendChild(actions);
   bubble.appendChild(form);
 
@@ -1760,20 +1928,18 @@ function askUploadPath(files, repo) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'folder-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
+  const fieldWrap = document.createElement('div');
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
+  fieldWrap.appendChild(input);
+  const pathDropdownCtl = attachSuggestDropdown(input, fieldWrap, () => Promise.resolve([]));
 
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
     .then(r => r.json())
-    .then(data => fillDatalist(datalist, data.folders || []))
+    .then(data => pathDropdownCtl.setNames(data.folders || []))
     .catch(() => {});
 
   const hint = document.createElement('div');
@@ -1839,8 +2005,7 @@ function askUploadPath(files, repo) {
 
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
-  form.appendChild(input);
-  form.appendChild(datalist);
+  form.appendChild(fieldWrap);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);
@@ -2055,18 +2220,14 @@ function askZipUploadRepo(file) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'zip-repo-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
+  const fieldWrap = document.createElement('div');
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'repo-name';
   input.value = lastUploadRepo;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
-
-  getRepoNames().then(names => fillDatalist(datalist, names));
+  fieldWrap.appendChild(input);
+  attachSuggestDropdown(input, fieldWrap, getRepoNames);
 
   const actions = document.createElement('div');
   actions.className = 'prompt-actions';
@@ -2100,8 +2261,7 @@ function askZipUploadRepo(file) {
 
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
-  form.appendChild(input);
-  form.appendChild(datalist);
+  form.appendChild(fieldWrap);
   form.appendChild(actions);
   bubble.appendChild(form);
 
@@ -2128,20 +2288,18 @@ function askZipUploadPath(file, repo) {
   const form = document.createElement('div');
   form.className = 'prompt-form';
 
-  const listId = 'zip-folder-list-' + Date.now();
-  const datalist = document.createElement('datalist');
-  datalist.id = listId;
-
+  const fieldWrap = document.createElement('div');
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'folder (optional)';
   input.value = lastUploadDir;
-  input.setAttribute('list', listId);
   input.autocomplete = 'off';
+  fieldWrap.appendChild(input);
+  const zipPathDropdownCtl = attachSuggestDropdown(input, fieldWrap, () => Promise.resolve([]));
 
   fetch(`/api/repo-folders?repo=${encodeURIComponent(repo)}`)
     .then(r => r.json())
-    .then(data => fillDatalist(datalist, data.folders || []))
+    .then(data => zipPathDropdownCtl.setNames(data.folders || []))
     .catch(() => {});
 
   const hint = document.createElement('div');
@@ -2179,8 +2337,7 @@ function askZipUploadPath(file, repo) {
 
   actions.appendChild(goBtn);
   actions.appendChild(cancelBtn);
-  form.appendChild(input);
-  form.appendChild(datalist);
+  form.appendChild(fieldWrap);
   form.appendChild(hint);
   form.appendChild(actions);
   bubble.appendChild(form);
@@ -4052,17 +4209,45 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
 function appendPostUploadDeployAction(bubbleRef, repo) {
   if (!bubbleRef || !repo) return;
   if (!(authedUser && authedUser.vercelConnected)) return;
+  appendDeployAction(bubbleRef, `Deploy ${repo} to Vercel →`, `deploy ${repo} to vercel`);
+}
 
+// ── POST-ENV-SET "DEPLOY NOW" SHORTCUT ──
+// Setting an env var on Vercel or Netlify doesn't apply it to the live
+// site by itself — both platforms only pick up a new env var on the
+// *next* deploy, which is exactly what the "⚠️ Naya deploy trigger
+// karo" line already in these replies is warning about. Turning that
+// warning into a one-tap button closes the loop instead of making the
+// user go find the deploy command themselves.
+//
+// Deliberately NOT wired up for Render: RENDER_SET_ENV's PUT already
+// triggers an automatic redeploy as a side effect of the API call
+// itself (see executor.py's RENDER_SET_ENV — the reply already says so)
+// — adding a manual deploy button there would just queue a redundant
+// second deploy right after the automatic one.
+function appendPostEnvSetDeployAction(bubbleRef, platform, target) {
+  if (!bubbleRef || !target) return;
+  if (platform === 'vercel') {
+    appendDeployAction(bubbleRef, `Deploy ${target} now →`, `deploy ${target} to vercel`);
+  } else if (platform === 'netlify') {
+    appendDeployAction(bubbleRef, `Deploy ${target} now →`, `deploy netlify site ${target}`);
+  }
+}
+
+// Shared button-builder behind both shortcuts above — same visual
+// treatment (post-upload-actions/post-upload-deploy-btn classes) either
+// way, just a different label/command sentence.
+function appendDeployAction(bubbleRef, label, commandSentence) {
   const { bubble } = bubbleRef;
   const actions = document.createElement('div');
   actions.className = 'post-upload-actions';
 
   const deployBtn = document.createElement('button');
   deployBtn.className = 'post-upload-deploy-btn';
-  deployBtn.textContent = `Deploy ${repo} to Vercel →`;
+  deployBtn.textContent = label;
   deployBtn.onclick = () => {
     deployBtn.disabled = true;
-    resendMessage(`deploy ${repo} to vercel`);
+    resendMessage(commandSentence);
   };
 
   actions.appendChild(deployBtn);
@@ -4225,7 +4410,7 @@ const PROVIDER_BADGES = {
   vercel_deploy_pending: 'vercel', vercel_delete_project: 'vercel',
   vercel_env: 'vercel', vercel_env_set: 'vercel',
   netlify_list: 'netlify', netlify_site_info: 'netlify', netlify_delete_site: 'netlify',
-  netlify_env: 'netlify', netlify_env_set: 'netlify',
+  netlify_env: 'netlify', netlify_env_set: 'netlify', netlify_deploy: 'netlify',
   render_list: 'render', render_create_service: 'render', render_delete_service: 'render',
   render_env: 'render', render_env_update: 'render', render_deploy: 'render',
 };
@@ -4301,7 +4486,7 @@ function actionColorFor(action) {
     vercel_env: 'info', vercel_env_set: 'success',
     vercel_rollback: 'success', vercel_deployments: 'info',
     netlify_list: 'info', netlify_site_info: 'info', netlify_delete_site: 'success',
-    netlify_env: 'info', netlify_env_set: 'success',
+    netlify_env: 'info', netlify_env_set: 'success', netlify_deploy: 'success',
     render_list: 'info', render_create_service: 'success', render_delete_service: 'success',
     render_env: 'info', render_env_update: 'success', render_deploy: 'success',
     confirm_required: 'warning', auth_required: 'warning',
@@ -4595,7 +4780,12 @@ async function sendMsg() {
     }
 
     const cls = actionColorFor(data.action);
-    addMessage('agent', data.reply, cls, null, data.action);
+    const msgRef = addMessage('agent', data.reply, cls, null, data.action);
+    if (data.action === 'vercel_env_set' && data.project_name) {
+      appendPostEnvSetDeployAction(msgRef, 'vercel', data.project_name);
+    } else if (data.action === 'netlify_env_set' && data.site_name) {
+      appendPostEnvSetDeployAction(msgRef, 'netlify', data.site_name);
+    }
     history.push({ role: 'assistant', content: data.reply });
 
   } catch (err) {

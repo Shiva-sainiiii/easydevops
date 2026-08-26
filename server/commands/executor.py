@@ -12,7 +12,7 @@ import base64
 import requests
 
 from server.providers.github import gh_api, get_file_sha
-from server.providers.vercel import vc_api, vercel_find_project, vercel_poll_deployment, vercel_project_live_url, VERCEL_TERMINAL_STATES
+from server.providers.vercel import vc_api, vercel_find_project, vercel_find_project_by_repo, vercel_poll_deployment, vercel_project_live_url, VERCEL_TERMINAL_STATES
 from server.providers.netlify import nl_api, netlify_find_site
 from server.providers.render import rd_api
 from server.security import safe_repo_path, UnsafePathError
@@ -250,17 +250,29 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
             project_name = params["project_name"]
             proj = vercel_find_project(project_name, vc_token)
+            resolved_by_repo = False
             if not proj:
-                return {"reply": f"❌ Vercel project `{project_name}` nahi mila. Pehle import kar.", "action": "error"}
+                # Exact Vercel-project-name match failed — the given name
+                # is very often actually a GitHub repo name (e.g. the
+                # post-upload "Deploy to Vercel" shortcut always sends the
+                # repo name, and a repo/project pair can legitimately have
+                # different names — see vercel_find_project_by_repo's
+                # docstring). Before giving up, try resolving it as a
+                # repo linked to some Vercel project instead.
+                proj = vercel_find_project_by_repo(f"{owner}/{project_name}", vc_token)
+                resolved_by_repo = bool(proj)
+            if not proj:
+                return {"reply": f"❌ Vercel project `{project_name}` nahi mila (naam se ya linked GitHub repo se). Pehle import kar, ya sahi Vercel project naam bata.", "action": "error"}
+            actual_project_name = proj.get("name", project_name)
 
             git_repo = proj.get("link", {})
             repo_id = git_repo.get("repoId")
             git_branch = git_repo.get("productionBranch", "main")
             if not repo_id:
-                return {"reply": f"❌ Project `{project_name}` GitHub se linked nahi hai. Pehle import kar.", "action": "error"}
+                return {"reply": f"❌ Project `{actual_project_name}` GitHub se linked nahi hai. Pehle import kar.", "action": "error"}
 
             payload = {
-                "name": project_name,
+                "name": actual_project_name,
                 "target": "production",
                 "gitSource": {"type": "github", "repoId": repo_id, "ref": git_branch},
                 "projectSettings": {"framework": proj.get("framework")}
@@ -277,17 +289,18 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             if not dep_id:
                 return {"reply": "❌ Vercel ne deployment ID nahi diya, kuch galat hua.", "action": "error"}
 
+            name_note = f" (repo `{project_name}` → Vercel project `{actual_project_name}`)" if resolved_by_repo and actual_project_name != project_name else ""
             result = vercel_poll_deployment(dep_id, vc_token)
             if result["ok"]:
-                return {"reply": f"✅ Deployment complete!\n**{project_name}**\n🔗 {result['live_url']}\n\nID: `{dep_id}`",
-                        "action": "vercel_deploy", "deployment_id": dep_id, "url": result["live_url"], "project_name": project_name}
+                return {"reply": f"✅ Deployment complete!{name_note}\n**{actual_project_name}**\n🔗 {result['live_url']}\n\nID: `{dep_id}`",
+                        "action": "vercel_deploy", "deployment_id": dep_id, "url": result["live_url"], "project_name": actual_project_name}
             elif result["timed_out"]:
-                return {"reply": (f"⏳ Deploy trigger ho gaya hai (ID: `{dep_id}`), lekin build abhi bhi chal raha hai.\n\n"
+                return {"reply": (f"⏳ Deploy trigger ho gaya hai{name_note} (ID: `{dep_id}`), lekin build abhi bhi chal raha hai.\n\n"
                                    f"Status check karne ke liye thodi der baad bol: 'check deployment status {dep_id}'."),
-                        "action": "vercel_deploy_pending", "deployment_id": dep_id, "project_name": project_name}
+                        "action": "vercel_deploy_pending", "deployment_id": dep_id, "project_name": actual_project_name}
             else:
                 error_detail = result["deployment"].get("errorMessage", "") or result["state"]
-                return {"reply": f"❌ Deployment fail ho gaya.\nStatus: **{result['state']}**\n{error_detail}\nID: `{dep_id}`",
+                return {"reply": f"❌ Deployment fail ho gaya.{name_note}\nStatus: **{result['state']}**\n{error_detail}\nID: `{dep_id}`",
                         "action": "error", "deployment_id": dep_id}
 
         elif cmd == "VERCEL_DELETE_PROJECT":
@@ -422,7 +435,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                        json={"key": key, "value": value, "type": "encrypted", "target": target})
             if r.status_code in (200, 201):
                 return {"reply": f"✅ Env var `{key}` set ho gaya `{project_name}` me.\n⚠️ Naya deploy trigger karo change apply karne ke liye.",
-                        "action": "vercel_env_set"}
+                        "action": "vercel_env_set", "project_name": project_name}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
             else:
@@ -430,6 +443,34 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"❌ Env set Error: {err}", "action": "error"}
 
         # ──────────────── NETLIFY ────────────────
+        elif cmd == "NETLIFY_DEPLOY":
+            # POST /sites/{id}/builds triggers a fresh production build
+            # directly via the site's API-key auth — no separate build
+            # hook URL to create/store first, unlike the build-hooks
+            # approach in Netlify's own docs (those are meant for
+            # external services with no API key of their own; this app
+            # already authenticates as the user, so the plain builds
+            # endpoint is the more direct path). No status polling here
+            # (Vercel's deploy command polls to a terminal state) since
+            # Netlify's build endpoint doesn't return a deploy object
+            # with a pollable ready-state the way Vercel's does — it
+            # just returns build metadata to fetch full details.
+            if not nl_token:
+                return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
+            site_name = params["site_name"]
+            site = netlify_find_site(site_name, nl_token)
+            if not site:
+                return {"reply": f"❌ Netlify site `{site_name}` nahi mili.", "action": "error"}
+            r = nl_api("POST", f"/sites/{site['id']}/builds", nl_token, json={})
+            if r.status_code in (200, 201):
+                build = r.json()
+                return {"reply": f"✅ Deploy trigger ho gaya `{site_name}` ke liye!\nBuild ID: `{build.get('id', '')}`\n\n🔗 {site.get('url', '')}\n\nBuild Netlify dashboard pe track ho sakti hai.",
+                        "action": "netlify_deploy", "site_name": site_name, "build_id": build.get("id")}
+            elif r.status_code in (401, 403):
+                return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
+            else:
+                return {"reply": f"❌ Netlify deploy trigger Error: {r.text[:200]}", "action": "error"}
+
         elif cmd == "NETLIFY_LIST_SITES":
             if not nl_token:
                 return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
@@ -522,7 +563,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             r = nl_api("POST", f"/accounts/{account_id}/env?site_id={site['id']}", nl_token, json=payload)
             if r.status_code in (200, 201):
                 return {"reply": f"✅ Env var `{key}` set ho gaya `{site_name}` me.\n⚠️ Naya deploy trigger karo change apply karne ke liye.",
-                        "action": "netlify_env_set"}
+                        "action": "netlify_env_set", "site_name": site_name}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
             else:
@@ -615,7 +656,7 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             if r.status_code in (200, 201):
                 keys = ", ".join(new_vars.keys())
                 return {"reply": f"✅ Env vars update ho gaye for `{service_id}`!\nUpdated keys: `{keys}`\n\n⚠️ Service redeploy hoga automatically Render ki taraf se.",
-                        "action": "render_env_update"}
+                        "action": "render_env_update", "service_id": service_id}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
             else:

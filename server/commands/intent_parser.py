@@ -118,6 +118,12 @@ INTENT_RULES = [
     ], lambda m: {"project_name": _g(m, 3), "key": _g(m, 1), "value": _g(m, 2)}),
 
     # ── NETLIFY ──
+    ("NETLIFY_DEPLOY", [
+        rf"deploy\s+netlify\s+site\s+({SLUG})",
+        rf"deploy\s+({SLUG})\s+to\s+netlify",
+        rf"({SLUG})\s+(?:ko\s+)?netlify\s+(?:pe|par)\s+deploy\s+(?:karo|kar\s*do)",
+    ], lambda m: {"site_name": _g(m, 1)}),
+
     ("NETLIFY_LIST_SITES", [
         r"(?:list|sare|show|dikhao|dikha)\s+.*netlify.*sites?\b",
         r"^netlify\s+sites?$",
