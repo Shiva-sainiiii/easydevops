@@ -1220,32 +1220,76 @@ function renderSuggestions(rawValue) {
   }
 
   panel.innerHTML = '';
-  const label = document.createElement('div');
-  label.className = 'suggest-group-label';
-  label.textContent = 'Commands';
-  panel.appendChild(label);
 
+  // Grouped by platform instead of one flat list — typing a common verb
+  // like "delete" or "list" matches the same-shaped command on every
+  // connected platform at once (DELETE_FILE, DELETE_REPO,
+  // VERCEL_DELETE, NETLIFY_DELETE, RENDER_DELETE all score on "delete"),
+  // and a flat list made those five look interchangeable at a glance —
+  // you had to actually read each description to tell them apart. A
+  // small icon+name header per platform group turns that into "which
+  // section has the icon I want" instead of "read every line".
+  // activeSuggestions itself stays flat/in-score-order (nothing else
+  // about keyboard nav / index-based selection changes) — only the
+  // visual grouping below reorders how they're painted into the DOM.
+  const order = ['github', 'vercel', 'netlify', 'render', 'ai'];
+  const groups = new Map();
   activeSuggestions.forEach((cmd, i) => {
-    const item = document.createElement('div');
-    item.className = 'suggest-item';
-    item.dataset.index = i;
+    const platform = commandPlatform(cmd);
+    if (!groups.has(platform)) groups.set(platform, []);
+    groups.get(platform).push({ cmd, i });
+  });
 
-    const tplEl = document.createElement('div');
-    tplEl.className = 'tpl';
-    tplEl.innerHTML = highlightTemplate(cmd.tpl, queryWords);
+  order.filter(p => groups.has(p)).forEach(platform => {
+    const groupLabel = document.createElement('div');
+    groupLabel.className = 'suggest-group-label';
+    if (platform === 'ai') {
+      groupLabel.textContent = '✨ AI';
+    } else {
+      groupLabel.innerHTML = `<span class="suggest-group-icon">${PROVIDER_ICONS[platform]}</span>${PROVIDER_NAMES[platform]}`;
+    }
+    panel.appendChild(groupLabel);
 
-    const descEl = document.createElement('div');
-    descEl.className = 'desc';
-    descEl.textContent = cmd.desc;
+    groups.get(platform).forEach(({ cmd, i }) => {
+      const item = document.createElement('div');
+      item.className = 'suggest-item';
+      item.dataset.index = i;
 
-    item.appendChild(tplEl);
-    item.appendChild(descEl);
-    item.onclick = () => applySuggestion(cmd);
+      const tplEl = document.createElement('div');
+      tplEl.className = 'tpl';
+      tplEl.innerHTML = highlightTemplate(cmd.tpl, queryWords);
 
-    panel.appendChild(item);
+      const descEl = document.createElement('div');
+      descEl.className = 'desc';
+      // Platform name is now redundant with the group header above it,
+      // so trim the "Platform · " prefix off desc here rather than
+      // changing every entry's desc string in COMMANDS.
+      descEl.textContent = cmd.desc.replace(/^[A-Za-z]+ · /, '');
+
+      item.appendChild(tplEl);
+      item.appendChild(descEl);
+      item.onclick = () => applySuggestion(cmd);
+
+      panel.appendChild(item);
+    });
   });
 
   panel.classList.add('show');
+}
+
+// Derives which platform group a command belongs to for the suggestion
+// panel's grouped display — from the same vercel/netlify/render flags
+// already used to gate visibility, plus an explicit 'ai' for
+// CODE_GENERATE (no provider flag, not a plain GitHub CRUD command
+// either, so it gets its own small group rather than being lumped into
+// GitHub where "build {feature} in {repo}" would look out of place next
+// to "list files in {repo}").
+function commandPlatform(cmd) {
+  if (cmd.id === 'CODE_GENERATE') return 'ai';
+  if (cmd.vercel) return 'vercel';
+  if (cmd.netlify) return 'netlify';
+  if (cmd.render) return 'render';
+  return 'github';
 }
 
 // Renders the template with {placeholders} styled distinctly, and any

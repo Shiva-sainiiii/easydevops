@@ -2015,6 +2015,9 @@
   #suggest-panel.show { display: flex; }
 
   .suggest-group-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-family: var(--font-mono);
     font-size: 10px;
     letter-spacing: 0.5px;
@@ -2022,6 +2025,20 @@
     padding: 8px 14px 4px;
     text-transform: uppercase;
   }
+  .suggest-group-label:not(:first-child) {
+    margin-top: 4px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding-top: 10px;
+  }
+  .suggest-group-icon {
+    display: inline-flex;
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .suggest-group-icon svg { width: 100%; height: 100%; }
 
   .suggest-item {
     display: flex;
