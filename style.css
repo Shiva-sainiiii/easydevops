@@ -151,6 +151,147 @@
   .menu-btn svg { width: 16px; height: 16px; }
   .menu-btn:active { color: var(--accent-2); border-color: var(--accent-2); background: rgba(54,209,255,0.08); }
 
+  /* ── TAB SWITCHER BUTTON (header) — Chrome's numbered rounded-square
+     tab-count icon; opens the full-screen tab-switcher overlay below. ── */
+  .tab-switcher-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    margin-left: 6px;
+    border-radius: 8px;
+    border: 1.5px solid var(--muted-2);
+    background: transparent;
+    color: var(--muted-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .tab-switcher-btn:active { color: var(--accent-2); border-color: var(--accent-2); background: rgba(54,209,255,0.08); }
+  .tab-switcher-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* ── TAB SWITCHER OVERLAY (Chrome-style tab grid) ── */
+  .tab-switcher-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    background: var(--bg-0, #0a0f11);
+    flex-direction: column;
+  }
+  .tab-switcher-overlay.open { display: flex; }
+  .tab-switcher-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 8px;
+  }
+  .tab-switcher-new, .tab-switcher-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--border-2);
+    background: rgba(255,255,255,0.03);
+    color: var(--text, #eaf2f2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab-switcher-new svg, .tab-switcher-close svg { width: 18px; height: 18px; }
+  .tab-switcher-new:active, .tab-switcher-close:active { background: rgba(54,209,255,0.1); border-color: var(--accent-2); }
+  .tab-switcher-count-pill {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .tab-switcher-search { margin: 4px 16px 14px; }
+
+  .tab-switcher-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 14px 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-content: start;
+  }
+  .tab-switcher-card {
+    position: relative;
+    border-radius: 14px;
+    border: 1px solid var(--border-2);
+    background: var(--bg-1, #10181c);
+    overflow: hidden;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color .15s, transform .1s;
+    display: flex;
+    flex-direction: column;
+  }
+  .tab-switcher-card:active { transform: scale(.97); }
+  .tab-switcher-card.active { border-color: var(--accent); box-shadow: 0 0 0 1.5px var(--accent); }
+  .tab-switcher-card-hdr {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-2);
+    background: rgba(255,255,255,0.02);
+  }
+  .tab-switcher-card-title {
+    flex: 1;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text, #eaf2f2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab-switcher-card-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--muted-2);
+    flex-shrink: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab-switcher-card-close:active { background: rgba(255,107,107,0.15); color: #ff6b6b; }
+  .tab-switcher-card-close svg { width: 13px; height: 13px; }
+  .tab-switcher-card-preview {
+    padding: 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+    height: 92px;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  }
+  .tab-switcher-card-preview .snippet-hit { color: var(--accent-2); font-style: italic; }
+  .tab-switcher-card-meta {
+    padding: 0 10px 10px;
+    font-size: 10px;
+    color: var(--muted-2);
+    font-family: var(--font-mono);
+  }
+  .tab-switcher-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--muted-2);
+    font-size: 13px;
+    padding: 40px 20px;
+  }
+
   /* ── USER BADGE + MENU (OAuth identity) ── */
   .user-badge {
     width: 34px; height: 34px;

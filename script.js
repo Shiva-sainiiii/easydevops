@@ -894,6 +894,11 @@ function findMatchSnippet(session, query) {
 }
 
 function renderChatHistoryList() {
+  updateTabSwitcherCount();
+  if (document.getElementById('tab-switcher-overlay').classList.contains('open')) {
+    renderTabSwitcherGrid();
+  }
+
   const list = document.getElementById('chat-hist-list');
   if (!list) return;
   list.innerHTML = '';
@@ -971,6 +976,132 @@ function renderChatHistoryList() {
     item.appendChild(info);
     item.appendChild(delBtn);
     list.appendChild(item);
+  });
+}
+
+// ── CHROME-STYLE TAB SWITCHER ──
+// A second view onto the exact same sessionsState the drawer's "Recent
+// Chats" list reads — full-screen card grid instead of a list, closer to
+// how Chrome's own tab switcher looks (grid of cards, X to close, tap to
+// switch, count badge in the toolbar). Doesn't duplicate any session
+// data or add a separate store — renderChatHistoryList() already calls
+// updateTabSwitcherCount()/renderTabSwitcherGrid() on every session
+// change, so the grid and the drawer list never drift out of sync.
+let tabSwitcherSearchQuery = '';
+
+function updateTabSwitcherCount() {
+  const n = sessionsState.sessions.length || 1;
+  const countEl = document.getElementById('tab-switcher-count');
+  const pillEl = document.getElementById('tab-switcher-pill');
+  if (countEl) countEl.textContent = n > 99 ? '99+' : String(n);
+  if (pillEl) pillEl.textContent = `${n} tab${n === 1 ? '' : 's'}`;
+}
+
+function openTabSwitcher() {
+  document.getElementById('tab-switcher-overlay').classList.add('open');
+  renderTabSwitcherGrid();
+  vibrate(8);
+}
+
+function closeTabSwitcher() {
+  document.getElementById('tab-switcher-overlay').classList.remove('open');
+}
+
+function onTabSwitcherSearchInput(e) {
+  tabSwitcherSearchQuery = e.target.value.trim();
+  document.getElementById('tab-switcher-search-clear').classList.toggle('hidden', !tabSwitcherSearchQuery);
+  renderTabSwitcherGrid();
+}
+
+function clearTabSwitcherSearch() {
+  tabSwitcherSearchQuery = '';
+  const input = document.getElementById('tab-switcher-search-input');
+  if (input) input.value = '';
+  document.getElementById('tab-switcher-search-clear').classList.add('hidden');
+  renderTabSwitcherGrid();
+}
+
+// Builds the small multi-line text preview shown on each card — last few
+// messages of the session, most recent first, truncated. This is the
+// closest equivalent this app has to Chrome's actual page-thumbnail:
+// there's no page render to snapshot for a chat session, so a text
+// preview is the informative stand-in. When a search query matches
+// inside the session's messages (not just its title), the matching
+// snippet is shown highlighted at the top instead, so scanning the grid
+// for a search hit doesn't require opening each card.
+function tabSwitcherCardPreview(session, query) {
+  if (query) {
+    const snip = findMatchSnippet(session, query);
+    if (snip) return `<span class="snippet-hit">${escHtml(snip)}</span>`;
+  }
+  const recent = session.messages.slice(-3).reverse();
+  if (!recent.length) return 'Koi message nahi hai abhi.';
+  return recent.map(m => {
+    const who = m.role === 'user' ? 'Aap' : 'Agent';
+    const text = (m.content || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return `<strong>${who}:</strong> ${escHtml(text)}`;
+  }).join('<br>');
+}
+
+function renderTabSwitcherGrid() {
+  const grid = document.getElementById('tab-switcher-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const sorted = [...sessionsState.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  const query = tabSwitcherSearchQuery;
+
+  let visible = sorted;
+  if (query) {
+    const q = query.toLowerCase();
+    visible = sorted.filter(s => (s.title || '').toLowerCase().includes(q) || findMatchSnippet(s, query));
+  }
+
+  if (!visible.length) {
+    grid.innerHTML = query
+      ? `<div class="tab-switcher-empty">"${escHtml(query)}" ke liye kuch nahi mila.</div>`
+      : '<div class="tab-switcher-empty">Koi tab open nahi hai.</div>';
+    return;
+  }
+
+  visible.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'tab-switcher-card' + (s.id === sessionsState.activeSessionId ? ' active' : '');
+    card.onclick = () => {
+      switchToSession(s.id);
+      closeTabSwitcher();
+    };
+
+    const hdr = document.createElement('div');
+    hdr.className = 'tab-switcher-card-hdr';
+    const title = document.createElement('div');
+    title.className = 'tab-switcher-card-title';
+    title.textContent = s.title || 'Nayi Chat';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tab-switcher-card-close';
+    closeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      vibrate(12);
+      if (confirm(`"${s.title}" delete karein? Ye wapas nahi aayega.`)) {
+        deleteSession(s.id);
+      }
+    };
+    hdr.appendChild(title);
+    hdr.appendChild(closeBtn);
+
+    const preview = document.createElement('div');
+    preview.className = 'tab-switcher-card-preview';
+    preview.innerHTML = tabSwitcherCardPreview(s, query);
+
+    const meta = document.createElement('div');
+    meta.className = 'tab-switcher-card-meta';
+    meta.textContent = `${s.messages.length} msgs · ${timeAgo(s.updatedAt)}`;
+
+    card.appendChild(hdr);
+    card.appendChild(preview);
+    card.appendChild(meta);
+    grid.appendChild(card);
   });
 }
 

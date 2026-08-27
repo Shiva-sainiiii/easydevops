@@ -56,6 +56,9 @@
           <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/>
         </svg>
       </button>
+      <button class="tab-switcher-btn" title="Chats" onclick="openTabSwitcher()">
+        <span class="tab-switcher-count" id="tab-switcher-count">1</span>
+      </button>
       <button class="menu-btn" title="Menu" onclick="openDrawer()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 6h18M3 12h18M3 18h18"/>
@@ -63,6 +66,35 @@
       </button>
     </div>
   </header>
+
+  <!-- ── CHROME-STYLE TAB SWITCHER ──
+       Full-screen grid of session cards, opened via the tab-count button
+       in the header. Each card shows the session title + a text preview
+       of its last message (a lightweight stand-in for a real page
+       thumbnail — this app has chat sessions, not web pages, so there's
+       no page render to snapshot) and a close (X) button, same shape as
+       Chrome's tab-grid: tap a card to switch to it, tap X to close it,
+       "+" to start a new one. Reuses sessionsState (the same data
+       renderChatHistoryList's drawer view reads) so both views always
+       agree — this is just a second, more visual way to browse the same
+       session list, not a separate store. -->
+  <div id="tab-switcher-overlay" class="tab-switcher-overlay">
+    <div class="tab-switcher-topbar">
+      <button class="tab-switcher-new" onclick="startNewChatSession(); closeTabSwitcher();">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="tab-switcher-count-pill" id="tab-switcher-pill">1</div>
+      <button class="tab-switcher-close" onclick="closeTabSwitcher()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="chat-search-wrap tab-switcher-search">
+      <svg class="chat-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" id="tab-switcher-search-input" class="chat-search-input" placeholder="Apne tabs search karo…" oninput="onTabSwitcherSearchInput(event)" />
+      <button class="chat-search-clear hidden" id="tab-switcher-search-clear" onclick="clearTabSwitcherSearch()">✕</button>
+    </div>
+    <div id="tab-switcher-grid" class="tab-switcher-grid"></div>
+  </div>
 
   <div id="user-menu" class="user-menu">
     <div class="user-menu-name" id="user-menu-name"></div>
