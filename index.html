@@ -322,22 +322,6 @@
         Log Out
       </button>
 
-      <div class="drawer-section">
-        <div class="drawer-section-title">
-          Recent Chats
-          <button class="drawer-new-chat-btn" onclick="startNewChatSession()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-            New
-          </button>
-        </div>
-        <div class="chat-search-wrap">
-          <svg class="chat-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-          <input type="text" id="chat-search-input" class="chat-search-input" placeholder="Chats aur messages search karo…" oninput="onChatSearchInput(event)" />
-          <button class="chat-search-clear hidden" id="chat-search-clear" onclick="clearChatSearch()">✕</button>
-        </div>
-      </div>
-      <div id="chat-hist-list"></div>
-
       <div class="drawer-divider"></div>
 
       <div class="drawer-section">
@@ -386,25 +370,51 @@
 
   <div id="suggest-panel"></div>
 
-  <div id="dock">
-    <div id="attach-menu" class="attach-menu">
-      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('fileInput').click()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        <div><div class="attach-menu-label">Upload files</div><div class="attach-menu-sub">Ek ya zyada files</div></div>
+  <!-- ── ATTACH SHEET (Claude-style "Add to chat" bottom sheet) ──
+       Replaces the old small popover-above-the-clip-button menu. Same
+       four upload actions as before (files/folder/zip/env), just laid
+       out the way Claude's own attach sheet does: a 3-across icon grid
+       for the primary/most-common actions up top, then a full-width
+       row below for the less-common one (.env import) — row style
+       mirrors Claude's "Web search" toggle row rather than being forced
+       into a 4th grid tile, which is what actually reads as
+       overcrowded on a small screen. -->
+  <div id="attach-sheet-scrim" class="attach-sheet-scrim" onclick="hideAttachMenu()"></div>
+  <div id="attach-menu" class="attach-sheet">
+    <div class="attach-sheet-handle"></div>
+    <div class="attach-sheet-title">Add to chat</div>
+    <div class="attach-sheet-grid">
+      <div class="attach-sheet-tile" onclick="hideAttachMenu(); document.getElementById('fileInput').click()">
+        <div class="attach-sheet-tile-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="attach-sheet-tile-label">Files</div>
       </div>
-      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('folderInput').click()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-        <div><div class="attach-menu-label">Upload folder</div><div class="attach-menu-sub">Nested structure preserve hoga</div></div>
+      <div class="attach-sheet-tile" onclick="hideAttachMenu(); document.getElementById('folderInput').click()">
+        <div class="attach-sheet-tile-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        </div>
+        <div class="attach-sheet-tile-label">Folder</div>
       </div>
-      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('zipInput').click()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M9 7h1M9 11h1M9 15h1"/></svg>
-        <div><div class="attach-menu-label">Upload zip</div><div class="attach-menu-sub">Auto-extract ho jayegi</div></div>
-      </div>
-      <div class="attach-menu-item" onclick="hideAttachMenu(); document.getElementById('envInput').click()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/><line x1="7" y1="14" x2="17" y2="14"/><line x1="7" y1="17" x2="12" y2="17"/></svg>
-        <div><div class="attach-menu-label">Upload .env</div><div class="attach-menu-sub">Vercel/Netlify/Render pe bulk import</div></div>
+      <div class="attach-sheet-tile" onclick="hideAttachMenu(); document.getElementById('zipInput').click()">
+        <div class="attach-sheet-tile-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M9 7h1M9 11h1M9 15h1"/></svg>
+        </div>
+        <div class="attach-sheet-tile-label">Zip</div>
       </div>
     </div>
+    <div class="attach-sheet-row" onclick="hideAttachMenu(); document.getElementById('envInput').click()">
+      <div class="attach-sheet-row-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/><line x1="7" y1="14" x2="17" y2="14"/><line x1="7" y1="17" x2="12" y2="17"/></svg>
+      </div>
+      <div class="attach-sheet-row-text">
+        <div class="attach-sheet-row-label">Upload .env</div>
+        <div class="attach-sheet-row-sub">Vercel/Netlify/Render pe bulk import</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dock">
     <div id="chatbar">
       <button class="clip-btn" title="Attach" onclick="toggleAttachMenu()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -438,7 +448,6 @@
   </div>
 
 </div>
-
 <script src="/script.js"></script>
 </body>
 </html>

@@ -857,22 +857,6 @@ function deleteSession(id) {
   _syncDelete(`/api/sessions/${encodeURIComponent(id)}`);
 }
 
-let chatSearchQuery = '';
-
-function onChatSearchInput(e) {
-  chatSearchQuery = e.target.value.trim();
-  document.getElementById('chat-search-clear').classList.toggle('hidden', !chatSearchQuery);
-  renderChatHistoryList();
-}
-
-function clearChatSearch() {
-  chatSearchQuery = '';
-  const input = document.getElementById('chat-search-input');
-  if (input) input.value = '';
-  document.getElementById('chat-search-clear').classList.add('hidden');
-  renderChatHistoryList();
-}
-
 // Finds the first message in a session whose content contains the query
 // (case-insensitive) and returns a short "...around the match..." snippet
 // — same idea as a browser's Ctrl+F result preview, so picking the right
@@ -893,90 +877,19 @@ function findMatchSnippet(session, query) {
   return null;
 }
 
+// Keeps the tab-switcher's count badge and (if open) its card grid in
+// sync with sessionsState. Named renderChatHistoryList still, even
+// though the drawer's own "Recent Chats" list this used to also render
+// is gone now (removed per request — the tab switcher covers session
+// browsing on its own, so keeping a second list in the drawer was
+// redundant) — kept the name rather than rename+update every call site,
+// since every caller here really does just mean "sessions changed,
+// resync whatever's showing them".
 function renderChatHistoryList() {
   updateTabSwitcherCount();
   if (document.getElementById('tab-switcher-overlay').classList.contains('open')) {
     renderTabSwitcherGrid();
   }
-
-  const list = document.getElementById('chat-hist-list');
-  if (!list) return;
-  list.innerHTML = '';
-
-  const sorted = [...sessionsState.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
-
-  const query = chatSearchQuery;
-  // No query: original behavior, every session shown, meta line is the
-  // message count. With a query: only sessions matching by title OR by
-  // some message's content are shown, and a message match replaces the
-  // meta line with a highlighted-context snippet instead of the count —
-  // that's the part a session list alone (title-only) can't give you,
-  // and is the actual point of searching message content rather than
-  // just filtering titles.
-  let visible = sorted;
-  let snippets = null;
-  if (query) {
-    const q = query.toLowerCase();
-    snippets = new Map();
-    visible = sorted.filter(s => {
-      if ((s.title || '').toLowerCase().includes(q)) return true;
-      const snip = findMatchSnippet(s, query);
-      if (snip) { snippets.set(s.id, snip); return true; }
-      return false;
-    });
-  }
-
-  if (!sorted.length) {
-    list.innerHTML = '<div class="chat-hist-empty">Koi purani chat nahi hai.</div>';
-    return;
-  }
-  if (query && !visible.length) {
-    list.innerHTML = `<div class="chat-hist-empty">"${escHtml(query)}" ke liye kuch nahi mila.</div>`;
-    return;
-  }
-
-  visible.forEach(s => {
-    const item = document.createElement('div');
-    item.className = 'chat-hist-item' + (s.id === sessionsState.activeSessionId ? ' active' : '');
-    item.onclick = () => switchToSession(s.id);
-
-    const icon = document.createElement('div');
-    icon.className = 'chat-hist-icon';
-    icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>`;
-
-    const info = document.createElement('div');
-    info.className = 'chat-hist-info';
-    const title = document.createElement('div');
-    title.className = 'chat-hist-title';
-    title.textContent = s.title || 'Nayi Chat';
-    const meta = document.createElement('div');
-    meta.className = 'chat-hist-meta';
-    const snip = snippets && snippets.get(s.id);
-    if (snip) {
-      meta.className += ' chat-hist-snippet';
-      meta.textContent = snip;
-    } else {
-      meta.textContent = `${s.messages.length} messages · ${timeAgo(s.updatedAt)}`;
-    }
-    info.appendChild(title);
-    info.appendChild(meta);
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'chat-hist-delete';
-    delBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>`;
-    delBtn.onclick = (e) => {
-      e.stopPropagation();
-      vibrate(12);
-      if (confirm(`"${s.title}" delete karein? Ye wapas nahi aayega.`)) {
-        deleteSession(s.id);
-      }
-    };
-
-    item.appendChild(icon);
-    item.appendChild(info);
-    item.appendChild(delBtn);
-    list.appendChild(item);
-  });
 }
 
 // ── CHROME-STYLE TAB SWITCHER ──
@@ -1545,13 +1458,24 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ── ATTACH MENU (files / folder / zip picker) ──
+// ── ATTACH SHEET (files / folder / zip / env picker) ──
+// Claude-style full-screen bottom sheet now, not a small popover — the
+// scrim div (#attach-sheet-scrim) sits behind it and its own onclick
+// already calls hideAttachMenu(), so this listener is just a second,
+// harmless line of defense for stray taps that land outside both the
+// sheet and the scrim (e.g. a hardware back gesture region on some
+// devices) rather than the primary close mechanism.
 function toggleAttachMenu() {
   const menu = document.getElementById('attach-menu');
+  const scrim = document.getElementById('attach-sheet-scrim');
+  const opening = !menu.classList.contains('show');
   menu.classList.toggle('show');
+  scrim.classList.toggle('show', opening);
+  if (opening) vibrate(8);
 }
 function hideAttachMenu() {
   document.getElementById('attach-menu').classList.remove('show');
+  document.getElementById('attach-sheet-scrim').classList.remove('show');
 }
 document.addEventListener('click', (e) => {
   const menu = document.getElementById('attach-menu');

@@ -2126,35 +2126,102 @@
   .clip-btn:active { color: var(--accent-2); }
   .clip-btn svg { width: 19px; height: 19px; }
 
-  /* ── ATTACH MENU (popover above the chatbar) ── */
-  .attach-menu {
+  /* ── ATTACH SHEET (Claude-style "Add to chat" bottom sheet) ──
+     Same slide-up-from-bottom pattern as .card-details-sheet above:
+     fixed-position scrim + a bottom-anchored panel with a drag handle.
+     Replaces the old small popover-above-the-clip-button menu. */
+  .attach-sheet-scrim {
     display: none;
-    flex-direction: column;
-    gap: 2px;
-    margin: 0 14px 8px;
-    padding: 6px;
-    background: rgba(15,26,28,0.92);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--border-2);
-    border-radius: var(--radius-md);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.4);
+    position: fixed; inset: 0;
+    z-index: 400;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(2px);
   }
-  .attach-menu.show { display: flex; }
-  .attach-menu-item {
+  .attach-sheet-scrim.show { display: block; }
+
+  .attach-sheet {
+    display: none;
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 401;
+    background: var(--bg-1, #10181c);
+    border-top: 1px solid var(--border-2);
+    border-radius: 18px 18px 0 0;
+    padding: 10px 18px max(18px, env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 30px rgba(0,0,0,0.4);
+  }
+  .attach-sheet.show { display: block; }
+  .attach-sheet-handle {
+    width: 36px; height: 4px;
+    background: var(--border-2);
+    border-radius: 3px;
+    margin: 4px auto 14px;
+  }
+  .attach-sheet-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text, #eaf2f2);
+    text-align: center;
+    margin-bottom: 18px;
+  }
+
+  /* 3-across icon grid — Files / Folder / Zip, matching the primary-
+     actions grid in Claude's own attach sheet (Camera/Photos/Files). */
+  .attach-sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .attach-sheet-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 8px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.04);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s;
+  }
+  .attach-sheet-tile:active { background: rgba(54,209,255,0.12); }
+  .attach-sheet-tile-icon {
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    color: var(--accent-2);
+  }
+  .attach-sheet-tile-icon svg { width: 20px; height: 20px; }
+  .attach-sheet-tile-label { font-size: 13px; font-weight: 500; color: var(--text, #eaf2f2); }
+
+  /* Full-width row — .env import, a less-common action that would
+     crowd a 4th grid tile; matches Claude's toggle-row treatment
+     (e.g. its "Web search" row) instead. */
+  .attach-sheet-row {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
-    border-radius: 10px;
+    padding: 12px 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
     cursor: pointer;
-    transition: background 0.12s;
     -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s;
   }
-  .attach-menu-item:active { background: rgba(54,209,255,0.1); }
-  .attach-menu-item svg { width: 20px; height: 20px; color: var(--accent-2); flex-shrink: 0; }
-  .attach-menu-label { font-size: 13.5px; font-weight: 500; color: var(--text); }
-  .attach-menu-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .attach-sheet-row:active { background: rgba(54,209,255,0.1); }
+  .attach-sheet-row-icon {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    color: var(--accent-2);
+  }
+  .attach-sheet-row-icon svg { width: 18px; height: 18px; }
+  .attach-sheet-row-text { flex: 1; min-width: 0; }
+  .attach-sheet-row-label { font-size: 13.5px; font-weight: 500; color: var(--text, #eaf2f2); }
+  .attach-sheet-row-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
 
   #userInput {
     flex: 1;
