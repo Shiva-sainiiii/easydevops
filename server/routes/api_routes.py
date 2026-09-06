@@ -13,10 +13,10 @@ from server.config import OPENROUTER_KEY
 from server.auth import current_user
 from server.db import decrypt_token, get_user_vercel_token, get_user_netlify_token, get_user_render_token
 from server.security import safe_jsonify, redact, safe_repo_path, UnsafePathError
-from server.providers.github import gh_api, get_file_sha
-from server.providers.vercel import vc_api, vercel_find_project_by_repo, VERCEL_TERMINAL_STATES
-from server.providers.netlify import nl_api
-from server.providers.render import rd_api
+from server.providers.github import gh_api, get_file_sha, gh_list_all_repos
+from server.providers.vercel import vc_api, vercel_find_project_by_repo, vercel_list_all_projects, VERCEL_TERMINAL_STATES
+from server.providers.netlify import nl_api, nl_list_all_sites
+from server.providers.render import rd_api, rd_list_all_services
 from server.commands.ai_fallback import OPENROUTER_MODEL
 from server.commands.confirmation import confirm_token, build_confirmation
 from server.commands.bulk_actions import (
@@ -32,10 +32,10 @@ def api_list_repos():
     if not user:
         return safe_jsonify({"repos": []})
     gh_token = decrypt_token(user["github_token_encrypted"])
-    r = gh_api("GET", "/user/repos?per_page=100&sort=updated&affiliation=owner", gh_token)
-    if r.status_code != 200:
+    repos, r = gh_list_all_repos(gh_token)
+    if r is None or r.status_code != 200:
         return safe_jsonify({"repos": []})
-    names = [rp["name"] for rp in r.json()]
+    names = [rp["name"] for rp in repos]
     return safe_jsonify({"repos": names})
 
 
@@ -54,10 +54,10 @@ def api_list_vercel_projects():
     vc_token = get_user_vercel_token(user)
     if not vc_token:
         return safe_jsonify({"projects": []})
-    r = vc_api("GET", "/v9/projects", vc_token)
-    if r.status_code != 200:
+    projects, r = vercel_list_all_projects(vc_token)
+    if r is None or r.status_code != 200:
         return safe_jsonify({"projects": []})
-    names = [p["name"] for p in r.json().get("projects", [])]
+    names = [p["name"] for p in projects]
     return safe_jsonify({"projects": names})
 
 
@@ -104,10 +104,10 @@ def api_list_netlify_sites():
     nl_token = get_user_netlify_token(user)
     if not nl_token:
         return safe_jsonify({"sites": []})
-    r = nl_api("GET", "/sites?per_page=50", nl_token)
-    if r.status_code != 200:
+    sites, r = nl_list_all_sites(nl_token)
+    if r is None or r.status_code != 200:
         return safe_jsonify({"sites": []})
-    names = [s["name"] for s in r.json()]
+    names = [s["name"] for s in sites]
     return safe_jsonify({"sites": names})
 
 
@@ -127,15 +127,15 @@ def api_list_render_services():
     rd_token = get_user_render_token(user)
     if not rd_token:
         return safe_jsonify({"services": []})
-    r = rd_api("GET", "/services?limit=50", rd_token)
-    if r.status_code != 200:
+    entries, r = rd_list_all_services(rd_token)
+    if r is None or r.status_code != 200:
         return safe_jsonify({"services": []})
     # Render's list response wraps each entry as {"service": {...}} in
     # some API versions and returns the service object directly in
     # others — same defensive unwrap RENDER_LIST_SERVICES already uses
     # in executor.py, kept consistent here rather than assuming one shape.
     items = []
-    for entry in r.json():
+    for entry in entries:
         svc = entry.get("service", entry)
         if svc.get("name") and svc.get("id"):
             items.append(f"{svc['name']} ({svc['id']})")

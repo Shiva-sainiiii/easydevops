@@ -3582,7 +3582,10 @@ const ACTIVITY_LIST_CONFIG = {
 };
 
 function richBubbleBadgeFor(entry) {
-  if (entry.action === 'list_files' || entry.action === 'read_file') return 'github';
+  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info') return 'github';
+  if (entry.action === 'vercel_deployments' || entry.action === 'vercel_env') return 'vercel';
+  if (entry.action === 'netlify_site_info' || entry.action === 'netlify_env') return 'netlify';
+  if (entry.action === 'render_env') return 'render';
   const cfg = ACTIVITY_LIST_CONFIG[entry.action];
   return cfg ? cfg.badge : null;
 }
@@ -3603,6 +3606,34 @@ function buildRichBubbleNode(entry) {
     // highlighting operate on actual file content, not fence markers.
     const rawContent = entry.fileContent != null ? entry.fileContent : replyText;
     return buildReadFileBubble(entry.repo, entry.path, rawContent);
+  }
+
+  if (entry.action === 'code_generate' && Array.isArray(entry.files) && entry.files.length) {
+    return buildCodeGenDiffBubble(entry.reply != null ? entry.reply : replyText, entry.files, entry.repo, entry.repo_link);
+  }
+
+  if (entry.action === 'vercel_deployments' && Array.isArray(entry.deployments) && entry.deployments.length) {
+    return buildDeploymentsListBubble(entry.project_name, entry.deployments);
+  }
+
+  if (entry.action === 'repo_info' && entry.repo_info) {
+    return buildRepoInfoBubble(entry.repo_info);
+  }
+
+  if (entry.action === 'netlify_site_info' && entry.site_info) {
+    return buildSiteInfoBubble(entry.site_info);
+  }
+
+  if (entry.action === 'vercel_env' && Array.isArray(entry.env_vars) && entry.env_vars.length) {
+    return buildEnvVarsBubble('vercel', entry.project_name, entry.env_vars);
+  }
+
+  if (entry.action === 'netlify_env' && Array.isArray(entry.env_vars) && entry.env_vars.length) {
+    return buildEnvVarsBubble('netlify', entry.site_name, entry.env_vars);
+  }
+
+  if (entry.action === 'render_env' && Array.isArray(entry.env_vars) && entry.env_vars.length) {
+    return buildEnvVarsBubble('render', entry.service_id, entry.env_vars);
   }
 
   const activityCfg = ACTIVITY_LIST_CONFIG[entry.action];
@@ -3679,6 +3710,345 @@ function buildReadFileBubble(repo, filePath, content) {
   actionsRow.appendChild(editBtn);
 
   wrap.appendChild(actionsRow);
+
+  return wrap;
+}
+
+// ── CODE_GENERATE RESULT BUBBLE: per-file line diff instead of a bare
+// file-touched list. Reuses computeLineDiff/diffLineHtml (the same LCS
+// diff engine the manual inline editor's "Review changes" pane uses) —
+// see the block comment above computeLineDiff for how that works. Each
+// file gets its own collapsed-by-default section (multi-file AI edits
+// commonly touch 3-8 files at once; showing every diff expanded by
+// default would make the chat bubble enormous) with a +added/-removed
+// summary in the header so you know what's inside before expanding.
+function buildCodeGenDiffBubble(replyText, files, repo, repoLink) {
+  const wrap = document.createElement('div');
+  wrap.className = 'codegen-diff-bubble';
+
+  if (replyText) {
+    const summaryText = document.createElement('div');
+    summaryText.className = 'codegen-reply-text';
+    summaryText.innerHTML = renderMarkdown(replyText);
+    wrap.appendChild(summaryText);
+  }
+
+  files.forEach((f, idx) => {
+    const path = f.path || `file-${idx + 1}`;
+    const before = f.before || '';
+    const after = f.after || '';
+    const isNew = before === '';
+
+    const section = document.createElement('div');
+    section.className = 'codegen-file-section';
+
+    const diff = computeLineDiff(before, after);
+    const added = diff.filter(d => d.type === 'add').length;
+    const removed = diff.filter(d => d.type === 'del').length;
+
+    const header = document.createElement('button');
+    header.type = 'button';
+    header.className = 'codegen-file-header';
+    header.innerHTML = `
+      <span class="codegen-file-caret">${iconExpand()}</span>
+      <span class="codegen-file-path">${isNew ? '🆕 ' : ''}${escHtml(path)}</span>
+      <span class="codegen-file-stats"><span class="plus">+${added}</span> <span class="minus">-${removed}</span></span>
+    `;
+
+    const body = document.createElement('div');
+    body.className = 'codegen-file-diff';
+    body.style.display = 'none';
+
+    let rendered = false;
+    header.onclick = () => {
+      const expanded = body.style.display !== 'none';
+      body.style.display = expanded ? 'none' : 'block';
+      section.classList.toggle('expanded', !expanded);
+      if (!rendered && !expanded) {
+        renderCodeGenFileDiff(body, diff);
+        rendered = true;
+      }
+    };
+
+    section.appendChild(header);
+    section.appendChild(body);
+    wrap.appendChild(section);
+
+    // First file (most likely the one the user cares about most) opens
+    // expanded by default; the rest stay collapsed to keep the bubble
+    // scannable for a typical 3-8 file multi-file edit.
+    if (idx === 0) {
+      header.click();
+    }
+  });
+
+  if (repo && repoLink) {
+    const link = document.createElement('a');
+    link.className = 'codegen-repo-link';
+    link.href = repoLink;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = `🔗 ${repo} par dekho`;
+    wrap.appendChild(link);
+  }
+
+  return wrap;
+}
+
+// Same context-collapse behavior as the inline editor's renderDiffPane
+// (unchanged runs over CONTEXT_COLLAPSE_THRESHOLD lines only show their
+// first/last CONTEXT_EDGE lines) — factored out so both the manual
+// editor's diff pane and this chat bubble render identically instead of
+// keeping two slightly-different copies of the same collapsing logic.
+function renderCodeGenFileDiff(container, diff) {
+  if (diff.length === 1 && diff[0].type === 'note') {
+    container.innerHTML = `<div class="diff-empty-note">${escHtml(diff[0].text)}</div>`;
+    return;
+  }
+  const hasChanges = diff.some(d => d.type === 'add' || d.type === 'del');
+  if (!hasChanges) {
+    container.innerHTML = `<div class="diff-empty-note">Koi change nahi hai.</div>`;
+    return;
+  }
+
+  const CONTEXT_EDGE = 3;
+  const CONTEXT_COLLAPSE_THRESHOLD = 8;
+  let html = '';
+  let ctxRun = [];
+
+  function flushCtxRun() {
+    if (ctxRun.length === 0) return;
+    if (ctxRun.length <= CONTEXT_COLLAPSE_THRESHOLD) {
+      for (const line of ctxRun) html += diffLineHtml('ctx', line);
+    } else {
+      for (const line of ctxRun.slice(0, CONTEXT_EDGE)) html += diffLineHtml('ctx', line);
+      html += `<div class="diff-line diff-line-ctx"><span class="diff-line-marker"> </span>… ${ctxRun.length - CONTEXT_EDGE * 2} unchanged lines …</div>`;
+      for (const line of ctxRun.slice(-CONTEXT_EDGE)) html += diffLineHtml('ctx', line);
+    }
+    ctxRun = [];
+  }
+
+  for (const d of diff) {
+    if (d.type === 'ctx') {
+      ctxRun.push(d.text);
+    } else {
+      flushCtxRun();
+      html += diffLineHtml(d.type, d.text);
+    }
+  }
+  flushCtxRun();
+  container.innerHTML = html;
+}
+
+// ── VERCEL DEPLOYMENTS LIST BUBBLE (tap-to-rollback) ──
+// Reuses the same .activity-card/.activity-status visual classes the
+// repo/vercel/netlify/render list grids use (see buildActivityListBubble)
+// for a consistent look, but as its own standalone builder rather than
+// going through ACTIVITY_LIST_CONFIG — deployments aren't a "resource
+// with a name + live URL" the way repos/projects/sites/services are, so
+// the bulk-select/details-sheet machinery built around that shape
+// doesn't apply here. Tapping a card resends "rollback {project} to
+// {id}" as a normal chat message — same one-tap-resend pattern
+// appendDeployAction already uses elsewhere.
+function buildDeploymentsListBubble(projectName, deployments) {
+  const wrap = document.createElement('div');
+  wrap.className = 'activity-list-bubble';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'activity-list-hdr';
+  const hdrText = document.createElement('span');
+  hdrText.textContent = `${projectName || 'Project'} ki recent deployments`;
+  hdr.appendChild(hdrText);
+  wrap.appendChild(hdr);
+
+  const grid = document.createElement('div');
+  grid.className = 'activity-grid';
+
+  deployments.forEach(dep => {
+    const state = (dep.state || 'UNKNOWN').toUpperCase();
+    const status = state === 'READY' ? { state: 'live', label: 'Ready' }
+      : state === 'ERROR' ? { state: 'error', label: 'Error' }
+      : state === 'BUILDING' || state === 'QUEUED' || state === 'INITIALIZING' ? { state: 'building', label: 'Building' }
+      : { state: 'neutral', label: state };
+
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    card.onclick = () => {
+      if (!projectName) return;
+      resendMessage(`rollback ${projectName} to ${dep.id}`);
+    };
+
+    const icon = document.createElement('div');
+    icon.className = 'activity-card-icon';
+    icon.textContent = '▲';
+
+    const main = document.createElement('div');
+    main.className = 'activity-card-main';
+    const title = document.createElement('div');
+    title.className = 'activity-card-title';
+    title.textContent = dep.id || 'unknown';
+    const sub = document.createElement('div');
+    sub.className = 'activity-card-sub';
+    const ageText = dep.age_min != null
+      ? (dep.age_min < 120 ? `${dep.age_min}m pehle` : `${Math.floor(dep.age_min / 60)}h pehle`)
+      : '';
+    sub.textContent = ageText || 'Tap to rollback';
+    main.appendChild(title);
+    main.appendChild(sub);
+
+    const statusEl = document.createElement('span');
+    statusEl.className = `activity-status ${status.state}`;
+    statusEl.innerHTML = `<span class="status-dot-sm"></span>${status.label}`;
+
+    card.appendChild(icon);
+    card.appendChild(main);
+    card.appendChild(statusEl);
+    grid.appendChild(card);
+  });
+
+  wrap.appendChild(grid);
+
+  const hint = document.createElement('div');
+  hint.className = 'read-file-more-note';
+  hint.textContent = 'Kisi deployment par tap karo rollback karne ke liye.';
+  wrap.appendChild(hint);
+
+  return wrap;
+}
+
+// ── REPO INFO CARD ──
+function buildRepoInfoBubble(info) {
+  const wrap = document.createElement('div');
+  wrap.className = 'info-card';
+
+  const title = document.createElement('div');
+  title.className = 'info-card-title';
+  title.textContent = `📁 ${info.name}`;
+  wrap.appendChild(title);
+
+  if (info.description) {
+    const desc = document.createElement('div');
+    desc.className = 'info-card-desc';
+    desc.textContent = info.description;
+    wrap.appendChild(desc);
+  }
+
+  const stats = document.createElement('div');
+  stats.className = 'info-card-stats';
+  const statPairs = [
+    ['⭐', info.stars], ['🍴', info.forks], ['👁️', info.watchers],
+  ];
+  statPairs.forEach(([icon, val]) => {
+    const stat = document.createElement('span');
+    stat.className = 'info-card-stat';
+    stat.textContent = `${icon} ${val}`;
+    stats.appendChild(stat);
+  });
+  wrap.appendChild(stats);
+
+  const rows = document.createElement('div');
+  rows.className = 'info-card-rows';
+  const rowData = [
+    ['Visibility', info.visibility],
+    ['Language', info.language],
+    ['Default branch', info.default_branch],
+    ['Last updated', timeAgoShort(info.updated_at) ? `${timeAgoShort(info.updated_at)} pehle` : info.updated_at],
+  ].filter(([, v]) => v);
+  rowData.forEach(([label, val]) => {
+    const row = document.createElement('div');
+    row.className = 'info-card-row';
+    row.innerHTML = `<span class="info-card-row-label">${escHtml(label)}</span><span class="info-card-row-val">${escHtml(String(val))}</span>`;
+    rows.appendChild(row);
+  });
+  wrap.appendChild(rows);
+
+  if (info.url) {
+    const link = document.createElement('a');
+    link.className = 'codegen-repo-link';
+    link.href = info.url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = `🔗 ${info.url.replace(/^https?:\/\//, '')}`;
+    wrap.appendChild(link);
+  }
+
+  return wrap;
+}
+
+// ── NETLIFY SITE INFO CARD ──
+function buildSiteInfoBubble(info) {
+  const wrap = document.createElement('div');
+  wrap.className = 'info-card';
+
+  const title = document.createElement('div');
+  title.className = 'info-card-title';
+  title.textContent = `🌐 ${info.name}`;
+  wrap.appendChild(title);
+
+  const rows = document.createElement('div');
+  rows.className = 'info-card-rows';
+  const rowData = [
+    ['Site ID', info.id],
+    ['Custom domain', info.custom_domain],
+    ['Last updated', timeAgoShort(info.updated_at) ? `${timeAgoShort(info.updated_at)} pehle` : info.updated_at],
+  ].filter(([, v]) => v);
+  rowData.forEach(([label, val]) => {
+    const row = document.createElement('div');
+    row.className = 'info-card-row';
+    row.innerHTML = `<span class="info-card-row-label">${escHtml(label)}</span><span class="info-card-row-val">${escHtml(String(val))}</span>`;
+    rows.appendChild(row);
+  });
+  wrap.appendChild(rows);
+
+  if (info.url) {
+    const link = document.createElement('a');
+    link.className = 'codegen-repo-link';
+    link.href = info.url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = `🔗 ${info.url.replace(/^https?:\/\//, '')}`;
+    wrap.appendChild(link);
+  }
+
+  return wrap;
+}
+
+// ── ENV VARS LIST BUBBLE ──
+// Shared across Vercel/Netlify (keys only — values stay encrypted at
+// rest on those platforms, same as the existing text replies already
+// said) and Render (keys AND values — Render's API returns plaintext
+// values, unlike the other two).
+function buildEnvVarsBubble(platform, targetName, envVars) {
+  const wrap = document.createElement('div');
+  wrap.className = 'info-card';
+
+  const title = document.createElement('div');
+  title.className = 'info-card-title';
+  const platformIcon = platform === 'vercel' ? '▲' : platform === 'netlify' ? '🌐' : '⚙️';
+  title.textContent = `${platformIcon} Env vars${targetName ? ` — ${targetName}` : ''}`;
+  wrap.appendChild(title);
+
+  if (platform !== 'render') {
+    const note = document.createElement('div');
+    note.className = 'info-card-desc';
+    note.textContent = 'Values encrypted hai, sirf keys dikha sakta hu.';
+    wrap.appendChild(note);
+  }
+
+  const rows = document.createElement('div');
+  rows.className = 'info-card-rows env-var-rows';
+  envVars.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'info-card-row';
+    const targets = Array.isArray(e.target) && e.target.length ? ` <span class="env-var-targets">(${e.target.join(', ')})</span>` : '';
+    if (platform === 'render' && e.value != null) {
+      row.innerHTML = `<span class="info-card-row-label">${escHtml(e.key)}</span><span class="info-card-row-val env-var-value">${escHtml(e.value)}</span>`;
+    } else {
+      row.innerHTML = `<span class="info-card-row-label">${escHtml(e.key)}${targets}</span>`;
+    }
+    rows.appendChild(row);
+  });
+  wrap.appendChild(rows);
 
   return wrap;
 }
@@ -4860,13 +5230,13 @@ async function sendMsg() {
       return;
     }
 
-    // ── RICH BUBBLES: list_files / read_file / list_repos / vercel_list /
-    // netlify_list / render_list → structured DOM widgets instead of a
-    // plain text block. buildRichBubbleNode() (single source of truth,
-    // shared with the page-load restore path) decides whether this action
-    // has a widget; falls through to the normal text bubble below if not,
-    // or if the underlying array is missing/empty (server already sends a
-    // friendly "koi X nahi mila" reply for the empty case).
+    // ── RICH BUBBLES: list_files / read_file / code_generate / list_repos /
+    // vercel_list / netlify_list / render_list → structured DOM widgets
+    // instead of a plain text block. buildRichBubbleNode() (single source
+    // of truth, shared with the page-load restore path) decides whether
+    // this action has a widget; falls through to the normal text bubble
+    // below if not, or if the underlying array is missing/empty (server
+    // already sends a friendly "koi X nahi mila" reply for the empty case).
     {
       const richNode = buildRichBubbleNode(data);
       if (richNode) {
@@ -4905,6 +5275,18 @@ async function sendMsg() {
           // `reply` string, which would show fence markers as if they
           // were file content.
           fileContent: data.action === 'read_file' ? data.content : undefined,
+          // code_generate's per-file before/after pairs — needed so the
+          // diff bubble survives a page refresh instead of degrading to
+          // the plain-text reply (which only lists filenames, not diffs).
+          files: data.action === 'code_generate' ? data.files : undefined,
+          repo_link: data.action === 'code_generate' ? data.repo_link : undefined,
+          // Structured single-item payloads (repo info, site info, env
+          // var lists, deployment list) — same "reply stays the text
+          // fallback" pattern as everything else above, so these cards
+          // survive a page refresh too instead of degrading to plain text.
+          project_name: data.project_name, site_name: data.site_name, service_id: data.service_id,
+          deployments: data.deployments, repo_info: data.repo_info, site_info: data.site_info,
+          env_vars: data.env_vars,
         });
         history.push({ role: 'assistant', content: data.reply });
         scrollToBottom();

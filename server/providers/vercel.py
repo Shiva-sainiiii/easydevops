@@ -12,6 +12,32 @@ def vc_api(method, endpoint, vc_token, **kwargs):
     return requests.request(method, url, headers=headers, timeout=20, **kwargs)
 
 
+def vercel_list_all_projects(vc_token, limit=100, max_total=300):
+    """Fetch every Vercel project, looping on the `pagination.next` cursor
+    /v9/projects returns in the response body until it comes back null.
+    Capped at max_total for the same reason as gh_list_all_repos.
+
+    Returns (projects, r) — r is the last response, for the caller's
+    existing status-code branching.
+    """
+    endpoint = f"/v9/projects?limit={limit}"
+    all_projects = []
+    r = None
+    while endpoint:
+        r = vc_api("GET", endpoint, vc_token)
+        if r.status_code != 200:
+            break
+        data = r.json()
+        all_projects.extend(data.get("projects", []))
+        if len(all_projects) >= max_total:
+            break
+        next_cursor = (data.get("pagination") or {}).get("next")
+        if not next_cursor:
+            break
+        endpoint = f"/v9/projects?limit={limit}&until={next_cursor}"
+    return all_projects[:max_total], r
+
+
 def vercel_find_project(project_name, vc_token):
     r = vc_api("GET", "/v9/projects", vc_token)
     if r.status_code != 200:

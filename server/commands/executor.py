@@ -11,10 +11,10 @@ import json
 import base64
 import requests
 
-from server.providers.github import gh_api, get_file_sha
-from server.providers.vercel import vc_api, vercel_find_project, vercel_find_project_by_repo, vercel_poll_deployment, vercel_project_live_url, VERCEL_TERMINAL_STATES
-from server.providers.netlify import nl_api, netlify_find_site
-from server.providers.render import rd_api
+from server.providers.github import gh_api, get_file_sha, gh_list_all_repos
+from server.providers.vercel import vc_api, vercel_find_project, vercel_find_project_by_repo, vercel_poll_deployment, vercel_project_live_url, vercel_list_all_projects, VERCEL_TERMINAL_STATES
+from server.providers.netlify import nl_api, netlify_find_site, nl_list_all_sites
+from server.providers.render import rd_api, rd_list_all_services
 from server.security import safe_repo_path, UnsafePathError
 from server.commands.render_blueprint import generate_render_yaml
 from server.commands.render_create_service import create_render_service
@@ -48,9 +48,8 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 return {"reply": f"❌ Delete Error: {msg}", "action": "error"}
 
         elif cmd == "LIST_REPOS":
-            r = gh_api("GET", f"/user/repos?per_page=20&sort=updated&affiliation=owner", gh_token)
-            if r.status_code == 200:
-                repos = r.json()
+            repos, r = gh_list_all_repos(gh_token)
+            if r is not None and r.status_code == 200:
                 if not repos:
                     return {"reply": "Koi repo nahi hai abhi.", "action": "list_repos", "repos": []}
                 lines = [f"📁 **{rp['name']}** — ⭐{rp['stargazers_count']} — `{rp['visibility']}`\n🔗 {rp['html_url']}" for rp in repos]
@@ -172,7 +171,21 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                          f"🔗 {d['html_url']}")
                 if d.get("description"):
                     reply += f"\n📝 {d['description']}"
-                return {"reply": reply, "action": "repo_info"}
+                # Structured fields alongside the markdown reply, for the
+                # frontend's repo-info card (buildRepoInfoBubble in
+                # script.js) — same "reply stays the fallback" pattern
+                # LIST_REPOS already uses for older clients / AI-narration.
+                return {"reply": reply, "action": "repo_info", "repo": repo, "repo_info": {
+                    "name": d["name"], "url": d["html_url"],
+                    "stars": d.get("stargazers_count", 0),
+                    "forks": d.get("forks_count", 0),
+                    "watchers": d.get("watchers_count", 0),
+                    "visibility": d.get("visibility", "public"),
+                    "updated_at": d.get("updated_at"),
+                    "description": d.get("description"),
+                    "language": d.get("language"),
+                    "default_branch": d.get("default_branch"),
+                }}
             else:
                 return {"reply": f"❌ Repo info fetch nahi hui: {r.json().get('message','')}", "action": "error"}
 
@@ -183,9 +196,8 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
         elif cmd == "VERCEL_LIST_PROJECTS":
             if not vc_token:
                 return {"reply": "🔒 Pehle Vercel connect karo — user menu me 'Connect Vercel' dabao.", "action": "vercel_auth_required"}
-            r = vc_api("GET", "/v9/projects", vc_token)
-            if r.status_code == 200:
-                projects = r.json().get("projects", [])
+            projects, r = vercel_list_all_projects(vc_token)
+            if r is not None and r.status_code == 200:
                 if not projects:
                     return {"reply": "Koi Vercel project nahi mila.", "action": "vercel_list", "projects": []}
                 # readyState of the most recent deployment maps to the
@@ -212,10 +224,10 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                     })
                 return {"reply": f"Tere {len(projects)} Vercel projects:\n\n" + "\n\n".join(lines),
                         "action": "vercel_list", "projects": project_cards}
-            elif r.status_code in (401, 403):
+            elif r is not None and r.status_code in (401, 403):
                 return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
             else:
-                return {"reply": f"❌ Vercel projects fetch nahi hue: {r.text[:200]}", "action": "error"}
+                return {"reply": f"❌ Vercel projects fetch nahi hue: {r.text[:200] if r is not None else 'connection error'}", "action": "error"}
 
         elif cmd == "VERCEL_IMPORT_REPO":
             if not vc_token:
@@ -412,10 +424,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             if r.status_code == 200:
                 envs = r.json().get("envs", [])
                 if not envs:
-                    return {"reply": f"Project `{project_name}` me koi env vars nahi hai.", "action": "vercel_env"}
+                    return {"reply": f"Project `{project_name}` me koi env vars nahi hai.", "action": "vercel_env", "env_vars": []}
                 lines = [f"`{e['key']}` — targets: {', '.join(e.get('target', []))}" for e in envs]
                 return {"reply": f"Env vars for `{project_name}` (values encrypted, sirf keys dikha sakta hu):\n\n" + "\n".join(lines),
-                        "action": "vercel_env"}
+                        "action": "vercel_env", "project_name": project_name,
+                        "env_vars": [{"key": e["key"], "target": e.get("target", [])} for e in envs]}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Vercel token invalid ya expire ho gaya. Dubara connect karo.", "action": "vercel_auth_required"}
             else:
@@ -474,9 +487,8 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
         elif cmd == "NETLIFY_LIST_SITES":
             if not nl_token:
                 return {"reply": "🔒 Pehle Netlify connect karo — user menu me 'Connect Netlify' dabao.", "action": "netlify_auth_required"}
-            r = nl_api("GET", "/sites?per_page=50", nl_token)
-            if r.status_code == 200:
-                sites = r.json()
+            sites, r = nl_list_all_sites(nl_token)
+            if r is not None and r.status_code == 200:
                 if not sites:
                     return {"reply": "Koi Netlify site nahi mili.", "action": "netlify_list", "sites": []}
                 lines = [f"🌐 **{s['name']}**\n🔗 {s.get('url', '')}" for s in sites]
@@ -485,10 +497,10 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                             "name": s["name"], "id": s["id"], "url": s.get("url", ""),
                             "status": s.get("state", "unknown"),
                         } for s in sites]}
-            elif r.status_code in (401, 403):
+            elif r is not None and r.status_code in (401, 403):
                 return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
             else:
-                return {"reply": f"❌ Netlify sites fetch nahi hui: {r.text[:200]}", "action": "error"}
+                return {"reply": f"❌ Netlify sites fetch nahi hui: {r.text[:200] if r is not None else 'connection error'}", "action": "error"}
 
         elif cmd == "NETLIFY_GET_SITE_INFO":
             if not nl_token:
@@ -503,7 +515,12 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                      f"🕓 Last updated: {site.get('updated_at', '')}")
             if site.get("custom_domain"):
                 reply += f"\n🌍 Custom domain: {site['custom_domain']}"
-            return {"reply": reply, "action": "netlify_site_info"}
+            return {"reply": reply, "action": "netlify_site_info", "site_name": site_name, "site_info": {
+                "name": site["name"], "id": site["id"], "url": site.get("url", ""),
+                "updated_at": site.get("updated_at"),
+                "custom_domain": site.get("custom_domain"),
+                "state": site.get("state", "unknown"),
+            }}
 
         elif cmd == "NETLIFY_DELETE_SITE":
             if not nl_token:
@@ -534,10 +551,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             if r.status_code == 200:
                 envs = r.json()
                 if not envs:
-                    return {"reply": f"Site `{site_name}` me koi env vars nahi hai.", "action": "netlify_env"}
+                    return {"reply": f"Site `{site_name}` me koi env vars nahi hai.", "action": "netlify_env", "env_vars": []}
                 lines = [f"`{e['key']}`" for e in envs]
                 return {"reply": f"Env vars for `{site_name}` (values encrypted, sirf keys dikha sakta hu):\n\n" + "\n".join(lines),
-                        "action": "netlify_env"}
+                        "action": "netlify_env", "site_name": site_name,
+                        "env_vars": [{"key": e["key"]} for e in envs]}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Netlify token invalid ya expire ho gaya. Dubara connect karo.", "action": "netlify_auth_required"}
             else:
@@ -582,9 +600,8 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
         elif cmd == "RENDER_LIST_SERVICES":
             if not rd_token:
                 return {"reply": "🔒 Pehle Render connect karo — user menu me 'Connect Render' dabao.", "action": "render_auth_required"}
-            r = rd_api("GET", "/services?limit=50", rd_token)
-            if r.status_code == 200:
-                items = r.json()
+            items, r = rd_list_all_services(rd_token)
+            if r is not None and r.status_code == 200:
                 if not items:
                     return {"reply": "Koi Render service nahi mila.", "action": "render_list", "services": []}
                 lines = []
@@ -614,10 +631,10 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                     })
                 return {"reply": f"Tere {len(items)} Render services:\n\n" + "\n\n".join(lines),
                         "action": "render_list", "services": services}
-            elif r.status_code in (401, 403):
+            elif r is not None and r.status_code in (401, 403):
                 return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
             else:
-                return {"reply": f"❌ Render services fetch nahi hue: {r.text[:200]}", "action": "error"}
+                return {"reply": f"❌ Render services fetch nahi hue: {r.text[:200] if r is not None else 'connection error'}", "action": "error"}
 
         elif cmd == "RENDER_GET_ENV":
             if not rd_token:
@@ -627,9 +644,11 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
             if r.status_code == 200:
                 items = r.json()
                 if not items:
-                    return {"reply": f"Service `{service_id}` me koi env vars nahi hai.", "action": "render_env"}
+                    return {"reply": f"Service `{service_id}` me koi env vars nahi hai.", "action": "render_env", "env_vars": []}
                 lines = [f"`{item['envVar']['key']}` = `{item['envVar']['value']}`" for item in items]
-                return {"reply": f"Env vars for `{service_id}`:\n\n" + "\n".join(lines), "action": "render_env"}
+                return {"reply": f"Env vars for `{service_id}`:\n\n" + "\n".join(lines), "action": "render_env",
+                        "service_id": service_id,
+                        "env_vars": [{"key": item["envVar"]["key"], "value": item["envVar"]["value"]} for item in items]}
             elif r.status_code in (401, 403):
                 return {"reply": "❌ Render token invalid ya expire ho gaya. Dubara connect karo.", "action": "render_auth_required"}
             else:

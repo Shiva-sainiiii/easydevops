@@ -292,6 +292,7 @@ def handle_code_generate(params, owner, gh_token):
     files = files[:MAX_CODEGEN_FILES]
     existing_set = set(existing_paths)
     file_map = {}
+    before_map = {}  # path -> original content (empty string for newly-created files)
     skipped = []
 
     for f in files:
@@ -310,6 +311,7 @@ def handle_code_generate(params, owner, gh_token):
         action = f.get("action")
         if action == "create" or path not in existing_set:
             file_map[path] = f.get("content") or ""
+            before_map[path] = ""
         elif action == "edit":
             edits = f.get("edits")
             if edits:
@@ -321,10 +323,18 @@ def handle_code_generate(params, owner, gh_token):
                 new_content, changed, missed = apply_file_edits(current, edits)
                 if changed:
                     file_map[path] = new_content
+                    before_map[path] = current
                 if missed and not changed:
                     skipped.append(path)
             elif f.get("content") is not None:
+                # Full-content edit path (short file / most-of-file rewrite,
+                # per the system prompt's rule 2) — still need the original
+                # for the diff view, so fetch it the same way the edits
+                # branch above does rather than leaving "before" blank.
+                r = gh_api("GET", f"/repos/{owner}/{repo}/contents/{path}", gh_token)
+                current = base64.b64decode(r.json()["content"]).decode("utf-8", errors="replace") if r.status_code == 200 else ""
                 file_map[path] = f["content"]
+                before_map[path] = current
 
     if not file_map:
         note = f"\n\n⚠️ In files ke edits apply nahi hue (snippet match nahi hua): {', '.join(skipped)}" if skipped else ""
@@ -339,7 +349,17 @@ def handle_code_generate(params, owner, gh_token):
     file_list = "\n".join(f"• {p}" for p in sorted(file_map.keys()))
     skip_note = f"\n\n⚠️ Skip hui (snippet match nahi hua): {', '.join(skipped)}" if skipped else ""
     reasoning_block = f"\n\n_{reasoning}_" if reasoning else ""
+    # `files` payload below feeds the frontend's per-file diff bubble
+    # (computeLineDiff in script.js) — before/after are the full contents
+    # already held in memory from the loop above, returned instead of
+    # discarded so the chat reply can show what actually changed instead
+    # of just which paths were touched.
     return {
         "reply": f"✅ {reply_text}{reasoning_block}\n\n**{n} file{'s' if n != 1 else ''}** → `{repo}`\n{file_list}{skip_note}\n\n🔗 {repo_link}",
-        "action": "create_file", "repo": repo, "file_count": n, "source": "hybrid",
+        "action": "code_generate", "repo": repo, "file_count": n, "source": "hybrid",
+        "files": [
+            {"path": p, "before": before_map.get(p, ""), "after": content}
+            for p, content in sorted(file_map.items())
+        ],
+        "repo_link": repo_link,
     }

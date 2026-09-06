@@ -2732,6 +2732,119 @@
   .read-fullscreen-btn:active { background: rgba(255,255,255,0.1); transform: scale(.97); }
   .read-fullscreen-btn svg { width: 13px; height: 13px; }
 
+  /* ── CODE_GENERATE RESULT BUBBLE: per-file collapsible diff ──
+     Reuses .diff-line/.diff-line-add/.diff-line-del/.diff-line-ctx/
+     .diff-empty-note from the inline editor's diff pane (defined above
+     under DIFF PREVIEW PANE) so both surfaces render diff lines
+     identically — only the container chrome below is new. */
+  .codegen-diff-bubble { display: flex; flex-direction: column; gap: 10px; }
+  .codegen-reply-text { font-size: 14px; line-height: 1.5; }
+  .codegen-file-section {
+    border: 1px solid var(--border-2);
+    border-radius: 9px;
+    overflow: hidden;
+    background: var(--bg-1);
+  }
+  .codegen-file-header {
+    width: 100%;
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 12px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .codegen-file-header:active { background: rgba(255,255,255,0.04); }
+  .codegen-file-caret {
+    flex-shrink: 0; display: inline-flex;
+    transition: transform .15s;
+    opacity: 0.6;
+  }
+  .codegen-file-caret svg { width: 12px; height: 12px; }
+  .codegen-file-section.expanded .codegen-file-caret { transform: rotate(45deg); }
+  .codegen-file-path {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .codegen-file-stats {
+    flex-shrink: 0;
+    font-size: 11px;
+    display: flex; gap: 6px;
+  }
+  .codegen-file-stats .plus { color: var(--green); }
+  .codegen-file-stats .minus { color: var(--red); }
+  .codegen-file-diff {
+    max-height: 380px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border-top: 1px solid var(--border-2);
+    padding: 6px 0;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+  }
+  .codegen-repo-link {
+    font-size: 12.5px;
+    color: var(--accent, #36d1ff);
+    text-decoration: none;
+    align-self: flex-start;
+  }
+  .codegen-repo-link:active { opacity: 0.7; }
+
+  /* ── GENERIC INFO CARD (repo info / site info / env vars) ──
+     Shared chrome for single-item structured replies — repo_info,
+     netlify_site_info, vercel_env/netlify_env/render_env. */
+  .info-card {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 12px 13px;
+    background: var(--bg-1);
+    border: 1px solid var(--border-2);
+    border-radius: 12px;
+  }
+  .info-card-title {
+    font-size: 14.5px; font-weight: 600; color: var(--text);
+  }
+  .info-card-desc {
+    font-size: 12.5px; color: var(--muted);
+    line-height: 1.4;
+  }
+  .info-card-stats {
+    display: flex; gap: 14px;
+  }
+  .info-card-stat {
+    font-size: 12.5px; color: var(--text);
+    font-family: var(--font-mono);
+  }
+  .info-card-rows {
+    display: flex; flex-direction: column;
+    border-top: 1px solid var(--border);
+  }
+  .info-card-row {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .info-card-row:last-child { border-bottom: none; }
+  .info-card-row-label {
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .info-card-row-val {
+    color: var(--text);
+    font-family: var(--font-mono);
+    text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .env-var-rows .info-card-row-label { font-family: var(--font-mono); color: var(--text); }
+  .env-var-targets { color: var(--muted); font-size: 11px; }
+  .env-var-value {
+    color: var(--yellow, #ffc857);
+    max-width: 60%;
+  }
+
   /* ── ENV VAR FORM (interactive bubble) ── */
   .env-form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
   .env-rows { display: flex; flex-direction: column; gap: 8px; }
