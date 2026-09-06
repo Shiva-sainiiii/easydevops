@@ -14,7 +14,7 @@ from server.auth import current_user
 from server.db import decrypt_token, get_user_vercel_token, get_user_netlify_token, get_user_render_token
 from server.security import safe_jsonify, redact, safe_repo_path, UnsafePathError
 from server.providers.github import gh_api, get_file_sha
-from server.providers.vercel import vc_api, VERCEL_TERMINAL_STATES
+from server.providers.vercel import vc_api, vercel_find_project_by_repo, VERCEL_TERMINAL_STATES
 from server.providers.netlify import nl_api
 from server.providers.render import rd_api
 from server.commands.ai_fallback import OPENROUTER_MODEL
@@ -59,6 +59,37 @@ def api_list_vercel_projects():
         return safe_jsonify({"projects": []})
     names = [p["name"] for p in r.json().get("projects", [])]
     return safe_jsonify({"projects": names})
+
+
+@api_bp.route("/api/vercel-repo-linked", methods=["GET"])
+def api_vercel_repo_linked():
+    """
+    Powers the post-upload chat shortcut's Deploy-vs-Import decision
+    (see appendPostUploadDeployAction in script.js). VERCEL_DEPLOY
+    requires an existing Vercel project already linked to the repo's
+    GitHub remote — a repo that's never been imported has no such
+    project, so the deploy call fails outright with "Pehle import kar"
+    (see executor.py's VERCEL_DEPLOY branch). This lets the frontend
+    check first and offer the button that will actually work instead of
+    one that's guaranteed to fail on a brand-new repo.
+
+    Silently reports {"linked": false} on any not-applicable state (no
+    session, no repo param, Vercel not connected) rather than erroring —
+    the caller only cares about the yes/no, and every one of those cases
+    means "can't currently be linked" anyway.
+    """
+    user = current_user()
+    repo = (request.args.get("repo") or "").strip()
+    if not user or not repo:
+        return safe_jsonify({"linked": False})
+    vc_token = get_user_vercel_token(user)
+    if not vc_token:
+        return safe_jsonify({"linked": False})
+    owner = user["github_login"]
+    proj = vercel_find_project_by_repo(f"{owner}/{repo}", vc_token)
+    if proj:
+        return safe_jsonify({"linked": True, "project_name": proj.get("name")})
+    return safe_jsonify({"linked": False})
 
 
 @api_bp.route("/api/netlify-sites", methods=["GET"])

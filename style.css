@@ -1807,7 +1807,11 @@
   .confirm-btn:disabled { opacity: .5; cursor: not-allowed; }
 
   /* ── POST-UPLOAD "DEPLOY TO VERCEL" SHORTCUT ── */
-  .post-upload-actions { margin-top: 12px; max-width: 360px; }
+  /* flex column + gap so this also works cleanly when two buttons are
+     appended into the same bubble (e.g. post-repo-create's "Upload
+     Files" + "Upload Zip") — previously relied on each button's own
+     width:100% to force a line-wrap, which left zero gap between them. */
+  .post-upload-actions { margin-top: 12px; max-width: 360px; display: flex; flex-direction: column; gap: 8px; }
   .post-upload-deploy-btn {
     width: 100%;
     padding: 10px 14px;

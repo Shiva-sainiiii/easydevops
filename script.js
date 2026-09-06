@@ -1567,6 +1567,15 @@ function onFilePicked(event) {
   const files = Array.from(event.target.files || []);
   event.target.value = ''; // allow picking the same file(s) again later
   if (!files.length) return;
+  // Set by the post-CREATE_REPO "Upload Files" shortcut button — repo is
+  // already known, so skip straight to the destination-folder step.
+  if (pendingShortcutRepo) {
+    const repo = pendingShortcutRepo;
+    pendingShortcutRepo = null;
+    lastUploadRepo = repo;
+    askUploadPath(files, repo);
+    return;
+  }
   askUploadRepo(files);
 }
 
@@ -1592,6 +1601,15 @@ function onZipPicked(event) {
   const file = files[0];
   if (!/\.zip$/i.test(file.name)) {
     addMessage('agent', '❌ Ye zip file nahi lag rahi. `.zip` extension chahiye.', 'error');
+    return;
+  }
+  // Set by the post-CREATE_REPO "Upload Zip" shortcut button — repo is
+  // already known, so skip straight to the destination-folder step.
+  if (pendingShortcutRepo) {
+    const repo = pendingShortcutRepo;
+    pendingShortcutRepo = null;
+    lastUploadRepo = repo;
+    askZipUploadPath(file, repo);
     return;
   }
   askZipUploadRepo(file);
@@ -4296,19 +4314,77 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
   return { wrap, bubble };
 }
 
-// ── POST-UPLOAD "DEPLOY TO VERCEL" SHORTCUT ──
+// ── POST-UPLOAD "DEPLOY / IMPORT TO VERCEL" SHORTCUT ──
 // After a successful GitHub push (single file, multi-file, or zip
-// extract-and-push), the very next thing most users do is deploy that
-// repo — so offer it right in the same success bubble instead of making
-// them go find the command. Only shown when Vercel is connected; the
-// button just fills+sends the existing "deploy {project_name} to
-// vercel" command sentence, so it goes through the normal VERCEL_DEPLOY
-// path (project-doesn't-exist-yet handling, confirm flow, etc. all stay
-// exactly as they already work for that command).
-function appendPostUploadDeployAction(bubbleRef, repo) {
+// extract-and-push), the very next thing most users do is get that repo
+// onto Vercel — so offer it right in the same success bubble instead of
+// making them go find the command. Only shown when Vercel is connected.
+//
+// Which button actually works depends on whether this repo has EVER
+// been imported into Vercel before:
+//   - already linked → "Deploy to Vercel" (VERCEL_DEPLOY just triggers a
+//     new build on the existing linked project)
+//   - never linked    → "Import to Vercel" (VERCEL_DEPLOY fails outright
+//     on a repo Vercel has never heard of — see executor.py's "Pehle
+//     import kar" error — so a brand-new repo, most commonly right
+//     after CREATE_REPO + first upload, needs Import first, not Deploy)
+// /api/vercel-repo-linked answers that so the button shown here always
+// actually works, instead of "Deploy" failing ~automatically on new repos.
+async function appendPostUploadDeployAction(bubbleRef, repo) {
   if (!bubbleRef || !repo) return;
   if (!(authedUser && authedUser.vercelConnected)) return;
-  appendDeployAction(bubbleRef, `Deploy ${repo} to Vercel →`, `deploy ${repo} to vercel`);
+
+  let linked = true; // safe fallback: pre-existing behavior if the check itself fails
+  try {
+    const res = await fetch(`/api/vercel-repo-linked?repo=${encodeURIComponent(repo)}`);
+    const data = await res.json();
+    linked = !!data.linked;
+  } catch (e) { /* keep fallback */ }
+
+  if (linked) {
+    appendDeployAction(bubbleRef, `Deploy ${repo} to Vercel →`, `deploy ${repo} to vercel`);
+  } else {
+    appendDeployAction(bubbleRef, `Import ${repo} to Vercel →`, `import ${repo} to vercel`);
+  }
+}
+
+// ── POST-CREATE-REPO "UPLOAD FILES / UPLOAD ZIP" SHORTCUTS ──
+// Right after a brand-new repo is created, the next thing every user
+// does is put something in it — so offer both upload paths directly in
+// the same success bubble instead of making them retype an upload
+// command or dig through the attach menu. Tapping a button opens the
+// normal OS file/zip picker, just pre-aimed at this repo: it skips
+// askUploadRepo/askZipUploadRepo's "which repo?" prompt (already known)
+// via pendingShortcutRepo below, and drops straight into the existing
+// askUploadPath / askZipUploadPath step — same underlying upload
+// pipeline as a manual upload, nothing duplicated.
+let pendingShortcutRepo = null;
+
+function appendPostRepoCreateActions(bubbleRef, repo) {
+  if (!bubbleRef || !repo) return;
+  const { bubble } = bubbleRef;
+  const actions = document.createElement('div');
+  actions.className = 'post-upload-actions';
+
+  const filesBtn = document.createElement('button');
+  filesBtn.className = 'post-upload-deploy-btn';
+  filesBtn.textContent = `📎 ${repo} me files upload karo →`;
+  filesBtn.onclick = () => {
+    pendingShortcutRepo = repo;
+    document.getElementById('fileInput').click();
+  };
+
+  const zipBtn = document.createElement('button');
+  zipBtn.className = 'post-upload-deploy-btn';
+  zipBtn.textContent = `🗜️ ${repo} me zip upload karo →`;
+  zipBtn.onclick = () => {
+    pendingShortcutRepo = repo;
+    document.getElementById('zipInput').click();
+  };
+
+  actions.appendChild(filesBtn);
+  actions.appendChild(zipBtn);
+  bubble.appendChild(actions);
 }
 
 // ── POST-ENV-SET "DEPLOY NOW" SHORTCUT ──
@@ -4880,7 +4956,15 @@ async function sendMsg() {
 
     const cls = actionColorFor(data.action);
     const msgRef = addMessage('agent', data.reply, cls, null, data.action);
-    if (data.action === 'vercel_env_set' && data.project_name) {
+    if (data.action === 'create_repo' && data.repo) {
+      appendPostRepoCreateActions(msgRef, data.repo);
+    } else if (data.action === 'vercel_import' && data.project_name) {
+      // Mirrors the post-upload shortcut, just the other direction: right
+      // after a repo is imported, offer to trigger the actual deploy too
+      // (import alone only queues Vercel's automatic initial build — see
+      // executor.py's VERCEL_IMPORT_REPO reply).
+      appendDeployAction(msgRef, `Deploy ${data.project_name} to Vercel →`, `deploy ${data.project_name} to vercel`);
+    } else if (data.action === 'vercel_env_set' && data.project_name) {
       appendPostEnvSetDeployAction(msgRef, 'vercel', data.project_name);
     } else if (data.action === 'netlify_env_set' && data.site_name) {
       appendPostEnvSetDeployAction(msgRef, 'netlify', data.site_name);
