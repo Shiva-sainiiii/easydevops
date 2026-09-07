@@ -3066,10 +3066,11 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   hdrText.textContent = headerText;
   hdr.appendChild(hdrText);
 
-  // Bulk select is only meaningful for repo and vercel kinds right now
-  // (bulk_actions.py only has delete/visibility ops for those two) —
-  // netlify/render keep the simple tap-to-details flow for now.
-  const supportsBulk = kind === 'repo' || kind === 'vercel';
+  // Bulk select is available for all four kinds — repo/vercel (name-based
+  // delete) and netlify/render (netlify by name, render by id — see
+  // requestBulkNetlifyDelete/requestBulkRenderDelete below for why render
+  // uses item.id instead of item.name).
+  const supportsBulk = kind === 'repo' || kind === 'vercel' || kind === 'netlify' || kind === 'render';
   let selectBtn = null;
   if (supportsBulk) {
     selectBtn = document.createElement('button');
@@ -3143,10 +3144,16 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
       updateBulkBar();
     };
     bulkDeleteBtn.onclick = () => {
-      const names = checkboxes.filter(c => c.checkbox.checked).map(c => c.item.name);
-      if (!names.length) return;
-      if (kind === 'repo') requestBulkRepoDelete(names, bulkDeleteBtn, () => setSelectMode(false));
-      else requestBulkVercelDelete(names, bulkDeleteBtn, () => setSelectMode(false));
+      const checked = checkboxes.filter(c => c.checkbox.checked);
+      if (!checked.length) return;
+      // Render has no name-based delete/lookup endpoint anywhere else in
+      // this app (RENDER_DELETE_SERVICE etc. all take the raw service_id
+      // directly) — every other kind deletes by name.
+      const keys = kind === 'render' ? checked.map(c => c.item.id) : checked.map(c => c.item.name);
+      if (kind === 'repo') requestBulkRepoDelete(keys, bulkDeleteBtn, () => setSelectMode(false));
+      else if (kind === 'vercel') requestBulkVercelDelete(keys, bulkDeleteBtn, () => setSelectMode(false));
+      else if (kind === 'netlify') requestBulkNetlifyDelete(keys, bulkDeleteBtn, () => setSelectMode(false));
+      else requestBulkRenderDelete(keys, bulkDeleteBtn, () => setSelectMode(false));
     };
     if (bulkPrivateBtn) bulkPrivateBtn.onclick = () => {
       const names = checkboxes.filter(c => c.checkbox.checked).map(c => c.item.name);
@@ -3515,6 +3522,74 @@ async function requestBulkVercelDelete(projects, btnEl, onDone) {
       addMessage('agent', data.reply, 'warning', {
         pending_command: data.pending_command, pending_value: data.pending_value,
         confirm_token: data.confirm_token, confirm_verb: data.confirm_verb, bulk_op: 'delete_vercel_projects',
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+    if (onDone) onDone();
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
+}
+
+async function requestBulkNetlifyDelete(sites, btnEl, onDone) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  isLoading = true;
+  const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(`${sites.length} Netlify site${sites.length !== 1 ? 's' : ''} delete kar raha hu…`);
+  typing.classList.add('show');
+  scrollToBottom();
+  try {
+    const res = await fetch('/api/bulk-action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ op: 'delete_netlify_sites', sites }),
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command, pending_value: data.pending_value,
+        confirm_token: data.confirm_token, confirm_verb: data.confirm_verb, bulk_op: 'delete_netlify_sites',
+      });
+    } else {
+      addMessage('agent', data.reply, actionColorFor(data.action));
+      history.push({ role: 'assistant', content: data.reply });
+    }
+    if (onDone) onDone();
+  } catch (err) {
+    typing.classList.remove('show');
+    addMessage('agent', '❌ Server se connect nahi ho paya.', 'error');
+  } finally {
+    isLoading = false;
+    btnEl.disabled = false;
+  }
+}
+
+async function requestBulkRenderDelete(services, btnEl, onDone) {
+  if (isLoading) return;
+  btnEl.disabled = true;
+  isLoading = true;
+  const typing = document.getElementById('typing-indicator');
+  setThinkingStatus(`${services.length} Render service${services.length !== 1 ? 's' : ''} delete kar raha hu…`);
+  typing.classList.add('show');
+  scrollToBottom();
+  try {
+    const res = await fetch('/api/bulk-action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+      body: JSON.stringify({ op: 'delete_render_services', services }),
+    });
+    const data = await res.json();
+    typing.classList.remove('show');
+    if (data.action === 'confirm_required') {
+      addMessage('agent', data.reply, 'warning', {
+        pending_command: data.pending_command, pending_value: data.pending_value,
+        confirm_token: data.confirm_token, confirm_verb: data.confirm_verb, bulk_op: 'delete_render_services',
       });
     } else {
       addMessage('agent', data.reply, actionColorFor(data.action));
@@ -4888,6 +4963,8 @@ const CONFIRM_ACTION_STATUS = {
   BULK_DELETE_FILES: 'Files delete kar raha hu…',
   BULK_DELETE_REPOS: 'Repos delete kar raha hu…',
   BULK_DELETE_VERCEL_PROJECTS: 'Vercel projects delete kar raha hu…',
+  BULK_DELETE_NETLIFY_SITES: 'Netlify sites delete kar raha hu…',
+  BULK_DELETE_RENDER_SERVICES: 'Render services delete kar raha hu…',
 };
 
 // ── CONFIRMED DESTRUCTIVE ACTION ──

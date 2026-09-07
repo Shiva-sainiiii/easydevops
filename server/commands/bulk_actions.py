@@ -18,6 +18,8 @@ Every bulk op:
 """
 from server.providers.github import gh_api, get_file_sha
 from server.providers.vercel import vc_api, vercel_find_project
+from server.providers.netlify import nl_api, netlify_find_site
+from server.providers.render import rd_api
 from server.security import safe_repo_path, UnsafePathError
 
 MAX_BULK_ITEMS = 50  # sanity cap — a fat-fingered "select all" on a huge list shouldn't fire 500 API calls
@@ -117,6 +119,59 @@ def bulk_delete_vercel_projects(project_names, vc_token):
         ok_count=len(ok), fail_count=len(failed),
         ok_label=f"{len(ok)} Vercel project{'s' if len(ok) != 1 else ''} delete ho gaye" if len(ok) != 1 else "1 Vercel project delete ho gaya",
         failed=failed, extra={"deleted_projects": ok},
+    )
+
+
+def bulk_delete_netlify_sites(site_names, nl_token):
+    """Takes site names/subdomains (same identifier the Netlify list UI
+    shows and checkboxes select by), resolved to a site object first —
+    same pattern as bulk_delete_vercel_projects, since Netlify's delete
+    endpoint wants a site_id and name/subdomain isn't guaranteed to be one."""
+    site_names = _cap(site_names)
+    ok, failed = [], []
+    for name in site_names:
+        site = netlify_find_site(name, nl_token)
+        if not site:
+            failed.append((name, "nahi mila"))
+            continue
+        r = nl_api("DELETE", f"/sites/{site['id']}", nl_token)
+        if r.status_code in (200, 204):
+            ok.append(name)
+        else:
+            err = r.json().get("message", "delete fail") if r.content else "delete fail"
+            failed.append((name, err))
+
+    return _bulk_reply(
+        action="bulk_delete_netlify_sites",
+        ok_count=len(ok), fail_count=len(failed),
+        ok_label=f"{len(ok)} Netlify site{'s' if len(ok) != 1 else ''} delete ho gayi" if len(ok) != 1 else "1 Netlify site delete ho gayi",
+        failed=failed, extra={"deleted_sites": ok},
+    )
+
+
+def bulk_delete_render_services(service_ids, rd_token):
+    """Takes service IDs directly (srv-xxxxx), NOT names — unlike GitHub
+    repos / Vercel projects / Netlify sites, every Render command in this
+    app (RENDER_DELETE_SERVICE, RENDER_GET_ENV, RENDER_DEPLOY, ...) already
+    operates on the raw service_id with no name-based lookup step, since
+    the list UI surfaces the id directly and there's no Render "find by
+    name" endpoint to resolve through. Kept consistent with that rather
+    than introducing a name-lookup path that doesn't exist elsewhere."""
+    service_ids = _cap(service_ids)
+    ok, failed = [], []
+    for sid in service_ids:
+        r = rd_api("DELETE", f"/services/{sid}", rd_token)
+        if r.status_code in (200, 204):
+            ok.append(sid)
+        else:
+            msg = r.json().get("message", "delete fail") if r.content else "delete fail"
+            failed.append((sid, msg))
+
+    return _bulk_reply(
+        action="bulk_delete_render_services",
+        ok_count=len(ok), fail_count=len(failed),
+        ok_label=f"{len(ok)} Render service{'s' if len(ok) != 1 else ''} delete ho gayi" if len(ok) != 1 else "1 Render service delete ho gayi",
+        failed=failed, extra={"deleted_services": ok},
     )
 
 

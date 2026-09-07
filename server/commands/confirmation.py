@@ -8,7 +8,8 @@ import json
 import hashlib
 
 DESTRUCTIVE_COMMANDS = {"DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK",
-                         "BULK_DELETE_FILES", "BULK_DELETE_REPOS", "BULK_DELETE_VERCEL_PROJECTS"}
+                         "BULK_DELETE_FILES", "BULK_DELETE_REPOS", "BULK_DELETE_VERCEL_PROJECTS",
+                         "BULK_DELETE_NETLIFY_SITES", "BULK_DELETE_RENDER_SERVICES"}
 
 
 def confirm_token(cmd, value, user_id):
@@ -54,6 +55,14 @@ def build_confirmation(cmd, params, user_id):
         projects = params.get("projects", [])
         target_desc = f"{len(projects)} Vercel project{'s' if len(projects) != 1 else ''} (`{', '.join(projects[:5])}{'…' if len(projects) > 5 else ''}`)"
         warn_text = "Ye saare Vercel projects aur unki deployments delete ho jayengi (GitHub repos safe rahenge)."
+    elif cmd == "BULK_DELETE_NETLIFY_SITES":
+        sites = params.get("sites", [])
+        target_desc = f"{len(sites)} Netlify site{'s' if len(sites) != 1 else ''} (`{', '.join(sites[:5])}{'…' if len(sites) > 5 else ''}`)"
+        warn_text = "Ye saari Netlify sites aur unki deployments delete ho jayengi (GitHub repos safe rahenge)."
+    elif cmd == "BULK_DELETE_RENDER_SERVICES":
+        services = params.get("services", [])
+        target_desc = f"{len(services)} Render service{'s' if len(services) != 1 else ''} (`{', '.join(services[:5])}{'…' if len(services) > 5 else ''}`)"
+        warn_text = "Ye saari services permanently delete ho jayengi — logs, deploy history, sab kuch. Wapas nahi aayengi."
     else:
         target_desc = str(params)
         warn_text = "Ye action wapas nahi ho sakta."

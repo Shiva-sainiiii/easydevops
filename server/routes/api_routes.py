@@ -21,6 +21,7 @@ from server.commands.ai_fallback import OPENROUTER_MODEL
 from server.commands.confirmation import confirm_token, build_confirmation
 from server.commands.bulk_actions import (
     bulk_delete_files, bulk_delete_repos, bulk_set_repo_visibility, bulk_delete_vercel_projects,
+    bulk_delete_netlify_sites, bulk_delete_render_services,
 )
 
 api_bp = Blueprint("api_routes", __name__)
@@ -320,6 +321,8 @@ BULK_CMD_MAP = {
     "delete_repos": "BULK_DELETE_REPOS",
     "set_repo_visibility": None,  # not destructive — no confirm needed, see below
     "delete_vercel_projects": "BULK_DELETE_VERCEL_PROJECTS",
+    "delete_netlify_sites": "BULK_DELETE_NETLIFY_SITES",
+    "delete_render_services": "BULK_DELETE_RENDER_SERVICES",
 }
 
 
@@ -371,6 +374,14 @@ def api_bulk_action():
         params = {"projects": body.get("projects", [])}
         if not params["projects"]:
             return safe_jsonify({"reply": "Koi project select nahi kiya gaya.", "action": "warning"})
+    elif op == "delete_netlify_sites":
+        params = {"sites": body.get("sites", [])}
+        if not params["sites"]:
+            return safe_jsonify({"reply": "Koi site select nahi ki gayi.", "action": "warning"})
+    elif op == "delete_render_services":
+        params = {"services": body.get("services", [])}
+        if not params["services"]:
+            return safe_jsonify({"reply": "Koi service select nahi ki gayi.", "action": "warning"})
     else:
         return safe_jsonify({"reply": "❌ Unknown bulk action.", "action": "error"}), 400
 
@@ -387,6 +398,16 @@ def _run_bulk_op(op, params, owner, gh_token, user):
         if not vc_token:
             return {"reply": "🔒 Pehle Vercel connect karo.", "action": "vercel_auth_required"}
         return bulk_delete_vercel_projects(params.get("projects", []), vc_token)
+    if op == "delete_netlify_sites":
+        nl_token = get_user_netlify_token(user)
+        if not nl_token:
+            return {"reply": "🔒 Pehle Netlify connect karo.", "action": "netlify_auth_required"}
+        return bulk_delete_netlify_sites(params.get("sites", []), nl_token)
+    if op == "delete_render_services":
+        rd_token = get_user_render_token(user)
+        if not rd_token:
+            return {"reply": "🔒 Pehle Render connect karo.", "action": "render_auth_required"}
+        return bulk_delete_render_services(params.get("services", []), rd_token)
     return {"reply": "❌ Unknown bulk action.", "action": "error"}
 
 
