@@ -33,6 +33,9 @@ FERNET_KEY = os.getenv("FERNET_KEY")                       # encrypts tokens at 
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")                # still app-level: AI fallback is shared infra, not per-user
+OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"  # lives here (not ai_fallback.py) so code_generate.py and
+                                                              # api_routes.py can import it without pulling in ai_fallback's
+                                                              # -> executor -> code_generate import chain (circular import)
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")  # used to build the OAuth callback URL
 DATABASE_URL = os.getenv("DATABASE_URL")                    # Neon Postgres connection string
 

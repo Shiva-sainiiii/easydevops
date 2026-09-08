@@ -26,10 +26,9 @@ import base64
 import time
 import requests
 
-from server.config import OPENROUTER_KEY
+from server.config import OPENROUTER_KEY, OPENROUTER_MODEL
 from server.providers.github import gh_api
 from server.security import safe_repo_path, UnsafePathError
-from server.commands.ai_fallback import OPENROUTER_MODEL
 from server.commands.intent_parser import (
     CODEGEN_INSPECT_VERBS_RE, CODEGEN_STRONG_CHANGE_VERBS_RE, CODEGEN_GENERIC_DO_RE,
 )

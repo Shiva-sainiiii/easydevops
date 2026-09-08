@@ -9,7 +9,7 @@ import base64
 import json
 from flask import Blueprint, request
 
-from server.config import OPENROUTER_KEY
+from server.config import OPENROUTER_KEY, OPENROUTER_MODEL
 from server.auth import current_user
 from server.db import decrypt_token, get_user_vercel_token, get_user_netlify_token, get_user_render_token
 from server.security import safe_jsonify, redact, safe_repo_path, UnsafePathError
@@ -17,7 +17,6 @@ from server.providers.github import gh_api, get_file_sha, gh_list_all_repos
 from server.providers.vercel import vc_api, vercel_find_project_by_repo, vercel_list_all_projects, VERCEL_TERMINAL_STATES
 from server.providers.netlify import nl_api, nl_list_all_sites
 from server.providers.render import rd_api, rd_list_all_services
-from server.commands.ai_fallback import OPENROUTER_MODEL
 from server.commands.confirmation import confirm_token, build_confirmation
 from server.commands.bulk_actions import (
     bulk_delete_files, bulk_delete_repos, bulk_set_repo_visibility, bulk_delete_vercel_projects,

@@ -8,14 +8,12 @@ with the calling user's token.
 import re
 import requests
 
-from server.config import OPENROUTER_KEY
+from server.config import OPENROUTER_KEY, OPENROUTER_MODEL
 from server.commands.intent_parser import NO_ARG_COMMANDS
 from server.commands.executor import execute_command
 
 
 # ════════════════════════════════════════════════════════════════
-OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
-
 SYSTEM_PROMPT_TEMPLATE = """You are a Easy DevOps helping GitHub user: {login}.
 You control ONLY this user's own GitHub account{vercel_clause}{netlify_clause}{render_clause}. You act by outputting EXACTLY ONE command per response.
 
