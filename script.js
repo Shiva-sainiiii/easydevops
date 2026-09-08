@@ -3657,7 +3657,7 @@ const ACTIVITY_LIST_CONFIG = {
 };
 
 function richBubbleBadgeFor(entry) {
-  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info') return 'github';
+  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created') return 'github';
   if (entry.action === 'vercel_deployments' || entry.action === 'vercel_env') return 'vercel';
   if (entry.action === 'netlify_site_info' || entry.action === 'netlify_env') return 'netlify';
   if (entry.action === 'render_env') return 'render';
@@ -3684,7 +3684,7 @@ function buildRichBubbleNode(entry) {
   }
 
   if (entry.action === 'code_generate' && Array.isArray(entry.files) && entry.files.length) {
-    return buildCodeGenDiffBubble(entry.reply != null ? entry.reply : replyText, entry.files, entry.repo, entry.repo_link);
+    return buildCodeGenDiffBubble(entry.reply != null ? entry.reply : replyText, entry.files, entry.repo, entry.repo_link, entry.branch, entry.pr_url, entry.direct_commit);
   }
 
   if (entry.action === 'vercel_deployments' && Array.isArray(entry.deployments) && entry.deployments.length) {
@@ -3797,7 +3797,7 @@ function buildReadFileBubble(repo, filePath, content) {
 // commonly touch 3-8 files at once; showing every diff expanded by
 // default would make the chat bubble enormous) with a +added/-removed
 // summary in the header so you know what's inside before expanding.
-function buildCodeGenDiffBubble(replyText, files, repo, repoLink) {
+function buildCodeGenDiffBubble(replyText, files, repo, repoLink, branch, prUrl, directCommit) {
   const wrap = document.createElement('div');
   wrap.className = 'codegen-diff-bubble';
 
@@ -3806,6 +3806,23 @@ function buildCodeGenDiffBubble(replyText, files, repo, repoLink) {
     summaryText.className = 'codegen-reply-text';
     summaryText.innerHTML = renderMarkdown(replyText);
     wrap.appendChild(summaryText);
+  }
+
+  // Branch/PR status strip — shown above the file diffs so it's the first
+  // thing visible, since "did this land on main or go through review" is
+  // the most important fact about a code_generate result. Falls back to
+  // nothing if neither branch nor prUrl is present (older saved chat
+  // entries from before P4, or a direct-commit result on a very old
+  // client) so this stays backward compatible.
+  if (!directCommit && (branch || prUrl)) {
+    const status = document.createElement('div');
+    status.className = 'codegen-branch-status';
+    if (prUrl) {
+      status.innerHTML = `🌿 <span class="codegen-branch-name">${escHtml(branch || '')}</span> → 🔀 <a href="${prUrl}" target="_blank" rel="noopener">PR dekho</a>`;
+    } else {
+      status.innerHTML = `🌿 Branch par commit ho gaya: <span class="codegen-branch-name">${escHtml(branch || '')}</span>`;
+    }
+    wrap.appendChild(status);
   }
 
   files.forEach((f, idx) => {
@@ -3857,7 +3874,15 @@ function buildCodeGenDiffBubble(replyText, files, repo, repoLink) {
     }
   });
 
-  if (repo && repoLink) {
+  // In the branch+PR flow the branch-status strip above already links out
+  // (to the PR, or to the branch itself if the PR failed to open) — this
+  // footer link is redundant there and would just point at the same
+  // branch tree twice. Show it for the direct-commit path, AND for older
+  // saved chat entries from before branch/PR existed (direct_commit is
+  // undefined there, not false — those have a repoLink and nothing else,
+  // so this is the only place they can still link out from).
+  const isLegacyEntry = directCommit === undefined && !branch && !prUrl;
+  if ((directCommit || isLegacyEntry) && repo && repoLink) {
     const link = document.createElement('a');
     link.className = 'codegen-repo-link';
     link.href = repoLink;
@@ -5357,6 +5382,9 @@ async function sendMsg() {
           // the plain-text reply (which only lists filenames, not diffs).
           files: data.action === 'code_generate' ? data.files : undefined,
           repo_link: data.action === 'code_generate' ? data.repo_link : undefined,
+          branch: data.action === 'code_generate' ? data.branch : undefined,
+          pr_url: data.action === 'code_generate' ? data.pr_url : undefined,
+          direct_commit: data.action === 'code_generate' ? data.direct_commit : undefined,
           // Structured single-item payloads (repo info, site info, env
           // var lists, deployment list) — same "reply stays the text
           // fallback" pattern as everything else above, so these cards

@@ -18,6 +18,7 @@ from server.providers.render import rd_api, rd_list_all_services
 from server.security import safe_repo_path, UnsafePathError
 from server.commands.render_blueprint import generate_render_yaml
 from server.commands.render_create_service import create_render_service
+from server.commands.code_generate import create_pull_request
 
 
 def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, rd_token=None):
@@ -188,6 +189,28 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                 }}
             else:
                 return {"reply": f"❌ Repo info fetch nahi hui: {r.json().get('message','')}", "action": "error"}
+
+        elif cmd == "CREATE_PR":
+            repo = params["repo"]
+            head = params["head"]
+            base = params.get("base")
+            if not base:
+                # No base branch named in the phrasing — resolve to the
+                # repo's default branch, same fallback create_pull_request's
+                # caller in handle_code_generate uses.
+                repo_r = gh_api("GET", f"/repos/{owner}/{repo}", gh_token)
+                if repo_r.status_code != 200:
+                    return {"reply": f"❌ Repo `{repo}` nahi mila.", "action": "error"}
+                base = repo_r.json().get("default_branch", "main")
+            if head == base:
+                return {"reply": f"❌ Head aur base branch same hai (`{head}`) — PR ke liye alag branches chahiye.", "action": "error"}
+            title = f"Merge {head} into {base}"
+            ok, err_or_empty, pr_url = create_pull_request(owner, repo, gh_token, head, base, title)
+            if ok:
+                return {"reply": f"✅ PR khul gaya: `{head}` → `{base}`\n🔀 {pr_url}",
+                        "action": "pr_created", "repo": repo, "head": head, "base": base, "pr_url": pr_url}
+            else:
+                return {"reply": f"❌ PR create nahi hua: {err_or_empty}", "action": "error"}
 
         # ──────────────── VERCEL ────────────────
         # Every Vercel branch below checks vc_token first and returns a

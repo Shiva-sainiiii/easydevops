@@ -2739,6 +2739,17 @@
      identically — only the container chrome below is new. */
   .codegen-diff-bubble { display: flex; flex-direction: column; gap: 10px; }
   .codegen-reply-text { font-size: 14px; line-height: 1.5; }
+  .codegen-branch-status {
+    font-size: 12.5px;
+    padding: 8px 10px;
+    background: rgba(61,220,151,0.08);
+    border: 1px solid rgba(61,220,151,0.25);
+    border-radius: 8px;
+    color: var(--text);
+  }
+  .codegen-branch-status a { color: var(--accent); text-decoration: none; }
+  .codegen-branch-status a:active { opacity: 0.7; }
+  .codegen-branch-name { font-family: var(--font-mono); color: var(--green); }
   .codegen-file-section {
     border: 1px solid var(--border-2);
     border-radius: 9px;

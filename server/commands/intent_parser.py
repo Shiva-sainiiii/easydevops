@@ -192,6 +192,33 @@ INTENT_RULES = [
         rf"^({SLUG})\s+(?:ke\s+liye\s+)?(?:blueprint|iac)\s+(?:generate|bana|banao)",
     ], lambda m: {"repo": _g(m, 1)}),
 
+    # ── CREATE_PR (open a GitHub pull request) ──
+    # Placed before CODE_GENERATE (see note on that rule below) since "PR"/
+    # "pull request" phrasing would otherwise get swallowed by CODE_GENERATE's
+    # broad "<verb> ... in <repo>" pattern — e.g. "open a PR from fix-bug to
+    # main in myrepo" contains "open" (a CODEGEN_VERB) followed by "in
+    # myrepo", so it would incorrectly match CODE_GENERATE if tried first.
+    #
+    # Three separate rule entries (not one shared lambda) because each
+    # phrasing's capture groups land in a different order — head/base/repo
+    # for the explicit "from X to Y in Z" form, repo/head/base for the
+    # Hinglish "Z mein X se Y tak" form, and just head/repo (base=None,
+    # meaning "use the repo's default branch") for the short form.
+    ("CREATE_PR", [
+        rf"(?:open|create|bana|banao|bana\s*do)\s+(?:a\s+|ek\s+)?(?:pr|pull\s*request)\s+"
+        rf"from\s+({SLUG})\s+to\s+({SLUG})\s+(?:in|for|of)\s+({SLUG})",
+    ], lambda m: {"head": _g(m, 1), "base": _g(m, 2), "repo": _g(m, 3)}),
+
+    ("CREATE_PR", [
+        rf"({SLUG})\s+(?:mein|me)\s+({SLUG})\s+se\s+({SLUG})\s+(?:tak|mein|ke\s+liye)\s+"
+        rf"(?:pr|pull\s*request)\s+(?:banao|bana\s*do|create|open)",
+    ], lambda m: {"repo": _g(m, 1), "head": _g(m, 2), "base": _g(m, 3)}),
+
+    ("CREATE_PR", [
+        rf"(?:open|create|bana|banao|bana\s*do)\s+(?:a\s+|ek\s+)?(?:pr|pull\s*request)\s+"
+        rf"(?:for|from)\s+({SLUG})\s+(?:in|of)\s+({SLUG})",
+    ], lambda m: {"head": _g(m, 1), "base": None, "repo": _g(m, 2)}),
+
     # ── CODE_GENERATE (multi-file agentic build/edit) ──
     # Deliberately placed LAST: its patterns are the broadest in this list
     # (any "<verb> ... in <repo>" or "<repo> mein <verb> ..." shape), and
