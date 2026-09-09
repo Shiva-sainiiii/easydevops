@@ -3657,7 +3657,7 @@ const ACTIVITY_LIST_CONFIG = {
 };
 
 function richBubbleBadgeFor(entry) {
-  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created') return 'github';
+  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status') return 'github';
   if (entry.action === 'vercel_deployments' || entry.action === 'vercel_env') return 'vercel';
   if (entry.action === 'netlify_site_info' || entry.action === 'netlify_env') return 'netlify';
   if (entry.action === 'render_env') return 'render';
@@ -3693,6 +3693,10 @@ function buildRichBubbleNode(entry) {
 
   if (entry.action === 'repo_info' && entry.repo_info) {
     return buildRepoInfoBubble(entry.repo_info);
+  }
+
+  if (entry.action === 'check_status' && entry.checks_summary) {
+    return buildCheckStatusBubble(entry.repo, entry.ref, entry.checks_summary);
   }
 
   if (entry.action === 'netlify_site_info' && entry.site_info) {
@@ -4046,6 +4050,26 @@ function buildRepoInfoBubble(info) {
   });
   wrap.appendChild(stats);
 
+  // Best-effort CI badge — repo_info.checks is null when the check-runs
+  // fetch failed/was skipped (see executor.py's GET_REPO_INFO), and
+  // {state:'none'} when the repo simply has no Actions check-runs on its
+  // default branch. Both cases render no badge — a missing/absent CI
+  // signal isn't worth a row, only an actual pass/fail/pending is.
+  if (info.checks && info.checks.state !== 'none') {
+    const ciMeta = {
+      success: ['✅', 'ci-success', 'Checks passing'],
+      failure: ['❌', 'ci-failure', 'Checks failing'],
+      pending: ['🟡', 'ci-pending', 'Checks running'],
+    }[info.checks.state];
+    if (ciMeta) {
+      const [icon, cls, label] = ciMeta;
+      const badge = document.createElement('span');
+      badge.className = `info-card-ci-badge ${cls}`;
+      badge.textContent = `${icon} ${label} (${info.checks.passed}/${info.checks.total})`;
+      wrap.appendChild(badge);
+    }
+  }
+
   const rows = document.createElement('div');
   rows.className = 'info-card-rows';
   const rowData = [
@@ -4071,6 +4095,59 @@ function buildRepoInfoBubble(info) {
     link.textContent = `🔗 ${info.url.replace(/^https?:\/\//, '')}`;
     wrap.appendChild(link);
   }
+
+  return wrap;
+}
+
+// ── GITHUB CHECK STATUS CARD (GITHUB_CHECK_STATUS full detail card) ──
+function buildCheckStatusBubble(repo, ref, summary) {
+  const wrap = document.createElement('div');
+  wrap.className = 'info-card';
+
+  const title = document.createElement('div');
+  title.className = 'info-card-title';
+  title.textContent = `🔧 ${repo}${ref ? ` (${ref})` : ''}`;
+  wrap.appendChild(title);
+
+  if (summary.state === 'none') {
+    const desc = document.createElement('div');
+    desc.className = 'info-card-desc';
+    desc.textContent = 'Is branch par koi GitHub Actions check-run nahi mila.';
+    wrap.appendChild(desc);
+    return wrap;
+  }
+
+  const ciMeta = {
+    success: ['✅', 'ci-success', 'Sab checks pass ho gaye'],
+    failure: ['❌', 'ci-failure', 'Kuch checks fail ho gaye'],
+    pending: ['🟡', 'ci-pending', 'Checks abhi chal rahe hain'],
+  }[summary.state] || ['•', '', ''];
+  const [headIcon, headCls, headLabel] = ciMeta;
+  const badge = document.createElement('span');
+  badge.className = `info-card-ci-badge ${headCls}`;
+  badge.textContent = `${headIcon} ${headLabel} (${summary.passed}/${summary.total})`;
+  wrap.appendChild(badge);
+
+  const list = document.createElement('div');
+  list.className = 'check-status-list';
+  const rowIcons = { success: '✅', failure: '❌', pending: '🟡', skipped: '⏭️' };
+  (summary.checks || []).forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'check-status-row' + (c.url ? ' is-link' : '');
+    const icon = document.createElement('span');
+    icon.className = 'check-status-row-icon';
+    icon.textContent = rowIcons[c.state] || '•';
+    const name = document.createElement('span');
+    name.className = 'check-status-row-name';
+    name.textContent = c.name || 'check';
+    row.appendChild(icon);
+    row.appendChild(name);
+    if (c.url) {
+      row.addEventListener('click', () => window.open(c.url, '_blank', 'noopener'));
+    }
+    list.appendChild(row);
+  });
+  wrap.appendChild(list);
 
   return wrap;
 }
@@ -5053,6 +5130,7 @@ const PROVIDER_BADGES = {
   create_repo: 'github', delete_repo: 'github',
   create_file: 'github', update_file: 'github', delete_file: 'github',
   list_repos: 'github', list_files: 'github', read_file: 'github', repo_info: 'github',
+  check_status: 'github', pr_created: 'github',
   vercel_list: 'vercel', vercel_import: 'vercel', vercel_deploy: 'vercel',
   vercel_deploy_pending: 'vercel', vercel_delete_project: 'vercel',
   vercel_env: 'vercel', vercel_env_set: 'vercel',
@@ -5128,6 +5206,7 @@ function actionColorFor(action) {
     create_repo: 'success', delete_repo: 'success',
     create_file: 'success', update_file: 'success', delete_file: 'success',
     list_repos: 'info', list_files: 'info', read_file: 'info', repo_info: 'info',
+    check_status: 'info',
     vercel_list: 'info', vercel_import: 'success', vercel_deploy: 'success',
     vercel_deploy_pending: 'warning', vercel_delete_project: 'success',
     vercel_env: 'info', vercel_env_set: 'success',
@@ -5392,6 +5471,10 @@ async function sendMsg() {
           project_name: data.project_name, site_name: data.site_name, service_id: data.service_id,
           deployments: data.deployments, repo_info: data.repo_info, site_info: data.site_info,
           env_vars: data.env_vars,
+          // GITHUB_CHECK_STATUS's check-runs summary — same survive-a-
+          // refresh reasoning as repo_info/site_info above.
+          ref: data.action === 'check_status' ? data.ref : undefined,
+          checks_summary: data.action === 'check_status' ? data.checks_summary : undefined,
         });
         history.push({ role: 'assistant', content: data.reply });
         scrollToBottom();

@@ -11,7 +11,7 @@ import json
 import base64
 import requests
 
-from server.providers.github import gh_api, get_file_sha, gh_list_all_repos
+from server.providers.github import gh_api, get_file_sha, gh_list_all_repos, gh_get_check_runs, summarize_check_runs
 from server.providers.vercel import vc_api, vercel_find_project, vercel_find_project_by_repo, vercel_poll_deployment, vercel_project_live_url, vercel_list_all_projects, VERCEL_TERMINAL_STATES
 from server.providers.netlify import nl_api, netlify_find_site, nl_list_all_sites
 from server.providers.render import rd_api, rd_list_all_services
@@ -172,6 +172,24 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                          f"🔗 {d['html_url']}")
                 if d.get("description"):
                     reply += f"\n📝 {d['description']}"
+                # Best-effort CI badge for the repo-info card: fetch
+                # check-runs for the default branch's tip commit and fold
+                # a small summary into the payload. Deliberately swallow
+                # any failure here (network hiccup, repo with Actions
+                # disabled, etc.) — a missing CI badge shouldn't turn a
+                # working GET_REPO_INFO into an error reply. summary stays
+                # None (frontend just omits the badge) rather than a fake
+                # "none" state, so we don't claim "no CI" when we simply
+                # couldn't check.
+                checks_summary = None
+                try:
+                    default_branch = d.get("default_branch")
+                    if default_branch:
+                        check_runs, checks_r = gh_get_check_runs(repo, default_branch, owner, gh_token)
+                        if checks_r is not None and checks_r.status_code == 200:
+                            checks_summary = summarize_check_runs(check_runs)
+                except Exception:
+                    checks_summary = None
                 # Structured fields alongside the markdown reply, for the
                 # frontend's repo-info card (buildRepoInfoBubble in
                 # script.js) — same "reply stays the fallback" pattern
@@ -186,9 +204,37 @@ def execute_command(cmd, params, owner, gh_token, vc_token=None, nl_token=None, 
                     "description": d.get("description"),
                     "language": d.get("language"),
                     "default_branch": d.get("default_branch"),
+                    "checks": checks_summary,
                 }}
             else:
                 return {"reply": f"❌ Repo info fetch nahi hui: {r.json().get('message','')}", "action": "error"}
+
+        elif cmd == "GITHUB_CHECK_STATUS":
+            repo = params["repo"]
+            ref = params.get("ref")
+            if not ref:
+                # No branch/commit named in the phrasing — resolve to the
+                # repo's default branch, same fallback CREATE_PR uses above.
+                repo_r = gh_api("GET", f"/repos/{owner}/{repo}", gh_token)
+                if repo_r.status_code != 200:
+                    return {"reply": f"❌ Repo `{repo}` nahi mila.", "action": "error"}
+                ref = repo_r.json().get("default_branch", "main")
+            check_runs, r = gh_get_check_runs(repo, ref, owner, gh_token)
+            if r is None or r.status_code != 200:
+                err = r.json().get("message", "") if r is not None else "request failed"
+                return {"reply": f"❌ Check status fetch nahi hua: {err}", "action": "error"}
+            summary = summarize_check_runs(check_runs)
+            if summary["state"] == "none":
+                reply = f"ℹ️ `{repo}` ({ref}) par koi GitHub Actions check-run nahi mila."
+            else:
+                icon = {"success": "✅", "failure": "❌", "pending": "🟡"}[summary["state"]]
+                reply = (f"{icon} `{repo}` ({ref}): {summary['passed']} passed, "
+                         f"{summary['failed']} failed, {summary['pending']} pending "
+                         f"— {summary['total']} check(s) total")
+                for c in summary["checks"]:
+                    c_icon = {"success": "✅", "failure": "❌", "pending": "🟡", "skipped": "⏭️"}.get(c["state"], "•")
+                    reply += f"\n{c_icon} {c['name']}"
+            return {"reply": reply, "action": "check_status", "repo": repo, "ref": ref, "checks_summary": summary}
 
         elif cmd == "CREATE_PR":
             repo = params["repo"]

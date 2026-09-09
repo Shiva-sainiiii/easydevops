@@ -50,3 +50,67 @@ def gh_list_all_repos(gh_token, per_page=100, max_total=300):
         next_url = match.group(1)
         endpoint = next_url.split("api.github.com", 1)[-1]
     return all_repos[:max_total], r
+
+
+def gh_get_check_runs(repo, ref, owner, gh_token):
+    """Fetch GitHub Actions check-runs for a commit/branch ref via
+    `/repos/{owner}/{repo}/commits/{ref}/check-runs`. `ref` can be a
+    branch name, tag, or SHA — GitHub resolves it to the tip commit.
+
+    Returns (check_runs, r) — same (data, response) shape as
+    gh_list_all_repos, so callers branch on r.status_code the same way.
+    check_runs is the raw `check_runs` array from the API (empty list if
+    the repo has no Actions workflows at all, which is a 200 with an
+    empty array, not an error).
+    """
+    r = gh_api("GET", f"/repos/{owner}/{repo}/commits/{ref}/check-runs?per_page=100", gh_token)
+    if r.status_code == 200:
+        return r.json().get("check_runs", []), r
+    return [], r
+
+
+def summarize_check_runs(check_runs):
+    """Reduce a raw check_runs array down to the small summary shape both
+    GITHUB_CHECK_STATUS and the repo_info badge need: overall state +
+    pass/fail/pending counts + the per-check list for the detail card.
+
+    Overall state priority: any run still queued/in_progress wins (CI
+    still running) over a failure, so a badge doesn't flash red for a
+    run that hasn't finished yet; failure only wins once nothing is
+    still pending.
+    """
+    if not check_runs:
+        return {"state": "none", "total": 0, "passed": 0, "failed": 0, "pending": 0, "checks": []}
+
+    passed = failed = pending = 0
+    checks = []
+    for c in check_runs:
+        status = c.get("status")  # queued | in_progress | completed
+        conclusion = c.get("conclusion")  # success | failure | neutral | cancelled | skipped | timed_out | action_required | None
+        if status != "completed":
+            pending += 1
+            run_state = "pending"
+        elif conclusion == "success":
+            passed += 1
+            run_state = "success"
+        elif conclusion in ("skipped", "neutral"):
+            run_state = "skipped"
+        else:
+            failed += 1
+            run_state = "failure"
+        checks.append({
+            "name": c.get("name"),
+            "state": run_state,
+            "conclusion": conclusion,
+            "url": c.get("html_url"),
+        })
+
+    if pending:
+        overall = "pending"
+    elif failed:
+        overall = "failure"
+    else:
+        overall = "success"
+
+    return {"state": overall, "total": len(check_runs), "passed": passed,
+            "failed": failed, "pending": pending, "checks": checks}

@@ -2851,6 +2851,39 @@
   }
   .env-var-rows .info-card-row-label { font-family: var(--font-mono); color: var(--text); }
   .env-var-targets { color: var(--muted); font-size: 11px; }
+
+  /* ── CI CHECK-STATUS BADGE (small pill inside repo_info card) ── */
+  .info-card-ci-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11.5px; font-weight: 600;
+    padding: 3px 8px; border-radius: 999px;
+    width: fit-content;
+  }
+  .info-card-ci-badge.ci-success { background: rgba(61,220,151,0.14); color: var(--green); }
+  .info-card-ci-badge.ci-failure { background: rgba(255,107,107,0.14); color: var(--red); }
+  .info-card-ci-badge.ci-pending { background: rgba(255,200,87,0.14); color: var(--yellow); }
+
+  /* ── CHECK-STATUS CARD (GITHUB_CHECK_STATUS full detail card) ── */
+  .check-status-list {
+    display: flex; flex-direction: column;
+    border-top: 1px solid var(--border);
+  }
+  .check-status-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .check-status-row:last-child { border-bottom: none; }
+  .check-status-row-icon { flex-shrink: 0; font-size: 13px; }
+  .check-status-row-name {
+    color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1;
+  }
+  .check-status-row.is-link { cursor: pointer; }
+  .check-status-row.is-link:hover .check-status-row-name { text-decoration: underline; }
+
   .env-var-value {
     color: var(--yellow, #ffc857);
     max-width: 60%;

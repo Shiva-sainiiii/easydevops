@@ -57,6 +57,21 @@ INTENT_RULES = [
         rf"repo(?:sitory)?\s+({SLUG})\s+(?:delete|uda(?:\s*do)?|hata(?:o|\s*do)?|remove)\s*(?:karo|kar\s*do)?$",
     ], lambda m: {"repo": _g(m, 1)}),
 
+    # ── CI / GitHub Actions check status ──
+    # ref is optional (branch/commit) — captured as group 2 when the user
+    # names one ("... of X on branch Y" / "X ki Y branch status"),
+    # otherwise the extractor's `_g(m, 2)` returns None and the executor
+    # falls back to the repo's default branch (same fallback CREATE_PR
+    # uses). The "on branch|on|branch" alternation must try the two-word
+    # form first — greedy SLUG matching means "on|branch" alone would
+    # swallow just the literal word "branch" out of "on branch dev" as if
+    # it were the ref itself, leaving "dev" unmatched.
+    ("GITHUB_CHECK_STATUS", [
+        rf"(?:check|ci|build)\s+status\s+(?:of|for)\s+({SLUG})(?:\s+(?:on\s+branch|on|branch)\s+({SLUG}))?",
+        rf"({SLUG})\s+(?:ki\s+)?(?:({SLUG})\s+branch\s+(?:ki\s+)?)?(?:ci\s+)?status\s+(?:dikhao|dikha|check\s+karo|batao)",
+        rf"({SLUG})\s+(?:ke\s+)?(?:checks?|actions?)\s+(?:dikhao|dikha|show)(?:\s+(?:on\s+branch|on|branch)\s+({SLUG}))?",
+    ], lambda m: {"repo": _g(m, 1), "ref": _g(m, 2)}),
+
     ("GET_REPO_INFO", [
         rf"(?:info|information|details)\s+(?:about|of|for)\s+(?:repo\s+)?({SLUG})",
         rf"repo\s+info\s+({SLUG})",
