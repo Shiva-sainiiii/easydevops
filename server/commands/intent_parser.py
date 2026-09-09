@@ -73,7 +73,14 @@ INTENT_RULES = [
     ], lambda m: {"repo": _g(m, 1), "ref": _g(m, 2)}),
 
     ("GET_REPO_INFO", [
-        rf"(?:info|information|details)\s+(?:about|of|for)\s+(?:repo\s+)?({SLUG})",
+        # Negative lookahead on "netlify"/"render" — without it, "info
+        # about netlify site X" matches here first (SLUG greedily takes
+        # "netlify" itself as the repo name via the optional "repo\s+"
+        # prefix), stealing the phrasing NETLIFY_GET_SITE_INFO further
+        # down is meant to own. GET_REPO_INFO is GitHub-only, so a repo
+        # name that's literally "netlify"/"render" was never a real
+        # case worth supporting here anyway.
+        rf"(?:info|information|details)\s+(?:about|of|for)\s+(?:repo\s+)?(?!netlify\b|render\b)({SLUG})",
         rf"repo\s+info\s+({SLUG})",
         rf"({SLUG})\s+ki\s+info\s+(?:do|dikhao|dikha)",
     ], lambda m: {"repo": _g(m, 1)}),

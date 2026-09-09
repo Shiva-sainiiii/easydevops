@@ -1046,6 +1046,8 @@ const COMMANDS = [
   { id: 'DELETE_REPO',  tpl: 'delete repo {repo}',                            desc: 'GitHub · delete a repository ⚠️',      kw: ['delete','uda','hata','remove','repo'] },
   { id: 'LIST_REPOS',   tpl: 'list all my repos',                             desc: 'GitHub · list all repositories',       kw: ['list','sare','mere','repos','show'] },
   { id: 'GET_REPO_INFO', tpl: 'info about {repo}',                            desc: 'GitHub · get repo details',            kw: ['info','information','details','repo'] },
+  { id: 'CHECK_STATUS',  tpl: 'check status of {repo}',                       desc: 'GitHub · view CI / Actions check status', kw: ['check','ci','status','build','actions','checks'] },
+  { id: 'CREATE_PR',     tpl: 'open a pr for {head} in {repo}',               desc: 'GitHub · open a pull request',         kw: ['pr','pull','request','open','create'] },
 
   // ── VERCEL (only surfaced in suggestions once connected — see
   // renderSuggestions' filter below) ──
@@ -1076,6 +1078,7 @@ const COMMANDS = [
   { id: 'RENDER_ENV_GET', tpl: 'get env for {service_id} render',            desc: 'Render · view environment variables',  kw: ['env','environment','vars','get','show','render'], render: true },
   { id: 'RENDER_ENV_SET', tpl: 'set render env {KEY}={value} for {service_id}', desc: 'Render · set an environment variable', kw: ['set','env','render','add','update'], render: true },
   { id: 'RENDER_DEPLOY', tpl: 'deploy {service_id} to render',               desc: 'Render · trigger a deploy',            kw: ['deploy','render','service'], render: true },
+  { id: 'RENDER_YAML',  tpl: 'generate render.yaml for {repo}',              desc: 'Render · generate a render.yaml blueprint', kw: ['generate','yaml','blueprint','render','iac'], render: true },
 ];
 
 // ── AUTOFILL STATE ──
@@ -1254,6 +1257,7 @@ function placeholderLabel(name) {
     repo: 'Repository', path: 'File path', message: 'Message',
     project_name: 'Vercel project', site_name: 'Netlify site',
     service_id: 'Render service', KEY: 'Env key', value: 'Env value',
+    ref: 'Branch (optional)', head: 'Head branch', base: 'Base branch (optional)',
   };
   return labels[name] || name.replace(/_/g, ' ');
 }
