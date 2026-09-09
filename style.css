@@ -2537,6 +2537,38 @@
     border-color: rgba(54,209,255,0.35);
     color: var(--accent);
   }
+  /* ── LIST FILTER (P6) ── Plain text input shown above the grid once a
+     list is long enough to be worth filtering (see the `items.length > 6`
+     check in buildActivityListBubble). Purely client-side: hides
+     non-matching .activity-card rows by name, no backend involved. */
+  .activity-list-filter-wrap { margin-bottom: 8px; }
+  .activity-list-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 11px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    border-radius: 7px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    outline: none;
+    transition: border-color .15s, background .15s;
+  }
+  .activity-list-filter-input::placeholder { color: var(--muted); }
+  .activity-list-filter-input:focus {
+    border-color: rgba(54,209,255,0.4);
+    background: rgba(255,255,255,0.06);
+  }
+  .activity-list-no-match {
+    padding: 14px 8px;
+    text-align: center;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .activity-list-no-match.hidden { display: none; }
+
   .activity-list-bulk-bar {
     display: none;
     align-items: center; gap: 8px;

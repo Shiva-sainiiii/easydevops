@@ -3084,6 +3084,25 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   }
   wrap.appendChild(hdr);
 
+  // Client-side name filter — only worth showing once a list is long enough
+  // that scanning it by eye is painful (P6). No backend change: the full
+  // list is already in the DOM, this just toggles which cards are visible.
+  let filterInput = null;
+  let noMatchRow = null;
+  if (items.length > 6) {
+    const filterWrap = document.createElement('div');
+    filterWrap.className = 'activity-list-filter-wrap';
+    filterInput = document.createElement('input');
+    filterInput.type = 'text';
+    filterInput.className = 'activity-list-filter-input';
+    filterInput.placeholder = `Filter ${items.length} by name…`;
+    filterInput.autocomplete = 'off';
+    filterInput.autocapitalize = 'off';
+    filterInput.spellcheck = false;
+    filterWrap.appendChild(filterInput);
+    wrap.appendChild(filterWrap);
+  }
+
   const bulkBar = document.createElement('div');
   bulkBar.className = 'activity-list-bulk-bar';
   const checkboxes = []; // {checkbox, item}
@@ -3124,11 +3143,16 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
 
   function updateBulkBar() {
     const checked = checkboxes.filter(c => c.checkbox.checked);
+    // "Select all" only ever means "all visible" — a filtered-out card
+    // stays exactly as it was (checked or not) rather than being silently
+    // swept into a bulk action the user can't currently see.
+    const visible = checkboxes.filter(c => c.checkbox.closest('.activity-card').style.display !== 'none');
     bulkCount.textContent = `${checked.length} selected`;
     bulkDeleteBtn.disabled = checked.length === 0;
     if (bulkPrivateBtn) bulkPrivateBtn.disabled = checked.length === 0;
     if (bulkPublicBtn) bulkPublicBtn.disabled = checked.length === 0;
-    bulkSelectAllBtn.textContent = checked.length === checkboxes.length && checkboxes.length > 0 ? 'Deselect all' : 'Select all';
+    const visibleChecked = visible.filter(c => c.checkbox.checked);
+    bulkSelectAllBtn.textContent = visibleChecked.length === visible.length && visible.length > 0 ? 'Deselect all' : 'Select all';
   }
 
   function setSelectMode(on) {
@@ -3143,8 +3167,10 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   if (supportsBulk) {
     selectBtn.onclick = () => setSelectMode(!wrap.classList.contains('select-mode'));
     bulkSelectAllBtn.onclick = () => {
-      const allChecked = checkboxes.every(c => c.checkbox.checked) && checkboxes.length > 0;
-      checkboxes.forEach(c => { c.checkbox.checked = !allChecked; });
+      // Only toggle cards the filter is currently showing.
+      const visible = checkboxes.filter(c => c.checkbox.closest('.activity-card').style.display !== 'none');
+      const allChecked = visible.every(c => c.checkbox.checked) && visible.length > 0;
+      visible.forEach(c => { c.checkbox.checked = !allChecked; });
       updateBulkBar();
     };
     bulkDeleteBtn.onclick = () => {
@@ -3262,6 +3288,28 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   });
 
   wrap.appendChild(grid);
+
+  if (filterInput) {
+    noMatchRow = document.createElement('div');
+    noMatchRow.className = 'activity-list-no-match hidden';
+    noMatchRow.textContent = 'No matches';
+    grid.appendChild(noMatchRow);
+
+    const cards = Array.from(grid.querySelectorAll('.activity-card'));
+    filterInput.oninput = () => {
+      const q = filterInput.value.trim().toLowerCase();
+      let visibleCount = 0;
+      cards.forEach(card => {
+        const name = (card.querySelector('.activity-card-title') || {}).textContent || '';
+        const match = !q || name.toLowerCase().includes(q);
+        card.style.display = match ? '' : 'none';
+        if (match) visibleCount++;
+      });
+      noMatchRow.classList.toggle('hidden', visibleCount !== 0);
+      if (supportsBulk) updateBulkBar();
+    };
+  }
+
   return wrap;
 }
 
