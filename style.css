@@ -3028,78 +3028,27 @@
   }
 
   /* ── DESKTOP / LAPTOP (≥900px) ──
-     Below this width the hamburger drawer stays exactly what it always
-     was: a slide-in overlay you open with the menu button and close by
-     tapping away, covering the screen. At ≥900px it instead becomes a
-     permanent left sidebar — same as VS Code's activity/file panel or
-     Claude's chat-history rail — sitting alongside the chat instead of
-     covering it. No HTML was moved for this: `body` becomes a row flex
-     container, `#drawer` drops out of `position: fixed` into that row
-     as a normal column, and `#app` (header + messages + composer) fills
-     the rest of the row. The open/close JS (openDrawer/closeDrawer,
-     which just toggle the `.show` class) still runs, but toggling
-     `.show` has no effect at this width since the sidebar is display:
-     flex regardless — see the `#drawer` override below. */
+     The chat column itself stays a comfortable reading width (like
+     Claude/ChatGPT's desktop layout) instead of stretching across a
+     whole ultrawide monitor — walls of full-width text and giant empty
+     input bars are what "not compatible with laptop view" usually
+     means in practice. Everything inside keeps working exactly as on
+     mobile; only the outer width changes. */
   @media (min-width: 900px) {
-    html, body { overflow: hidden; }
-
-    body {
-      display: flex;
-      flex-direction: row;
-      align-items: stretch;
-      height: 100vh;
-    }
-
-    /* Overlay scrim is what the phone version uses to dim/close the
-       drawer on outside-tap — meaningless once the drawer is a fixed
-       sidebar that's always open and never covers the chat. */
-    #drawer-overlay { display: none; }
-
-    /* No open/close on desktop — the sidebar is just always there — so
-       both the hamburger button that used to open it and the X button
-       inside it that used to close it are dead controls now; hide both
-       rather than leave clickable buttons that do nothing useful. */
-    .menu-btn { display: none; }
-    .drawer-close-btn { display: none; }
-
-    #drawer {
-      position: relative;
-      inset: auto;
-      top: auto; right: auto;
-      flex-shrink: 0;
-      width: 280px;
-      height: 100vh;
-      transform: none !important;
-      border-left: none;
-      border-right: 1px solid var(--border-2);
-      box-shadow: none;
-      order: -1; /* renders left of #app regardless of DOM order */
-    }
-
-    #ambient { position: fixed; }
+    html, body { overflow: auto; }
 
     #app {
-      position: relative;
-      flex: 1 1 auto;
-      min-width: 0;
+      max-width: 900px;
+      margin: 0 auto;
       height: 100vh;
+      box-shadow: 0 0 60px rgba(0,0,0,0.35);
     }
 
     header { padding: 18px 28px 12px; }
 
-    /* Chat content itself still caps at a comfortable reading width and
-       centers within whatever space is left next to the sidebar — full-
-       width paragraphs across a wide laptop screen are as hard to read
-       as they are on an ultrawide monitor. */
-    #messages, #dock > #chatbar, #dock > .footnote {
-      max-width: 760px;
-      margin-left: auto;
-      margin-right: auto;
-    }
     #messages { padding: 18px 28px 22px; }
 
-    .msg-bubble { max-width: 100%; }
-    .msg-wrap.user { max-width: 640px; align-self: flex-end; }
+    .msg-bubble { max-width: 720px; }
 
     #dock { padding: 12px 20px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
     #chatbar { padding: 10px 10px 10px 20px; }
@@ -3114,15 +3063,13 @@
 
     /* Full-screen sheets/overlays (code editor, card details, tab
        switcher, attach sheet) intentionally stay position:fixed and
-       viewport-wide — they're modal layers above everything, sidebar
-       included, so capping their width here isn't needed. */
+       viewport-wide — they're modal layers above the #app column, not
+       part of it, so capping their width here isn't needed. */
   }
 
   /* ── WIDE DESKTOP (≥1200px): a little extra breathing room, cards
      go three-wide instead of stretching two cards very wide ── */
   @media (min-width: 1200px) {
-    #drawer { width: 300px; }
-    #messages, #dock > #chatbar, #dock > .footnote { max-width: 880px; }
+    #app { max-width: 1040px; }
     .activity-grid { grid-template-columns: repeat(3, 1fr); }
   }
-
