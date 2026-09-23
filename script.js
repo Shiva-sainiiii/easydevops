@@ -2695,7 +2695,11 @@ function buildFileListBubble(repo, items, path) {
     if (paths.length) requestBulkFileDelete(repo, paths, bulkDeleteBtn, () => setSelectMode(false));
   };
 
-  items.forEach(item => {
+  const rowCache = new Map(); // item -> row/swipeWrap element, built once and reused
+
+  function createRow(item) {
+    if (rowCache.has(item)) return rowCache.get(item);
+
     const row = document.createElement('div');
     row.className = 'file-row';
 
@@ -2774,18 +2778,84 @@ function buildFileListBubble(repo, items, path) {
         onSwipeRight: () => dlBtn.click(),
         onSwipeLeft: () => requestFileRowDelete(repo, item.path, delBtn),
       });
-      list.appendChild(swipeWrap);
-      return;
+      rowCache.set(item, swipeWrap);
+      return swipeWrap;
     }
 
     // Dir row: whole row is a tap target that descends into the folder
     // via navigateTo(), same as clicking a breadcrumb segment.
     row.classList.add('file-row-dir');
     row.onclick = () => navigateTo(item.path);
-    list.appendChild(row);
-  });
+    rowCache.set(item, row);
+    return row;
+  }
+
+  // Only the first FILE_LIST_VISIBLE_CAP rows are built and appended up
+  // front — a folder with many files was turning "list files" into a huge
+  // chat bubble. The rest render lazily via "Show all" or the filter box.
+  const FILE_LIST_VISIBLE_CAP = 10;
+  const initialItems = items.slice(0, FILE_LIST_VISIBLE_CAP);
+  initialItems.forEach(item => list.appendChild(createRow(item)));
 
   wrap.appendChild(list);
+
+  const showAllSlot = document.createComment('show-all-slot');
+  wrap.appendChild(showAllSlot);
+
+  let noMatchRow = null;
+  let showAllBtn = null;
+  const hasMore = items.length > FILE_LIST_VISIBLE_CAP;
+  if (hasMore) {
+    const hiddenCount = items.length - FILE_LIST_VISIBLE_CAP;
+    showAllBtn = document.createElement('button');
+    showAllBtn.className = 'activity-list-show-all';
+    showAllBtn.textContent = `Show all ${items.length} (${hiddenCount} more)`;
+    showAllBtn.onclick = () => {
+      items.slice(FILE_LIST_VISIBLE_CAP).forEach(item => list.insertBefore(createRow(item), noMatchRow));
+      showAllBtn.remove();
+    };
+    wrap.insertBefore(showAllBtn, showAllSlot.nextSibling);
+  }
+
+  // A filter box only earns its place once there's actually something to
+  // filter through — same threshold logic as the activity list.
+  if (items.length > 6) {
+    const filterWrap = document.createElement('div');
+    filterWrap.className = 'activity-list-filter-wrap';
+    const filterInput = document.createElement('input');
+    filterInput.type = 'text';
+    filterInput.className = 'activity-list-filter-input';
+    filterInput.placeholder = `Filter ${items.length} by name…`;
+    filterInput.autocomplete = 'off';
+    filterInput.autocapitalize = 'off';
+    filterInput.spellcheck = false;
+    filterWrap.appendChild(filterInput);
+    wrap.insertBefore(filterWrap, list);
+
+    noMatchRow = document.createElement('div');
+    noMatchRow.className = 'activity-list-no-match hidden';
+    noMatchRow.textContent = 'No matches';
+    list.appendChild(noMatchRow);
+
+    filterInput.oninput = () => {
+      const q = filterInput.value.trim().toLowerCase();
+
+      if (!q) {
+        Array.from(list.children).forEach(c => { if (c !== noMatchRow) c.remove(); });
+        initialItems.forEach(item => list.insertBefore(createRow(item), noMatchRow));
+        if (hasMore && showAllBtn && !wrap.contains(showAllBtn)) wrap.insertBefore(showAllBtn, showAllSlot.nextSibling);
+        noMatchRow.classList.add('hidden');
+        return;
+      }
+
+      if (showAllBtn && wrap.contains(showAllBtn)) showAllBtn.remove();
+      const matches = items.filter(item => (item.path || item.name || '').toLowerCase().includes(q));
+      Array.from(list.children).forEach(c => { if (c !== noMatchRow) c.remove(); });
+      matches.forEach(item => list.insertBefore(createRow(item), noMatchRow));
+      noMatchRow.classList.toggle('hidden', matches.length !== 0);
+    };
+  }
+
   return wrap;
 }
 
@@ -3103,6 +3173,15 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
     wrap.appendChild(filterWrap);
   }
 
+  // Only the first ACTIVITY_LIST_VISIBLE_CAP cards are actually built and
+  // put in the DOM up front — with long lists (many repos/projects) building
+  // every card bloated the chat bubble hugely. Cards beyond the cap are
+  // built lazily, on demand, either by typing in the filter (which searches
+  // the full `items` array, not just what's rendered) or by tapping
+  // "Show all N".
+  const ACTIVITY_LIST_VISIBLE_CAP = 10;
+  const cardCache = new Map(); // item -> card element, built once and reused
+
   const bulkBar = document.createElement('div');
   bulkBar.className = 'activity-list-bulk-bar';
   const checkboxes = []; // {checkbox, item}
@@ -3141,12 +3220,21 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   }
   wrap.appendChild(bulkBar);
 
+  // A card that's been searched/collapsed out of the grid entirely (see
+  // the capped-list + on-demand filter above) is detached from the DOM,
+  // so .closest('.activity-card') returns null for its checkbox — treat
+  // that the same as "not visible" rather than throwing on .style.
+  function isCardVisible(checkbox) {
+    const card = checkbox.closest('.activity-card');
+    return !!card && card.style.display !== 'none';
+  }
+
   function updateBulkBar() {
     const checked = checkboxes.filter(c => c.checkbox.checked);
     // "Select all" only ever means "all visible" — a filtered-out card
     // stays exactly as it was (checked or not) rather than being silently
     // swept into a bulk action the user can't currently see.
-    const visible = checkboxes.filter(c => c.checkbox.closest('.activity-card').style.display !== 'none');
+    const visible = checkboxes.filter(c => isCardVisible(c.checkbox));
     bulkCount.textContent = `${checked.length} selected`;
     bulkDeleteBtn.disabled = checked.length === 0;
     if (bulkPrivateBtn) bulkPrivateBtn.disabled = checked.length === 0;
@@ -3168,7 +3256,7 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
     selectBtn.onclick = () => setSelectMode(!wrap.classList.contains('select-mode'));
     bulkSelectAllBtn.onclick = () => {
       // Only toggle cards the filter is currently showing.
-      const visible = checkboxes.filter(c => c.checkbox.closest('.activity-card').style.display !== 'none');
+      const visible = checkboxes.filter(c => isCardVisible(c.checkbox));
       const allChecked = visible.every(c => c.checkbox.checked) && visible.length > 0;
       visible.forEach(c => { c.checkbox.checked = !allChecked; });
       updateBulkBar();
@@ -3198,7 +3286,9 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
   const grid = document.createElement('div');
   grid.className = 'activity-grid';
 
-  items.forEach(item => {
+  function createCard(item) {
+    if (cardCache.has(item)) return cardCache.get(item);
+
     const status = normalizeActivityStatus(kind, item.status);
     const url = activityUrlFor(kind, item);
 
@@ -3284,10 +3374,38 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
     chevron.innerHTML = '<path d="M9 18l6-6-6-6"/>';
     card.appendChild(chevron);
 
-    grid.appendChild(card);
-  });
+    cardCache.set(item, card);
+    return card;
+  }
+
+  // Up front, only build+append the first N cards — this is what keeps a
+  // long repo/project list from ballooning the chat message. The rest of
+  // `items` stays un-rendered until the filter searches for them or
+  // "Show all" is tapped.
+  const initialItems = items.slice(0, ACTIVITY_LIST_VISIBLE_CAP);
+  initialItems.forEach(item => grid.appendChild(createCard(item)));
 
   wrap.appendChild(grid);
+
+  // Fixed anchor slot for the "Show all" button, right after the grid —
+  // showAllBtn always gets inserted/removed relative to this, so its
+  // position in `wrap` never depends on filter state.
+  const showAllSlot = document.createComment('show-all-slot');
+  wrap.appendChild(showAllSlot);
+
+  let showAllBtn = null;
+  const hasMore = items.length > ACTIVITY_LIST_VISIBLE_CAP;
+  if (hasMore) {
+    const hiddenCount = items.length - ACTIVITY_LIST_VISIBLE_CAP;
+    showAllBtn = document.createElement('button');
+    showAllBtn.className = 'activity-list-show-all';
+    showAllBtn.textContent = `Show all ${items.length} (${hiddenCount} more)`;
+    showAllBtn.onclick = () => {
+      items.slice(ACTIVITY_LIST_VISIBLE_CAP).forEach(item => grid.insertBefore(createCard(item), noMatchRow));
+      showAllBtn.remove();
+    };
+    wrap.insertBefore(showAllBtn, showAllSlot.nextSibling);
+  }
 
   if (filterInput) {
     noMatchRow = document.createElement('div');
@@ -3295,17 +3413,27 @@ function buildActivityListBubble(kind, items, headerText, onCardTap) {
     noMatchRow.textContent = 'No matches';
     grid.appendChild(noMatchRow);
 
-    const cards = Array.from(grid.querySelectorAll('.activity-card'));
     filterInput.oninput = () => {
       const q = filterInput.value.trim().toLowerCase();
-      let visibleCount = 0;
-      cards.forEach(card => {
-        const name = (card.querySelector('.activity-card-title') || {}).textContent || '';
-        const match = !q || name.toLowerCase().includes(q);
-        card.style.display = match ? '' : 'none';
-        if (match) visibleCount++;
-      });
-      noMatchRow.classList.toggle('hidden', visibleCount !== 0);
+
+      if (!q) {
+        // Cleared filter — collapse back to the capped view rather than
+        // leaving every searched-up card sitting in the DOM.
+        Array.from(grid.querySelectorAll('.activity-card')).forEach(c => c.remove());
+        initialItems.forEach(item => grid.insertBefore(createCard(item), noMatchRow));
+        if (hasMore && showAllBtn && !wrap.contains(showAllBtn)) wrap.insertBefore(showAllBtn, showAllSlot.nextSibling);
+        noMatchRow.classList.add('hidden');
+        if (supportsBulk) updateBulkBar();
+        return;
+      }
+
+      // A live query searches the FULL items array (not just whatever's
+      // currently rendered), building any newly-matched card on demand.
+      if (showAllBtn && wrap.contains(showAllBtn)) showAllBtn.remove();
+      const matches = items.filter(item => (item.name || '').toLowerCase().includes(q));
+      Array.from(grid.querySelectorAll('.activity-card')).forEach(c => c.remove());
+      matches.forEach(item => grid.insertBefore(createCard(item), noMatchRow));
+      noMatchRow.classList.toggle('hidden', matches.length !== 0);
       if (supportsBulk) updateBulkBar();
     };
   }

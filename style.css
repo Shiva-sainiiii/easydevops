@@ -2569,6 +2569,35 @@
   }
   .activity-list-no-match.hidden { display: none; }
 
+  /* ── SHOW ALL — only the first N cards/rows are built by default (see
+     ACTIVITY_LIST_VISIBLE_CAP / FILE_LIST_VISIBLE_CAP in script.js), to
+     keep long repo/project/file lists from bloating the chat bubble.
+     This reveals the rest on tap; searching the filter box above does
+     the same automatically. Shared by both the activity-card grid and
+     the file-list. */
+  .activity-list-show-all {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 9px 11px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-2);
+    border-radius: 9px;
+    color: var(--accent-2);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .activity-list-show-all:active {
+    transform: scale(.98);
+    background: rgba(54,209,255,0.1);
+    border-color: rgba(54,209,255,0.4);
+  }
+
   .activity-list-bulk-bar {
     display: none;
     align-items: center; gap: 8px;
@@ -2981,3 +3010,66 @@
     margin-bottom: 2px;
   }
 
+
+  /* ════════════════════════════════════════════════════════════════
+     RESPONSIVE — DESKTOP / LAPTOP / TABLET LAYOUT
+     Everything above this point was written mobile-first with fixed
+     px/vw sizing and no breakpoints, so on a laptop screen it stretched
+     edge-to-edge and felt cramped/oversized. This block layers desktop
+     behaviour on top without touching any of the mobile rules above —
+     it only takes effect at wider viewports, so phones are unaffected.
+     ════════════════════════════════════════════════════════════════ */
+
+  /* ── TABLET (≥600px): free the hard mobile width caps a little ── */
+  @media (min-width: 600px) {
+    .msg-bubble { max-width: 640px; }
+    .activity-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .activity-grid .activity-card { width: auto; }
+  }
+
+  /* ── DESKTOP / LAPTOP (≥900px) ──
+     The chat column itself stays a comfortable reading width (like
+     Claude/ChatGPT's desktop layout) instead of stretching across a
+     whole ultrawide monitor — walls of full-width text and giant empty
+     input bars are what "not compatible with laptop view" usually
+     means in practice. Everything inside keeps working exactly as on
+     mobile; only the outer width changes. */
+  @media (min-width: 900px) {
+    html, body { overflow: auto; }
+
+    #app {
+      max-width: 900px;
+      margin: 0 auto;
+      height: 100vh;
+      box-shadow: 0 0 60px rgba(0,0,0,0.35);
+    }
+
+    header { padding: 18px 28px 12px; }
+
+    #messages { padding: 18px 28px 22px; }
+
+    .msg-bubble { max-width: 720px; }
+
+    #dock { padding: 12px 20px; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+    #chatbar { padding: 10px 10px 10px 20px; }
+
+    /* Repo/Vercel/Netlify/Render cards and file rows get room to sit
+       side-by-side instead of one long mobile-width column, so a
+       10-item capped list (see script.js ACTIVITY_LIST_VISIBLE_CAP)
+       actually uses the wider screen instead of leaving it empty. */
+    .activity-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+    .suggest-dropdown { max-width: 480px; }
+
+    /* Full-screen sheets/overlays (code editor, card details, tab
+       switcher, attach sheet) intentionally stay position:fixed and
+       viewport-wide — they're modal layers above the #app column, not
+       part of it, so capping their width here isn't needed. */
+  }
+
+  /* ── WIDE DESKTOP (≥1200px): a little extra breathing room, cards
+     go three-wide instead of stretching two cards very wide ── */
+  @media (min-width: 1200px) {
+    #app { max-width: 1040px; }
+    .activity-grid { grid-template-columns: repeat(3, 1fr); }
+  }
