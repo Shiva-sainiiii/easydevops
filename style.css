@@ -909,7 +909,7 @@
     width: min(86vw, 360px);
     height: 100dvh;
     height: 100vh;
-    background: linear-gradient(180deg, #0c1719 0%, #081213 100%);
+    background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
     border-left: 1px solid var(--border-2);
     box-shadow: -12px 0 40px rgba(0,0,0,0.5);
     transform: translateX(100%);
