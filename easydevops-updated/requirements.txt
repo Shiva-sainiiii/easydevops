@@ -1,0 +1,8 @@
+flask
+flask-cors
+requests
+python-dotenv
+cryptography
+itsdangerous
+psycopg2-binary
+firebase-admin
