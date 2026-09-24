@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+
+<title>Easy DevOps — GitHub, Vercel, Netlify & Render se Chat karo</title>
+<meta name="description" content="Easy DevOps ek AI-powered chat tool hai jo GitHub repos banata hai, Vercel/Netlify pe deploy karta hai, aur Render services manage karta hai — sab kuch tumhare khud ke account me, Hindi/English chat commands se. Mobile-first, secure OAuth login." />
+<meta name="keywords" content="devops agent, ai devops tool, github automation, vercel deploy chatbot, netlify deployment ai, render service manager, chat based deployment, devops chatbot, github repo manager ai, hinglish devops tool" />
+<meta name="author" content="Shiva Saini" />
+<meta name="robots" content="index, follow" />
+<link rel="canonical" href="https://easydevops.vercel.app/" />
+<meta name="google-site-verification" content="P01x9soQMkl7WRKM-EGjKulOwN_Tqe-ytv7ZaOpKFLI" />
+<!-- Favicons -->
+<link rel="icon" type="image/x-icon" href="/favicon.ico" />
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+<link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<meta name="theme-color" content="#060c0d" />
+
+<!-- Open Graph (WhatsApp/Facebook/LinkedIn link previews) -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Easy DevOps — GitHub, Vercel, Netlify & Render se Chat karo" />
+<meta property="og:description" content="Ek chat interface se GitHub repos banao, Vercel/Netlify pe deploy karo, aur Render services manage karo — apne khud ke account me, secure OAuth ke saath." />
+<meta property="og:image" content="https://multitenant-agent.vercel.app/android-chrome-512x512.png" />
+<meta property="og:url" content="https://multitenant-agent.vercel.app/" />
+<meta property="og:site_name" content="Easy DevOps" />
+
+<!-- Twitter/X card -->
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Easy DevOps — GitHub, Vercel, Netlify & Render se Chat karo" />
+<meta name="twitter:description" content="Ek chat interface se GitHub repos banao, Vercel/Netlify pe deploy karo, aur Render services manage karo — apne khud ke account me." />
+<meta name="twitter:image" content="https://multitenant-agent.vercel.app/android-chrome-512x512.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="ambient"></div>
+<div id="app">
+
+  <header>
+    <div class="brand">
+      <img src="/logo-mark.png" alt="Easy DevOps" class="mark" width="17" height="17" />
+      Easy DevOps
+    </div>
+    <div class="status">
+      <div id="user-badge" class="user-badge" style="display:none;" onclick="toggleUserMenu()">
+        <img id="user-avatar" class="user-avatar" src="" alt="" />
+      </div>
+      <button class="clear-chat-btn" title="Clear chat history" onclick="confirmClearChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/>
+        </svg>
+      </button>
+      <button class="tab-switcher-btn" title="Chats" onclick="openTabSwitcher()">
+        <span class="tab-switcher-count" id="tab-switcher-count">1</span>
+      </button>
+      <button class="menu-btn" title="Menu" onclick="openDrawer()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M3 12h18M3 18h18"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── CHROME-STYLE TAB SWITCHER ──
+       Full-screen grid of session cards, opened via the tab-count button
+       in the header. Each card shows the session title + a text preview
+       of its last message (a lightweight stand-in for a real page
+       thumbnail — this app has chat sessions, not web pages, so there's
+       no page render to snapshot) and a close (X) button, same shape as
+       Chrome's tab-grid: tap a card to switch to it, tap X to close it,
+       "+" to start a new one. Reuses sessionsState (the same data
+       renderChatHistoryList's drawer view reads) so both views always
+       agree — this is just a second, more visual way to browse the same
+       session list, not a separate store. -->
+  <div id="tab-switcher-overlay" class="tab-switcher-overlay">
+    <div class="tab-switcher-topbar">
+      <button class="tab-switcher-new" onclick="startNewChatSession(); closeTabSwitcher();">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="tab-switcher-count-pill" id="tab-switcher-pill">1</div>
+      <button class="tab-switcher-close" onclick="closeTabSwitcher()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="chat-search-wrap tab-switcher-search">
+      <svg class="chat-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      <input type="text" id="tab-switcher-search-input" class="chat-search-input" placeholder="Apne tabs search karo…" oninput="onTabSwitcherSearchInput(event)" />
+      <button class="chat-search-clear hidden" id="tab-switcher-search-clear" onclick="clearTabSwitcherSearch()">✕</button>
+    </div>
+    <div id="tab-switcher-grid" class="tab-switcher-grid"></div>
+  </div>
+
+  <div id="user-menu" class="user-menu">
+    <div class="user-menu-name" id="user-menu-name"></div>
+    <div class="user-menu-item vercel-item" id="vercel-menu-item" onclick="onVercelMenuClick()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L24 22H0L12 1Z"/></svg>
+      <span id="vercel-menu-label">Connect Vercel</span>
+    </div>
+    <div class="user-menu-item netlify-item" id="netlify-menu-item" onclick="onNetlifyMenuClick()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.49 20.005h-.723l-.628-.628v-1.68l3.293-3.293 1.348 1.348-.132.397-2.85 2.85zm-1.351-3.494V15.19l.628-.628h1.68l3.293 3.293-1.348 1.348-.397-.132-2.85-2.85zM3.999 12.5v-.702l.61-.61H8.44l-.001 2.923H4.61l-.61-.611zm14.997-3.183l.628.628v1.68l-3.293 3.293-1.348-1.348.132-.397 2.85-2.85zm-9.276-4.99l.397.132 2.85 2.85-1.348 1.348-.628-.628v-1.68zm5.61 2.982l2.85-2.85.397.132v1.68l-2.85 2.85z"/></svg>
+      <span id="netlify-menu-label">Connect Netlify</span>
+    </div>
+    <div class="user-menu-item render-item" id="render-menu-item" onclick="onRenderMenuClick()">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/><path d="M2 15.5C2 12 5 9 8.5 9H12v6H8.5C5 15 2 19 2 15.5zM22 8.5C22 12 19 15 15.5 15H12V9h3.5C19 9 22 5 22 8.5z"/></svg>
+      <span id="render-menu-label">Connect Render</span>
+    </div>
+    <div class="user-menu-item" onclick="handleLogout()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      Log Out
+    </div>
+  </div>
+
+  <!-- ═══ VERCEL TOKEN PASTE MODAL ═══ -->
+  <div id="vercel-modal-overlay" class="vercel-modal-overlay">
+    <div class="vercel-modal">
+      <div class="vercel-modal-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 1L24 22H0L12 1Z"/></svg>
+        <h2>Connect Vercel</h2>
+      </div>
+      <p class="vercel-modal-desc">Apna Vercel Access Token paste karo. Token banane ke liye:</p>
+      <ol class="vercel-modal-steps">
+        <li>Vercel dashboard → <strong>Settings → Tokens</strong></li>
+        <li><strong>Create Token</strong> dabao, koi bhi naam do</li>
+        <li>Scope <strong>Full Account</strong> select karo, token copy karo</li>
+      </ol>
+      <a class="vercel-token-link" href="https://vercel.com/account/tokens" target="_blank" rel="noopener">vercel.com/account/tokens kholo →</a>
+      <div class="token-input-wrap">
+        <input type="password" id="vercel-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" oninput="onTokenInput('vercel')" />
+        <span id="vercel-token-icon" class="token-validate-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg></span>
+      </div>
+      <div id="vercel-token-label" class="token-validate-label"></div>
+      <div class="token-storage-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>Ye token sirf tumhare backend account me jaake <strong>encrypted</strong> (AES/Fernet) store hota hai — browser me kahi save nahi hota, na hi kabhi plaintext me kahi dikhta hai.</span>
+      </div>
+      <div id="vercel-modal-error" class="vercel-modal-error"></div>
+      <div class="vercel-modal-actions">
+        <button class="prompt-btn go" id="vercel-connect-btn" onclick="submitVercelToken()">Connect</button>
+        <button class="prompt-btn cancel" onclick="hideVercelModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ NETLIFY TOKEN PASTE MODAL ═══ -->
+  <div id="netlify-modal-overlay" class="vercel-modal-overlay">
+    <div class="vercel-modal">
+      <div class="vercel-modal-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M6.49 20.005h-.723l-.628-.628v-1.68l3.293-3.293 1.348 1.348-.132.397-2.85 2.85zm-1.351-3.494V15.19l.628-.628h1.68l3.293 3.293-1.348 1.348-.397-.132-2.85-2.85zM3.999 12.5v-.702l.61-.61H8.44l-.001 2.923H4.61l-.61-.611zm14.997-3.183l.628.628v1.68l-3.293 3.293-1.348-1.348.132-.397 2.85-2.85zm-9.276-4.99l.397.132 2.85 2.85-1.348 1.348-.628-.628v-1.68zm5.61 2.982l2.85-2.85.397.132v1.68l-2.85 2.85z"/></svg>
+        <h2>Connect Netlify</h2>
+      </div>
+      <p class="vercel-modal-desc">Apna Netlify Personal Access Token paste karo. Token banane ke liye:</p>
+      <ol class="vercel-modal-steps">
+        <li>Netlify dashboard → <strong>User settings → Applications</strong></li>
+        <li><strong>Personal access tokens</strong> section me <strong>New access token</strong></li>
+        <li>Naam do, expiration set karo, token copy karo</li>
+      </ol>
+      <a class="vercel-token-link" href="https://app.netlify.com/user/applications#personal-access-tokens" target="_blank" rel="noopener">app.netlify.com/user/applications kholo →</a>
+      <div class="token-input-wrap">
+        <input type="password" id="netlify-token-input" class="vercel-token-input" placeholder="Paste token here" autocomplete="off" oninput="onTokenInput('netlify')" />
+        <span id="netlify-token-icon" class="token-validate-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg></span>
+      </div>
+      <div id="netlify-token-label" class="token-validate-label"></div>
+      <div class="token-storage-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>Ye token sirf tumhare backend account me jaake <strong>encrypted</strong> (AES/Fernet) store hota hai — browser me kahi save nahi hota, na hi kabhi plaintext me kahi dikhta hai.</span>
+      </div>
+      <div id="netlify-modal-error" class="vercel-modal-error"></div>
+      <div class="vercel-modal-actions">
+        <button class="prompt-btn go" id="netlify-connect-btn" onclick="submitNetlifyToken()">Connect</button>
+        <button class="prompt-btn cancel" onclick="hideNetlifyModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ RENDER API KEY PASTE MODAL ═══ -->
+  <div id="render-modal-overlay" class="vercel-modal-overlay">
+    <div class="vercel-modal">
+      <div class="vercel-modal-header">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><circle cx="12" cy="12" r="4"/><path d="M2 15.5C2 12 5 9 8.5 9H12v6H8.5C5 15 2 19 2 15.5zM22 8.5C22 12 19 15 15.5 15H12V9h3.5C19 9 22 5 22 8.5z"/></svg>
+        <h2>Connect Render</h2>
+      </div>
+      <p class="vercel-modal-desc">Apni Render API Key paste karo. Key banane ke liye:</p>
+      <ol class="vercel-modal-steps">
+        <li>Render dashboard → <strong>Account Settings</strong></li>
+        <li><strong>API Keys</strong> section me <strong>Create API Key</strong></li>
+        <li>Naam do, key copy karo</li>
+      </ol>
+      <a class="vercel-token-link" href="https://dashboard.render.com/u/settings#api-keys" target="_blank" rel="noopener">dashboard.render.com/u/settings kholo →</a>
+      <div class="token-input-wrap">
+        <input type="password" id="render-token-input" class="vercel-token-input" placeholder="Paste API key here" autocomplete="off" oninput="onTokenInput('render')" />
+        <span id="render-token-icon" class="token-validate-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg></span>
+      </div>
+      <div id="render-token-label" class="token-validate-label"></div>
+      <div class="token-storage-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        <span>Ye key sirf tumhare backend account me jaake <strong>encrypted</strong> (AES/Fernet) store hoti hai — browser me kahi save nahi hoti, na hi kabhi plaintext me kahi dikhti hai.</span>
+      </div>
+      <div id="render-modal-error" class="vercel-modal-error"></div>
+      <div class="vercel-modal-actions">
+        <button class="prompt-btn go" id="render-connect-btn" onclick="submitRenderToken()">Connect</button>
+        <button class="prompt-btn cancel" onclick="hideRenderModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ INLINE CODE EDITOR / DIFF WIDGET OVERLAY ═══ -->
+  <div id="code-editor-overlay">
+    <div class="editor-topbar">
+      <button class="editor-topbar-close" id="editor-close-btn" title="Close editor">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <div class="editor-topbar-meta">
+        <div class="editor-topbar-path" id="editor-path-label">file.txt</div>
+        <div class="editor-topbar-repo" id="editor-repo-label">repo</div>
+      </div>
+      <button class="editor-topbar-save" id="editor-save-btn">Review changes</button>
+    </div>
+
+    <div class="editor-body" id="editor-edit-pane">
+      <div class="editor-gutter" id="editor-gutter"></div>
+      <div class="editor-highlight-wrap">
+        <pre id="editor-highlight" class="editor-highlight" aria-hidden="true"><code id="editor-highlight-code"></code></pre>
+        <textarea id="editor-textarea" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+      </div>
+    </div>
+
+    <div id="editor-diff-pane">
+      <div class="diff-summary-bar" id="editor-diff-summary"></div>
+      <div class="editor-diff-scroll" id="editor-diff-scroll"></div>
+    </div>
+
+    <div class="editor-status-bar">
+      <span id="editor-status-left">Loading…</span>
+      <span class="editor-conflict" id="editor-conflict-note">⚠️ File changed elsewhere</span>
+    </div>
+  </div>
+
+  <!-- ═══ CARD DETAILS SHEET — repo/Vercel/Netlify/Render card tap ═══
+       Bottom sheet instead of an instant tap-to-redirect: shows name +
+       full meta, an explicit "Open live URL" action, and Delete. Same
+       DOM structure reused for all four activity kinds; content is
+       filled in by openCardDetailsSheet() in script.js. -->
+  <div id="card-details-overlay" class="card-details-overlay">
+    <div class="card-details-backdrop" id="card-details-backdrop"></div>
+    <div class="card-details-sheet">
+      <div class="card-details-handle"></div>
+      <div class="card-details-header">
+        <div class="card-details-icon" id="card-details-icon"></div>
+        <div class="card-details-titlewrap">
+          <div class="card-details-title" id="card-details-title"></div>
+          <div class="card-details-sub" id="card-details-sub"></div>
+        </div>
+      </div>
+      <div class="card-details-meta" id="card-details-meta"></div>
+      <div class="card-details-actions">
+        <a class="card-details-btn primary" id="card-details-open-btn" target="_blank" rel="noopener">Open live URL</a>
+        <button class="card-details-btn ghost hidden" id="card-details-env-btn">⬇ Download .env</button>
+        <button class="card-details-btn danger" id="card-details-delete-btn">Delete</button>
+        <button class="card-details-btn ghost" id="card-details-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ LOGIN GATE — shown until GitHub is connected ═══ -->
+  <div id="login-gate">
+    <div class="login-card">
+      <div class="emblem-ring" style="width:84px;height:84px;">
+        <canvas id="login-emblem-canvas" class="emblem-star" style="width:30px;height:30px;" width="60" height="60"></canvas>
+      </div>
+      <h1>Easy DevOps</h1>
+      <p>Apna GitHub account connect karo — sab kuch tumhare khud ke account me hoga. Koi shared access nahi, koi tumhare tokens hamare server pe plaintext store nahi hote.</p>
+      <a class="github-connect-btn" href="/auth/github/login">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.5 0 12.3c0 5.43 3.44 10.03 8.2 11.66.6.11.82-.27.82-.6 0-.29-.01-1.06-.02-2.08-3.34.75-4.04-1.64-4.04-1.64-.55-1.42-1.33-1.8-1.33-1.8-1.09-.76.08-.75.08-.75 1.2.09 1.84 1.26 1.84 1.26 1.07 1.87 2.81 1.33 3.5 1.02.11-.79.42-1.33.76-1.64-2.66-.31-5.47-1.36-5.47-6.03 0-1.33.46-2.42 1.23-3.28-.12-.31-.53-1.55.12-3.24 0 0 1-.33 3.3 1.25a11.2 11.2 0 016 0c2.3-1.58 3.3-1.25 3.3-1.25.65 1.69.24 2.93.12 3.24.77.86 1.23 1.95 1.23 3.28 0 4.68-2.81 5.72-5.49 6.02.43.38.81 1.13.81 2.28 0 1.64-.02 2.97-.02 3.37 0 .33.22.72.83.6C20.57 22.32 24 17.72 24 12.3 24 5.5 18.63 0 12 0z"/></svg>
+        Connect GitHub
+      </a>
+      <div class="login-scope-note">Requested scopes: <code>repo</code>, <code>delete_repo</code> — repo read/write + repo deletion. Kabhi bhi Disconnect kar sakte ho.</div>
+      <div id="login-error-banner" class="login-error-banner"></div>
+    </div>
+  </div>
+
+  <button id="scroll-fab" title="Latest messages pe jao" onclick="scrollToBottom(true)">
+    <span class="fab-dot"></span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+  </button>
+
+  <!-- Live deploy log now renders inline in the chat thread (see
+       buildDeployLogCard() in script.js) instead of a fixed slide-up
+       panel — no static markup needed here anymore. -->
+
+  <!-- ═══ FULL-SCREEN DRAG & DROP OVERLAY ═══ -->
+  <div id="dropzone-overlay">
+    <div class="dropzone-card">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <div class="dropzone-card-title">Yahan drop karo</div>
+      <div class="dropzone-card-sub">Files, folder, ya ek zip — seedha upload ho jayega</div>
+    </div>
+  </div>
+
+  <!-- ═══ HAMBURGER DRAWER — chat history, connected apps, settings ═══ -->
+  <div id="drawer-overlay" onclick="closeDrawer()"></div>
+  <div id="drawer">
+    <div class="drawer-scroll">
+      <div class="drawer-profile">
+        <div class="drawer-avatar" id="drawer-avatar">?</div>
+        <div class="drawer-profile-info">
+          <div class="drawer-profile-name" id="drawer-name">Easy DevOps</div>
+          <div class="drawer-profile-sub" id="drawer-sub">Loading...</div>
+        </div>
+        <button class="drawer-close-btn" onclick="closeDrawer()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <button class="drawer-logout-btn" onclick="handleLogout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Log Out
+      </button>
+
+      <div class="drawer-divider"></div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Connected Apps</div>
+      </div>
+      <div id="apps-list"></div>
+
+      <div class="drawer-divider"></div>
+
+      <div class="drawer-section">
+        <button class="drawer-section-title drawer-section-toggle" id="settings-toggle-btn" onclick="toggleSettingsPanel()">
+          <span>Settings</span>
+          <svg class="gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        </button>
+      </div>
+      <div id="settings-list" class="settings-collapsed"></div>
+    </div>
+
+    <div class="drawer-footer">Easy DevOps · Multi-tenant</div>
+  </div>
+
+  <div id="scroll-area">
+    <div id="empty-state">
+      <div class="emblem-ring">
+        <canvas id="emblem-canvas" class="emblem-star" width="112" height="112"></canvas>
+      </div>
+      <div>
+        <h1>Easy DevOps se baatein karein</h1>
+        <p>Apne GitHub repos aur (agar connect kiya ho) Vercel projects manage karo — sab tumhare khud ke account me.</p>
+      </div>
+      <div class="chip-row">
+        <div class="chip" onclick="fillInput('Saare GitHub repos list kar')">📁 List my repos</div>
+        <div class="chip" onclick="fillInput('Naya repo bana naam ke saath my-app')">➕ Create new repo</div>
+        <div class="chip" onclick="fillInput('list files in my-app')">📄 List files in a repo</div>
+        <div class="chip" onclick="fillInput('list vercel projects')">▲ List Vercel projects</div>
+      </div>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="typing-indicator">
+      <canvas id="think-canvas" width="60" height="60"></canvas>
+      <div class="think-label"><span id="think-text" class="think-glow">Sochte hue...</span></div>
+    </div>
+  </div>
+
+  <div id="suggest-panel"></div>
+
+  <!-- ── ATTACH SHEET (Claude-style "Add to chat" bottom sheet) ──
+       Replaces the old small popover-above-the-clip-button menu. Same
+       four upload actions as before (files/folder/zip/env), just laid
+       out the way Claude's own attach sheet does: a 3-across icon grid
+       for the primary/most-common actions up top, then a full-width
+       row below for the less-common one (.env import) — row style
+       mirrors Claude's "Web search" toggle row rather than being forced
+       into a 4th grid tile, which is what actually reads as
+       overcrowded on a small screen. -->
+  <div id="attach-sheet-scrim" class="attach-sheet-scrim" onclick="hideAttachMenu()"></div>
+  <div id="attach-menu" class="attach-sheet">
+    <div class="attach-sheet-handle"></div>
+    <div class="attach-sheet-title">Add to chat</div>
+    <div class="attach-sheet-grid">
+      <div class="attach-sheet-tile" onclick="hideAttachMenu(); document.getElementById('fileInput').click()">
+        <div class="attach-sheet-tile-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <div class="attach-sheet-tile-label">Files</div>
+      </div>
+      <div class="attach-sheet-tile" onclick="hideAttachMenu(); document.getElementById('folderInput').click()">
+        <div class="attach-sheet-tile-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        </div>
+        <div class="attach-sheet-tile-label">Folder</div>
+      </div>
+      <div class="attach-sheet-tile" onclick="hideAttachMenu(); document.getElementById('zipInput').click()">
+        <div class="attach-sheet-tile-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M9 7h1M9 11h1M9 15h1"/></svg>
+        </div>
+        <div class="attach-sheet-tile-label">Zip</div>
+      </div>
+    </div>
+    <div class="attach-sheet-row" onclick="hideAttachMenu(); document.getElementById('envInput').click()">
+      <div class="attach-sheet-row-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z"/><line x1="7" y1="14" x2="17" y2="14"/><line x1="7" y1="17" x2="12" y2="17"/></svg>
+      </div>
+      <div class="attach-sheet-row-text">
+        <div class="attach-sheet-row-label">Upload .env</div>
+        <div class="attach-sheet-row-sub">Vercel/Netlify/Render pe bulk import</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dock">
+    <div id="chatbar">
+      <button class="clip-btn" title="Attach" onclick="toggleAttachMenu()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </button>
+      <input type="file" id="fileInput" multiple accept="*/*"
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onFilePicked(event)" />
+      <input type="file" id="folderInput" webkitdirectory directory multiple
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onFolderPicked(event)" />
+      <input type="file" id="zipInput" accept=".zip,application/zip,application/x-zip-compressed"
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onZipPicked(event)" />
+      <input type="file" id="envInput" accept=".env,text/plain"
+        style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"
+        onchange="onEnvPicked(event)" />
+      <textarea id="userInput"
+        placeholder="Message Easy DevOps…"
+        rows="1"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this); onInputChange();"
+      ></textarea>
+      <button id="sendBtn" onclick="handleSendBtnClick()">
+        <svg id="sendIcon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        <svg id="stopIcon" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </button>
+    </div>
+    <div class="footnote">Easy DevOps can make mistakes. Verify deployments before relying on them.</div>
+  </div>
+
+</div>
+<script src="/script.js"></script>
+</body>
+</html>
