@@ -136,6 +136,17 @@ export const INTENT_RULES: Rule[] = [
     r`(?:list|show|dikhao|dikha)\s+.*deployments?\s+(?:for|of)\s+(${SLUG})`,
   ], (m) => ({ project_name: g(m, 1) })],
 
+  // Env DOWNLOAD (.env file, asli values). GET_ENV se pehle rakha hai.
+  ["VERCEL_DOWNLOAD_ENV", [
+    r`(?:download|export|nikal|nikalo|de\s*do|dedo)\s+.*env(?:ironment)?(?:\s+(?:vars?|variables?|file))?\s+(?:for|of|from|ka|ki|ke)\s+(?:vercel\s+)?(?:project\s+)?(${SLUG})`,
+    r`(?:download|export|nikal|nikalo)\s+(?:vercel\s+)?(?:project\s+)?(${SLUG})\s+(?:ka\s+|ki\s+|ke\s+)?\.?env`,
+    r`(?:vercel\s+)?(?:project\s+)?(${SLUG})\s+(?:ka|ki|ke)\s+\.?env(?:ironment)?(?:\s+(?:vars?|variables?|file))?\s+(?:download|export|nikal|nikalo|chahiye|de\s*do|dedo)`,
+  ], (m) => {
+    const t = String(m.input || "");
+    const envTarget = /\bpreview\b/.test(t) ? "preview" : /\b(?:development|dev)\b/.test(t) ? "development" : "production";
+    return { project_name: g(m, 1), env_target: envTarget };
+  }],
+
   ["VERCEL_GET_ENV", [
     r`(?:get|show|dikhao|dikha)\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+(${SLUG})\s+.*vercel`,
     r`vercel\s+.*env(?:ironment)?(?:\s+vars?)?\s+(?:for|of)\s+(${SLUG})`,

@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Env export as .env download. Render: real KEY=value. Vercel/Netlify: sirf "KEY=" scaffold
- * (unki API values return nahi karti) + warning X-Env-Export-Warning header me.
+ * Env export as .env download. Render + Vercel (decrypt=true; ?env=production|preview|development,
+ * Sensitive-type vars khali): real KEY=value. Netlify: sirf "KEY=" scaffold + warning X-Env-Export-Warning header me.
  */
 export async function GET(req: Request) {
   const user = await currentUser();
@@ -18,6 +18,7 @@ export async function GET(req: Request) {
 
   const platform = qs(req, "platform").toLowerCase();
   const target = qs(req, "target");
+  const envTarget = (qs(req, "env") || "production").toLowerCase();
 
   if (!["vercel", "netlify", "render"].includes(platform)) {
     return safeJsonify({ reply: "❌ Platform vercel/netlify/render me se ek honi chahiye.", action: "error" }, 400);
@@ -31,7 +32,8 @@ export async function GET(req: Request) {
     target,
     platform === "vercel" ? getUserVercelToken(user) : null,
     platform === "netlify" ? getUserNetlifyToken(user) : null,
-    platform === "render" ? getUserRenderToken(user) : null
+    platform === "render" ? getUserRenderToken(user) : null,
+    envTarget
   );
   if (!Array.isArray(result)) {
     return safeJsonify({ reply: `❌ ${result.error}`, action: "error" }, 400);

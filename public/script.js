@@ -3526,8 +3526,9 @@ function openCardDetailsSheet(kind, item, url, onCardTap) {
 // Vercel/Netlify only ever containing key names (never values, a
 // platform-API limitation — see env_transfer.py) rides on a response
 // header that a plain link click can't read.
-async function downloadEnvFile(platform, target) {
-  const url = `/download-env?platform=${encodeURIComponent(platform)}&target=${encodeURIComponent(target)}`;
+async function downloadEnvFile(platform, target, envTarget) {
+  const url = `/download-env?platform=${encodeURIComponent(platform)}&target=${encodeURIComponent(target)}` +
+    (envTarget ? `&env=${encodeURIComponent(envTarget)}` : '');
   try {
     const res = await fetch(url);
     if (!res.ok) {
@@ -3538,7 +3539,7 @@ async function downloadEnvFile(platform, target) {
     const warning = res.headers.get('X-Env-Export-Warning');
     const disposition = res.headers.get('Content-Disposition') || '';
     const match = disposition.match(/filename="([^"]+)"/);
-    const filename = match ? match[1] : `${target}.env`;
+    const filename = match ? match[1] : `${target}${envTarget && envTarget !== 'production' ? '.' + envTarget : ''}.env`;
 
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
@@ -4385,10 +4386,15 @@ function buildEnvVarsBubble(platform, targetName, envVars) {
   title.textContent = `${platformIcon} Env vars${targetName ? ` — ${targetName}` : ''}`;
   wrap.appendChild(title);
 
-  if (platform !== 'render') {
+  if (platform === 'netlify') {
     const note = document.createElement('div');
     note.className = 'info-card-desc';
     note.textContent = 'Values encrypted hai, sirf keys dikha sakta hu.';
+    wrap.appendChild(note);
+  } else if (platform === 'vercel') {
+    const note = document.createElement('div');
+    note.className = 'info-card-desc';
+    note.textContent = 'Chat me sirf keys. Asli values ke liye .env download karo (Sensitive-type vars ki value Vercel deta hi nahi).';
     wrap.appendChild(note);
   }
 
@@ -4406,6 +4412,20 @@ function buildEnvVarsBubble(platform, targetName, envVars) {
     rows.appendChild(row);
   });
   wrap.appendChild(rows);
+
+  if (platform === 'vercel' && targetName) {
+    const bar = document.createElement('div');
+    bar.className = 'env-dl-bar';
+    ['production', 'preview', 'development'].forEach(envT => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'file-dl-btn env-dl-btn';
+      b.textContent = '\u2B07 .env \u00B7 ' + envT;
+      b.onclick = () => downloadEnvFile('vercel', targetName, envT);
+      bar.appendChild(b);
+    });
+    wrap.appendChild(bar);
+  }
 
   return wrap;
 }
@@ -6364,8 +6384,8 @@ function createHexLoader(canvasId, opts = {}) {
   ctx.scale(dpr, dpr);
 
   const cx = cssSize / 2, cy = cssSize / 2;
-  const accent = opts.color || '#36d1ff';
-  const accentRGB = opts.colorRGB || '54,209,255';
+  const accent = opts.color || '#f6b400';
+  const accentRGB = opts.colorRGB || '246,180,0';
   const accentDim = `rgba(${accentRGB},0.28)`;
 
   function hexPoints(r, rotation = 0) {

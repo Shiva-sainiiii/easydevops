@@ -53,6 +53,7 @@ const VERCEL_COMMANDS_BLOCK = `11. VERCEL_LIST_PROJECTS
 14. VERCEL_DELETE_PROJECT: {"project_name":"project-name"}
 15. VERCEL_GET_ENV: {"project_name":"project-name"}
 16. VERCEL_SET_ENV: {"project_name":"project-name","key":"KEY","value":"value"}
+17a. VERCEL_DOWNLOAD_ENV: {"project_name":"project-name","env_target":"production|preview|development"} — user .env file download / env values chahe to (env_target default production)
 17. VERCEL_ROLLBACK: {"project_name":"project-name","deployment_id":"optional-specific-id"} — omit deployment_id to rollback to the previous production deployment
 18. VERCEL_LIST_DEPLOYMENTS: {"project_name":"project-name"}
 `;
@@ -79,7 +80,7 @@ const COMMANDS = [
   "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
   "GENERATE_RENDER_YAML:",
   "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
-  "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_SET_ENV:",
+  "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_DOWNLOAD_ENV:", "VERCEL_SET_ENV:",
   "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",
   "NETLIFY_LIST_SITES", "NETLIFY_GET_SITE_INFO:", "NETLIFY_DELETE_SITE:",
   "NETLIFY_GET_ENV:", "NETLIFY_SET_ENV:",

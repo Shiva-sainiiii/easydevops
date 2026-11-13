@@ -34,6 +34,7 @@ import { safeRepoPath, UnsafePathError } from "@/lib/security";
 import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 import { createRenderService } from "@/lib/commands/render_create_service";
 import { createPullRequest } from "@/lib/commands/code_generate";
+import { exportEnvFile } from "@/lib/commands/env_transfer";
 
 /**
  * BUG-1 (old code): executor.py `time` import karna bhool gaya tha, isliye
@@ -660,6 +661,39 @@ export async function executeCommand(
       } else {
         return { reply: `❌ Env vars fetch nahi hue: ${r.text.slice(0, 200)}`, action: "error" };
       }
+    } else if (cmd === "VERCEL_DOWNLOAD_ENV") {
+      if (!vcToken) return { ...VERCEL_CONNECT };
+      const projectName = req(p, "project_name");
+      const rawTarget = String(gd(p, "env_target", "production") || "production").toLowerCase();
+      const envTarget = ["production", "preview", "development"].includes(rawTarget) ? rawTarget : "production";
+      // Values chat me nahi dikhate (secrets chat history me save na ho) - sirf file download card.
+      const result = await exportEnvFile("vercel", projectName, vcToken, null, null, envTarget);
+      if (!Array.isArray(result)) {
+        return { reply: `❌ ${result.error}`, action: "error" };
+      }
+      const [filename, text, warning] = result;
+      const rows = text.split("\n").filter((l) => l.trim() && l.includes("="));
+      const filled = rows.filter((l) => !/^[^=]+=$/.test(l)).length;
+      const envVars = rows.map((l) => ({ key: l.slice(0, l.indexOf("=")), target: [envTarget] }));
+      if (!rows.length) {
+        return {
+          reply: `Project \`${projectName}\` me \`${envTarget}\` target ki koi env vars nahi hai.`,
+          action: "vercel_env",
+          project_name: projectName,
+          env_target: envTarget,
+          env_vars: [],
+        };
+      }
+      return {
+        reply:
+          `📦 \`${projectName}\` ka \`${envTarget}\` .env ready: **${rows.length}** vars, **${filled}** ki value mili.\n` +
+          `Neeche **⬇ Download .env** dabao (file: \`${filename}\`).` +
+          (warning ? `\n⚠️ ${warning}` : ""),
+        action: "vercel_env",
+        project_name: projectName,
+        env_target: envTarget,
+        env_vars: envVars,
+      };
     } else if (cmd === "VERCEL_SET_ENV") {
       if (!vcToken) return { ...VERCEL_CONNECT };
       const projectName = req(p, "project_name");

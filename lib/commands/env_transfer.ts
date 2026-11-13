@@ -181,10 +181,11 @@ export async function exportEnvFile(
   targetName: string,
   vcToken: string | null = null,
   nlToken: string | null = null,
-  rdToken: string | null = null
+  rdToken: string | null = null,
+  envTarget: string = "production"
 ): Promise<EnvExportResult> {
   if (platform === "render") return exportRender(targetName, rdToken);
-  if (platform === "vercel") return exportVercel(targetName, vcToken);
+  if (platform === "vercel") return exportVercel(targetName, vcToken, envTarget);
   if (platform === "netlify") return exportNetlify(targetName, nlToken);
   return { error: `Platform \`${platform}\` pehchana nahi.` };
 }
@@ -201,20 +202,77 @@ async function exportRender(serviceId: string, rdToken: string | null): Promise<
   return [`${serviceId}.env`, toText(lines), null];
 }
 
-async function exportVercel(projectName: string, vcToken: string | null): Promise<EnvExportResult> {
+/** .env line: value me space/#/quote/newline ho to double-quote + escape. */
+function envLine(key: string, value: string): string {
+  if (value === "") return `${key}=`;
+  if (/[\s#"'\\$]/.test(value)) {
+    const esc = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, "\\n");
+    return `${key}="${esc}"`;
+  }
+  return `${key}=${value}`;
+}
+
+async function exportVercel(
+  projectName: string,
+  vcToken: string | null,
+  envTarget: string = "production"
+): Promise<EnvExportResult> {
   if (!vcToken) return { error: "Vercel connected nahi hai." };
+  const target = ["production", "preview", "development"].includes(envTarget) ? envTarget : "production";
   const proj = await vercelFindProject(projectName, vcToken);
   if (!proj) return { error: `Vercel project \`${projectName}\` nahi mila.` };
-  const r = await vcApi("GET", `/v9/projects/${pyStr(gd(proj, "id", null))}/env`, vcToken);
+  const projId = pyStr(gd(proj, "id", null));
+  // decrypt=true: "encrypted" type vars ki asli value aati hai. "sensitive" type ki nahi (Vercel ki policy).
+  const r = await vcApi("GET", `/v9/projects/${projId}/env?decrypt=true`, vcToken);
   if (r.status_code === 401 || r.status_code === 403) return { error: "Vercel token invalid ya expire ho gaya." };
   if (r.status_code !== 200) return { error: `Env vars fetch nahi hue: ${r.text.slice(0, 200)}` };
-  const envs: any[] = gd(r.json(), "envs", []);
-  const warning =
-    "Vercel apni env var VALUES kabhi API se return nahi karta (encrypted-at-rest) — " +
-    "ye sirf KEYS ka scaffold hai, values manually bharni padengi. Full backup ke liye " +
-    "`vercel env pull` CLI command use karo.";
-  const lines = envs.map((e) => `${K(e, "key")}=`);
-  return [`${projectName}.env`, toText(lines), warning];
+  const all: any[] = gd(r.json(), "envs", []);
+  const envs = all.filter((e) => Array.isArray(e.target) && e.target.includes(target));
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  const emptyKeys: string[] = [];
+  const sensitiveKeys: string[] = [];
+  for (const e of envs) {
+    const key = String(K(e, "key"));
+    if (seen.has(key)) continue; // branch-specific duplicates: pehli entry
+    seen.add(key);
+    let value: string | null = typeof e.value === "string" ? e.value : null;
+    if ((value === null || value === "") && e.type !== "sensitive" && e.id) {
+      // list me value na aaye to single-var endpoint try karo
+      try {
+        const one = await vcApi("GET", `/v1/projects/${projId}/env/${pyStr(e.id)}`, vcToken);
+        if (one.status_code === 200) {
+          const v = one.json();
+          if (typeof v?.value === "string") value = v.value;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (e.type === "sensitive") {
+      sensitiveKeys.push(key);
+      lines.push(`${key}=`);
+    } else if (value === null || value === "") {
+      emptyKeys.push(key);
+      lines.push(`${key}=`);
+    } else {
+      lines.push(envLine(key, value));
+    }
+  }
+
+  const parts: string[] = [];
+  if (sensitiveKeys.length) {
+    parts.push(
+      `${sensitiveKeys.length} var(s) "Sensitive" type ke hain (${sensitiveKeys.slice(0, 5).join(", ")}${sensitiveKeys.length > 5 ? ", ..." : ""}) - Vercel inki value kabhi return nahi karta, khali chhodi`
+    );
+  }
+  if (emptyKeys.length) {
+    parts.push(`${emptyKeys.length} var(s) ki value khali/nahi mili (${emptyKeys.slice(0, 5).join(", ")}${emptyKeys.length > 5 ? ", ..." : ""})`);
+  }
+  const warning = parts.length ? `[${target}] ` + parts.join(". ") + "." : null;
+  const suffix = target === "production" ? "" : `.${target}`;
+  return [`${projectName}${suffix}.env`, toText(lines), warning];
 }
 
 async function exportNetlify(siteName: string, nlToken: string | null): Promise<EnvExportResult> {
