@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.vercel
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
