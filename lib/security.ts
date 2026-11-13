@@ -24,6 +24,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /gho_[A-Za-z0-9]{20,}/g, // OAuth-issued GitHub tokens
   /github_pat_[A-Za-z0-9_]{20,}/g,
   /sk-or-v1-[A-Za-z0-9]{20,}/g,
+  /AIza[0-9A-Za-z_-]{30,}/g, // Google AI Studio keys
   /sk-[A-Za-z0-9]{20,}/g,
   /Bearer\s+[A-Za-z0-9\-_.]{15,}/gi,
   /rnd_[A-Za-z0-9]{20,}/g,

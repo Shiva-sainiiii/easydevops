@@ -12,7 +12,7 @@ import { safeJsonify } from "@/lib/security";
 import { buildConfirmation, confirmToken, DESTRUCTIVE_COMMANDS } from "@/lib/commands/confirmation";
 import { executeCommand } from "@/lib/commands/executor";
 import { NO_ARG_COMMANDS, parseIntent } from "@/lib/commands/intent_parser";
-import { AIError, callOpenrouterChat, extractCommand, handleCreateOrEditFile } from "@/lib/commands/ai_fallback";
+import { AIError, NoAIKeyError, callOpenrouterChat, extractCommand, handleCreateOrEditFile } from "@/lib/commands/ai_fallback";
 import { handleCodeGenerate } from "@/lib/commands/code_generate";
 import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 
@@ -87,9 +87,12 @@ export async function POST(req: Request) {
   if (cmd) {
     if (cmd === "CREATE_FILE" || cmd === "EDIT_FILE") {
       try {
-        const result = await handleCreateOrEditFile(cmd, params, userMessage, owner, ghToken);
+        const result = await handleCreateOrEditFile(cmd, params, userMessage, owner, ghToken, user.id);
         return safeJsonify(result);
       } catch (e: any) {
+        if (e instanceof NoAIKeyError) {
+          return safeJsonify({ reply: e.message, action: "ai_setup_required", source: "hybrid" });
+        }
         if (e instanceof AIError) {
           return safeJsonify({ reply: `❌ AI Error: ${e.message}`, action: "error", source: "hybrid" });
         }
@@ -117,9 +120,12 @@ export async function POST(req: Request) {
     if (cmd === "CODE_GENERATE") {
       try {
         params["instruction"] = userMessage;
-        const result = await handleCodeGenerate(params, owner, ghToken);
+        const result = await handleCodeGenerate(params, owner, ghToken, user.id);
         return safeJsonify(result);
       } catch (e: any) {
+        if (e instanceof NoAIKeyError) {
+          return safeJsonify({ reply: e.message, action: "ai_setup_required", source: "hybrid" });
+        }
         if (e instanceof AIError) {
           return safeJsonify({ reply: `❌ AI Error: ${e.message}`, action: "error", source: "hybrid" });
         }
@@ -147,8 +153,11 @@ export async function POST(req: Request) {
   // 3. AI FALLBACK
   let aiText: string;
   try {
-    aiText = await callOpenrouterChat(userMessage, convHistory, owner, !!vcToken, !!nlToken, !!rdToken);
+    aiText = await callOpenrouterChat(userMessage, convHistory, owner, !!vcToken, !!nlToken, !!rdToken, user.id);
   } catch (e: any) {
+    if (e instanceof NoAIKeyError) {
+      return safeJsonify({ reply: e.message, action: "ai_setup_required", source: "ai" });
+    }
     if (e instanceof AIError) {
       return safeJsonify({ reply: `AI Error: ${e.message}`, action: "error", source: "ai" });
     }

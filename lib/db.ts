@@ -76,6 +76,28 @@ async function runInit(): Promise<void> {
   await p.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS netlify_email TEXT");
   await p.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS render_token_encrypted BYTEA");
   await p.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS render_email TEXT");
+
+  // AI Gateway: har user ki apni AI keys (encrypted) + active provider/model
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ai_keys (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        key_encrypted BYTEA NOT NULL,
+        key_hint TEXT NOT NULL,
+        label TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await p.query("CREATE INDEX IF NOT EXISTS ai_keys_user_provider_idx ON ai_keys (user_id, provider)");
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ai_settings (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        active_provider TEXT,
+        models JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 }
 
 export function initDb(): Promise<void> {
@@ -209,4 +231,104 @@ export async function clearRenderToken(userId: number | string) {
 export function getUserRenderToken(user: UserRow): string | null {
   if (!user.render_token_encrypted) return null;
   return decryptToken(user.render_token_encrypted);
+}
+
+// ---- AI Gateway (per-user AI keys) ----
+
+export interface AiKeyRow {
+  id: number;
+  provider: string;
+  key_hint: string;
+  label: string | null;
+}
+
+export interface AiSettings {
+  active_provider: string | null;
+  models: Record<string, string>;
+}
+
+/** Keys ki list — sirf hint (last 4) ke saath, asli key kabhi nahi. */
+export async function listAiKeys(userId: number | string): Promise<AiKeyRow[]> {
+  return query<AiKeyRow>(
+    "SELECT id, provider, key_hint, label FROM ai_keys WHERE user_id = $1 ORDER BY id",
+    [userId]
+  );
+}
+
+/** Ek provider ki saari keys decrypt karke (sirf server ke andar use ke liye). */
+export async function getAiKeys(userId: number | string, provider: string): Promise<string[]> {
+  const rows = await query<{ key_encrypted: Buffer }>(
+    "SELECT key_encrypted FROM ai_keys WHERE user_id = $1 AND provider = $2 ORDER BY id",
+    [userId, provider]
+  );
+  const out: string[] = [];
+  for (const r of rows) {
+    const k = decryptToken(r.key_encrypted);
+    if (k) out.push(k);
+  }
+  return out;
+}
+
+/** Key save karta hai. Same key pehle se ho to duplicate nahi banata. */
+export async function addAiKey(
+  userId: number | string,
+  provider: string,
+  rawKey: string,
+  label: string | null
+): Promise<void> {
+  const existing = await getAiKeys(userId, provider);
+  if (existing.includes(rawKey)) return;
+  await query(
+    "INSERT INTO ai_keys (user_id, provider, key_encrypted, key_hint, label) VALUES ($1, $2, $3, $4, $5)",
+    [userId, provider, encryptToken(rawKey), rawKey.slice(-4), label]
+  );
+}
+
+/** Key hatata hai. Provider ki last key gayi to uska saved model / active selection bhi saaf. */
+export async function deleteAiKey(userId: number | string, keyId: number): Promise<void> {
+  const rows = await query<{ provider: string }>(
+    "DELETE FROM ai_keys WHERE id = $1 AND user_id = $2 RETURNING provider",
+    [keyId, userId]
+  );
+  if (!rows.length) return;
+  const provider = rows[0].provider;
+  const left = await query("SELECT 1 FROM ai_keys WHERE user_id = $1 AND provider = $2 LIMIT 1", [userId, provider]);
+  if (left.length) return;
+
+  const st = await getAiSettings(userId);
+  const models = { ...st.models };
+  delete models[provider];
+  let active = st.active_provider;
+  if (active === provider) {
+    const others = await query<{ provider: string }>(
+      "SELECT DISTINCT provider FROM ai_keys WHERE user_id = $1 ORDER BY provider",
+      [userId]
+    );
+    active = others.length ? others[0].provider : null;
+  }
+  await query(
+    `INSERT INTO ai_settings (user_id, active_provider, models) VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (user_id) DO UPDATE SET active_provider = $2, models = $3::jsonb, updated_at = NOW()`,
+    [userId, active, JSON.stringify(models)]
+  );
+}
+
+export async function getAiSettings(userId: number | string): Promise<AiSettings> {
+  const rows = await query<{ active_provider: string | null; models: Record<string, string> | null }>(
+    "SELECT active_provider, models FROM ai_settings WHERE user_id = $1",
+    [userId]
+  );
+  const r = rows[0];
+  return { active_provider: r?.active_provider ?? null, models: (r?.models as Record<string, string>) ?? {} };
+}
+
+/** Active provider + uska model save karta hai (baaki providers ke saved models same rehte hain). */
+export async function setAiActive(userId: number | string, provider: string, model: string): Promise<void> {
+  const st = await getAiSettings(userId);
+  const models = { ...st.models, [provider]: model };
+  await query(
+    `INSERT INTO ai_settings (user_id, active_provider, models) VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (user_id) DO UPDATE SET active_provider = $2, models = $3::jsonb, updated_at = NOW()`,
+    [userId, provider, JSON.stringify(models)]
+  );
 }

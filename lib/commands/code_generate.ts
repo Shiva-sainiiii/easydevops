@@ -4,10 +4,9 @@
  * Default: NAYI branch pe ONE commit (Git Data API: blobs -> tree -> commit -> ref) + PR.
  * DIRECT_COMMIT_RE wale phrases se seedha default branch pe commit.
  */
-import { config, OPENROUTER_MODEL } from "@/lib/config";
-import { post, type PyResponse } from "@/lib/http";
+import { aiChat } from "@/lib/ai";
+import { type PyResponse } from "@/lib/http";
 import { pyRegex, CODEGEN_INSPECT_VERBS_RE, CODEGEN_STRONG_CHANGE_VERBS_RE, CODEGEN_GENERIC_DO_RE } from "@/lib/commands/intent_parser";
-import { pyStr } from "@/lib/pyjson";
 import { ghApi } from "@/lib/providers/github";
 import { safeRepoPath, UnsafePathError } from "@/lib/security";
 import { AIError } from "@/lib/commands/errors";
@@ -122,27 +121,21 @@ export async function listRepoPaths(
   return [paths, repoR];
 }
 
-export async function callOpenrouterMultifile(instruction: string, fileContext: string): Promise<any> {
+export async function callOpenrouterMultifile(
+  instruction: string,
+  fileContext: string,
+  userId: number | string
+): Promise<any> {
   const systemPrompt = CODEGEN_MULTIFILE_SYSTEM_PROMPT(MAX_CODEGEN_FILES);
   const userContent = fileContext ? `Existing files:\n${fileContext}\n\nRequest: ${instruction}` : instruction;
-  const resp = await post("https://openrouter.ai/api/v1/chat/completions", {
-    headers: { Authorization: `Bearer ${pyStr(config.OPENROUTER_KEY ?? null)}`, "Content-Type": "application/json" },
-    json: {
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0.3,
-    },
-    timeout: 60,
-  });
-  const aiResp = resp.json();
-
-  if (aiResp && typeof aiResp === "object" && "error" in aiResp) {
-    throw new AIError(aiResp.error?.message ?? "Unknown AI error");
-  }
-  let raw: string = String(aiResp.choices[0].message.content).trim();
+  let raw: string = await aiChat(
+    userId,
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent },
+    ],
+    { temperature: 0.3, timeout: 60 }
+  );
   raw = raw.replace(/^```(?:json)?\n/, "");
   raw = raw.replace(/\n```$/, "");
   let data: any;
@@ -339,7 +332,8 @@ export async function createPullRequest(
 export async function handleCodeGenerate(
   params: Record<string, any>,
   owner: string,
-  ghToken: string
+  ghToken: string,
+  userId: number | string
 ): Promise<Record<string, any>> {
   const repo = req(params, "repo");
   const instruction: string = req(params, "instruction");
@@ -350,7 +344,7 @@ export async function handleCodeGenerate(
   }
 
   const fileContext = await buildCodegenFileContext(repo, owner, ghToken, instruction, existingPaths);
-  const aiData = await callOpenrouterMultifile(instruction, fileContext);
+  const aiData = await callOpenrouterMultifile(instruction, fileContext, userId);
 
   const replyText = gd(aiData, "reply", null) || "…";
   const reasoning = String(gd(aiData, "reasoning", null) || "").trim();

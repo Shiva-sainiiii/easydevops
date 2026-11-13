@@ -1,10 +1,8 @@
 import { currentUser } from "@/lib/auth";
-import { config, OPENROUTER_MODEL } from "@/lib/config";
-import { post } from "@/lib/http";
+import { aiChat } from "@/lib/ai";
 import { pyStr } from "@/lib/pyjson";
 import { readJsonBody } from "@/lib/route-utils";
 import { redact, safeJsonify } from "@/lib/security";
-import { AIError } from "@/lib/commands/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,23 +31,14 @@ export async function POST(req: Request) {
   const userPrompt = `Error message: ${errorMessage}\n\nBuild log (tail):\n${logTail}`.slice(0, 6000);
 
   try {
-    const resp = await post("https://openrouter.ai/api/v1/chat/completions", {
-      headers: { Authorization: `Bearer ${pyStr(config.OPENROUTER_KEY ?? null)}`, "Content-Type": "application/json" },
-      json: {
-        model: OPENROUTER_MODEL,
-        messages: [
-          { role: "system", content: ERROR_ANALYSIS_SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.2,
-      },
-      timeout: 25,
-    });
-    const aiResp = resp.json();
-    if (aiResp && typeof aiResp === "object" && "error" in aiResp) {
-      throw new AIError(aiResp.error?.message ?? "Unknown AI error");
-    }
-    let suggestion: string = String(aiResp.choices[0].message.content).trim();
+    let suggestion: string = await aiChat(
+      user.id,
+      [
+        { role: "system", content: ERROR_ANALYSIS_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      { temperature: 0.2, timeout: 25 }
+    );
     suggestion = redact(suggestion);
     return safeJsonify({ suggestion });
   } catch {

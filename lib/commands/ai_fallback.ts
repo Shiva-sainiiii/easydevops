@@ -4,14 +4,12 @@
  * use kisi ka GitHub token kabhi nahi milta; uska output bhi sirf executeCommand() ke
  * through, calling user ke token se hi GitHub tak pahunchta hai.
  */
-import { config, OPENROUTER_MODEL } from "@/lib/config";
-import { post } from "@/lib/http";
-import { pyStr } from "@/lib/pyjson";
+import { aiChat } from "@/lib/ai";
 import { NO_ARG_COMMANDS } from "@/lib/commands/intent_parser";
 import { executeCommand } from "@/lib/commands/executor";
-import { AIError } from "@/lib/commands/errors";
+import { AIError, NoAIKeyError } from "@/lib/commands/errors";
 
-export { AIError };
+export { AIError, NoAIKeyError };
 
 // ════════════════════════════════════════════════════════════════
 const systemPrompt = (v: {
@@ -127,7 +125,8 @@ export async function callOpenrouterChat(
   githubLogin: string,
   vercelConnected = false,
   netlifyConnected = false,
-  renderConnected = false
+  renderConnected = false,
+  userId: number | string
 ): Promise<string> {
   const vercel_clause = vercelConnected ? " and their connected Vercel account" : "";
   const vercel_commands = vercelConnected ? VERCEL_COMMANDS_BLOCK : "";
@@ -161,39 +160,24 @@ export async function callOpenrouterChat(
   }
   messages.push({ role: "user", content: userMessage });
 
-  const resp = await post("https://openrouter.ai/api/v1/chat/completions", {
-    headers: { Authorization: `Bearer ${pyStr(config.OPENROUTER_KEY ?? null)}`, "Content-Type": "application/json" },
-    json: { model: OPENROUTER_MODEL, messages, temperature: 0.2 },
-    timeout: 30,
-  });
-  const aiResp = resp.json();
-
-  if (aiResp && typeof aiResp === "object" && "error" in aiResp) {
-    throw new AIError(aiResp.error?.message ?? "Unknown AI error");
-  }
-  return String(aiResp.choices[0].message.content).trim();
+  // User ki apni key + chuna hua model (AI Gateway)
+  return aiChat(userId, messages, { temperature: 0.2, timeout: 30 });
 }
 
-export async function callOpenrouterCodegen(instruction: string, pathHint = ""): Promise<string> {
+export async function callOpenrouterCodegen(
+  instruction: string,
+  pathHint = "",
+  userId: number | string
+): Promise<string> {
   const userPrompt = pathHint ? `File path: ${pathHint}\n\nInstruction: ${instruction}` : instruction;
-  const resp = await post("https://openrouter.ai/api/v1/chat/completions", {
-    headers: { Authorization: `Bearer ${pyStr(config.OPENROUTER_KEY ?? null)}`, "Content-Type": "application/json" },
-    json: {
-      model: OPENROUTER_MODEL,
-      messages: [
-        { role: "system", content: CODEGEN_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.3,
-    },
-    timeout: 45,
-  });
-  const aiResp = resp.json();
-
-  if (aiResp && typeof aiResp === "object" && "error" in aiResp) {
-    throw new AIError(aiResp.error?.message ?? "Unknown AI error");
-  }
-  let content: string = String(aiResp.choices[0].message.content).trim();
+  let content: string = await aiChat(
+    userId,
+    [
+      { role: "system", content: CODEGEN_SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+    { temperature: 0.3, timeout: 45 }
+  );
   content = content.replace(/^```\w*\n/, "");
   content = content.replace(/\n```$/, "");
   return content;
@@ -204,10 +188,11 @@ export async function handleCreateOrEditFile(
   params: Record<string, any>,
   userMessage: string,
   owner: string,
-  ghToken: string
+  ghToken: string,
+  userId: number | string
 ): Promise<Record<string, any>> {
   const instruction = userMessage.trim();
-  const aiContent = await callOpenrouterCodegen(instruction, "path" in params ? params.path : "");
+  const aiContent = await callOpenrouterCodegen(instruction, "path" in params ? params.path : "", userId);
   const fullParams = {
     repo: params["repo"],
     path: params["path"],

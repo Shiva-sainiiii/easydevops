@@ -40,7 +40,7 @@ applyTheme();
 // (httponly, so JS can't read/forge it) and reflects whatever the
 // server says. /api/me is the single source of truth.
 // ══════════════════════════════════════════════════════════════════
-let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername, netlifyConnected, netlifyEmail, renderConnected, renderEmail } | null
+let authedUser = null; // { login, avatar_url, vercelConnected, vercelUsername, netlifyConnected, netlifyEmail, renderConnected, renderEmail, aiConnected, aiProvider, aiModel, aiKeyCount } | null
 
 async function checkAuth() {
   try {
@@ -56,6 +56,10 @@ async function checkAuth() {
         netlifyEmail: data.netlify_email || null,
         renderConnected: !!data.render_connected,
         renderEmail: data.render_email || null,
+        aiConnected: !!data.ai_connected,
+        aiProvider: data.ai_provider || null,
+        aiModel: data.ai_model || null,
+        aiKeyCount: data.ai_key_count || 0,
       };
       hideLoginGate();
       renderUserBadge();
@@ -112,6 +116,7 @@ function renderUserBadge() {
   renderVercelMenuState();
   renderNetlifyMenuState();
   renderRenderMenuState();
+  renderAIMenuState();
 }
 
 function renderVercelMenuState() {
@@ -5320,6 +5325,7 @@ const PROVIDER_ICONS = {
   vercel: '<svg viewBox="0 0 256 222" fill="#000000" xmlns="http://www.w3.org/2000/svg"><polygon points="128 0 256 221.705 0 221.705"/></svg>',
   netlify: '<svg viewBox="0 0 554 554" xmlns="http://www.w3.org/2000/svg"><path d="M0 0 C182.82 0 365.64 0 554 0 C554 182.82 554 365.64 554 554 C371.18 554 188.36 554 0 554 C0 371.18 0 188.36 0 0 Z" fill="#FEFEFE"/><path d="M0 0 C0.67 -0.005 1.35 -0.009 2.04 -0.014 C4.31 -0.026 6.57 -0.017 8.83 -0.007 C10.46 -0.011 12.08 -0.017 13.7 -0.023 C18.11 -0.037 22.51 -0.032 26.92 -0.022 C31.53 -0.014 36.13 -0.021 40.74 -0.026 C48.48 -0.032 56.22 -0.024 63.95 -0.01 C72.9 0.006 81.86 0.001 90.81 -0.016 C98.49 -0.029 106.17 -0.031 113.84 -0.023 C118.43 -0.019 123.02 -0.018 127.61 -0.028 C131.93 -0.037 136.24 -0.031 140.55 -0.013 C142.14 -0.009 143.73 -0.01 145.31 -0.017 C147.47 -0.025 149.63 -0.015 151.79 0 C153 0.001 154.21 0.002 155.46 0.003 C158.4 0.381 158.4 0.381 160.28 1.784 C161.7 3.822 161.78 5.057 161.78 7.529 C161.79 8.36 161.8 9.191 161.81 10.047 C161.8 11.388 161.8 11.388 161.79 12.756 C161.8 14.137 161.8 14.137 161.8 15.546 C161.8 17.493 161.8 19.44 161.79 21.387 C161.77 24.37 161.79 27.351 161.81 30.334 C161.8 32.225 161.8 34.115 161.79 36.006 C161.8 36.9 161.81 37.794 161.81 38.714 C161.8 39.961 161.8 39.961 161.78 41.233 C161.78 41.963 161.78 42.693 161.78 43.446 C161.26 46.065 160.54 46.787 158.4 48.381 C155.46 48.758 155.46 48.758 151.79 48.762 C151.12 48.767 150.44 48.771 149.75 48.776 C147.48 48.788 145.22 48.779 142.96 48.769 C141.33 48.773 139.71 48.779 138.09 48.785 C133.69 48.799 129.28 48.793 124.87 48.784 C120.26 48.776 115.66 48.783 111.05 48.788 C103.31 48.794 95.58 48.786 87.84 48.772 C78.89 48.756 69.93 48.761 60.98 48.778 C53.3 48.791 45.63 48.793 37.95 48.785 C33.36 48.781 28.77 48.78 24.18 48.79 C19.86 48.798 15.55 48.793 11.24 48.775 C9.65 48.771 8.07 48.772 6.48 48.779 C4.32 48.787 2.16 48.777 0 48.762 C-1.21 48.761 -2.42 48.76 -3.67 48.758 C-6.6 48.381 -6.6 48.381 -8.49 46.978 C-9.91 44.94 -9.98 43.705 -9.99 41.233 C-10 40.402 -10.01 39.571 -10.02 38.714 C-10.02 37.821 -10.01 36.927 -10 36.006 C-10.01 35.085 -10.01 34.164 -10.01 33.215 C-10.01 31.269 -10.01 29.322 -10 27.375 C-9.98 24.392 -10 21.411 -10.01 18.428 C-10.01 16.537 -10.01 14.647 -10 12.756 C-10.01 11.862 -10.02 10.968 -10.02 10.047 C-10.01 9.216 -10 8.386 -9.99 7.529 C-9.99 6.799 -9.99 6.069 -9.99 5.316 C-8.91 -0.141 -4.81 0.004 0 0 Z" fill="#05BDBA" transform="translate(382.6,252.6)"/><path d="M0 0 C0.67 -0.005 1.35 -0.009 2.04 -0.014 C4.31 -0.026 6.57 -0.017 8.83 -0.007 C10.46 -0.011 12.08 -0.017 13.7 -0.023 C18.11 -0.037 22.51 -0.032 26.92 -0.022 C31.53 -0.014 36.13 -0.021 40.74 -0.026 C48.48 -0.032 56.22 -0.024 63.95 -0.01 C72.9 0.006 81.86 0.001 90.81 -0.016 C98.49 -0.029 106.17 -0.031 113.84 -0.023 C118.43 -0.019 123.02 -0.018 127.61 -0.028 C131.93 -0.037 136.24 -0.031 140.55 -0.013 C142.14 -0.009 143.73 -0.01 145.31 -0.017 C147.47 -0.025 149.63 -0.015 151.79 0 C153 0.001 154.21 0.002 155.46 0.003 C158.4 0.381 158.4 0.381 160.28 1.784 C161.7 3.822 161.78 5.057 161.78 7.529 C161.79 8.36 161.8 9.191 161.81 10.047 C161.8 11.388 161.8 11.388 161.79 12.756 C161.8 14.137 161.8 14.137 161.8 15.546 C161.8 17.493 161.8 19.44 161.79 21.387 C161.77 24.37 161.79 27.351 161.81 30.334 C161.8 32.225 161.8 34.115 161.79 36.006 C161.8 36.9 161.81 37.794 161.81 38.714 C161.8 39.961 161.8 39.961 161.78 41.233 C161.78 41.963 161.78 42.693 161.78 43.446 C161.26 46.065 160.54 46.787 158.4 48.381 C155.46 48.758 155.46 48.758 151.79 48.762 C151.12 48.767 150.44 48.771 149.75 48.776 C147.48 48.788 145.22 48.779 142.96 48.769 C141.33 48.773 139.71 48.779 138.09 48.785 C133.69 48.799 129.28 48.793 124.87 48.784 C120.26 48.776 115.66 48.783 111.05 48.788 C103.31 48.794 95.58 48.786 87.84 48.772 C78.89 48.756 69.93 48.761 60.98 48.778 C53.3 48.791 45.63 48.793 37.95 48.785 C33.36 48.781 28.77 48.78 24.18 48.79 C19.86 48.798 15.55 48.793 11.24 48.775 C9.65 48.771 8.07 48.772 6.48 48.779 C4.32 48.787 2.16 48.777 0 48.762 C-1.21 48.761 -2.42 48.76 -3.67 48.758 C-6.6 48.381 -6.6 48.381 -8.49 46.978 C-9.91 44.94 -9.98 43.705 -9.99 41.233 C-10 40.402 -10.01 39.571 -10.02 38.714 C-10.02 37.821 -10.01 36.927 -10 36.006 C-10.01 35.085 -10.01 34.164 -10.01 33.215 C-10.01 31.269 -10.01 29.322 -10 27.375 C-9.98 24.392 -10 21.411 -10.01 18.428 C-10.01 16.537 -10.01 14.647 -10 12.756 C-10.01 11.862 -10.02 10.968 -10.02 10.047 C-10.01 9.216 -10 8.386 -9.99 7.529 C-9.99 6.799 -9.99 6.069 -9.99 5.316 C-8.91 -0.141 -4.81 0.004 0 0 Z" fill="#05BDBA" transform="translate(19.6,252.6)"/><path d="M0 0 C0.83 -0.009 1.66 -0.019 2.52 -0.029 C3.41 -0.023 4.31 -0.017 5.23 -0.01 C6.15 -0.013 7.07 -0.016 8.02 -0.019 C9.96 -0.021 11.91 -0.015 13.86 -0.003 C16.84 0.013 19.82 -0.003 22.8 -0.022 C24.7 -0.02 26.59 -0.016 28.48 -0.01 C29.37 -0.016 30.26 -0.022 31.19 -0.029 C32.43 -0.014 32.43 -0.014 33.7 0 C34.8 0.004 34.8 0.004 35.92 0.007 C38.48 0.512 39.25 1.338 40.85 3.388 C41.23 5.686 41.23 5.686 41.23 8.436 C41.25 10.001 41.25 10.001 41.26 11.597 C41.25 12.741 41.25 13.885 41.24 15.064 C41.25 16.269 41.25 17.474 41.26 18.716 C41.27 22.022 41.26 25.327 41.25 28.633 C41.25 32.091 41.25 35.549 41.26 39.007 C41.26 44.814 41.26 50.621 41.24 56.428 C41.23 63.144 41.23 69.86 41.25 76.576 C41.26 82.34 41.26 88.104 41.26 93.868 C41.25 97.311 41.25 100.755 41.26 104.198 C41.27 108.037 41.26 111.874 41.24 115.712 C41.25 116.856 41.25 118 41.26 119.179 C41.25 120.222 41.24 121.265 41.23 122.34 C41.23 123.248 41.23 124.156 41.23 125.091 C40.78 127.84 40.05 128.726 37.85 130.388 C35.92 130.769 35.92 130.769 33.7 130.776 C32.46 130.791 32.46 130.791 31.19 130.805 C30.29 130.799 29.4 130.793 28.48 130.787 C27.1 130.791 27.1 130.791 25.69 130.795 C23.74 130.797 21.79 130.792 19.85 130.779 C16.86 130.763 13.88 130.779 10.9 130.798 C9.01 130.796 7.12 130.793 5.23 130.787 C4.33 130.793 3.44 130.799 2.52 130.805 C1.69 130.796 0.86 130.786 0 130.776 C-0.73 130.774 -1.46 130.772 -2.21 130.769 C-4.78 130.264 -5.54 129.438 -7.15 127.388 C-7.53 125.091 -7.53 125.091 -7.53 122.34 C-7.54 121.297 -7.55 120.254 -7.56 119.179 C-7.55 118.035 -7.54 116.891 -7.54 115.712 C-7.54 114.507 -7.55 113.302 -7.55 112.061 C-7.56 108.755 -7.56 105.449 -7.55 102.144 C-7.54 98.686 -7.55 95.228 -7.56 91.77 C-7.56 85.963 -7.55 80.155 -7.54 74.348 C-7.52 67.632 -7.53 60.916 -7.55 54.2 C-7.56 48.436 -7.56 42.673 -7.55 36.909 C-7.55 33.465 -7.55 30.022 -7.56 26.578 C-7.57 22.74 -7.55 18.902 -7.54 15.064 C-7.54 13.92 -7.55 12.776 -7.56 11.597 C-7.55 10.554 -7.54 9.511 -7.53 8.436 C-7.53 7.529 -7.53 6.621 -7.53 5.686 C-6.79 1.216 -4.25 0.014 0 0 Z" fill="#06BDBA" transform="translate(260.15,372.61)"/><path d="M0 0 C4.34 -0.074 8.68 -0.129 13.02 -0.165 C14.5 -0.18 15.98 -0.2 17.45 -0.226 C19.58 -0.263 21.7 -0.28 23.83 -0.293 C25.74 -0.317 25.74 -0.317 27.7 -0.341 C31.27 0.028 32.6 0.371 35 3 C38.9 11.588 39.28 22.51 36.24 31.419 C31.38 41.534 21.87 49.718 13.88 57.438 C13.37 57.925 12.87 58.413 12.35 58.916 C8.95 62.223 5.49 65.469 1.99 68.684 C1.08 69.526 0.17 70.368 -0.76 71.236 C-1.63 71.998 -2.49 72.76 -3.37 73.545 C-4.12 74.215 -4.87 74.885 -5.65 75.576 C-8.67 77.404 -10.52 77.442 -14 77 C-15.78 75.977 -15.78 75.977 -17.25 74.525 C-17.81 73.984 -18.37 73.442 -18.95 72.885 C-19.53 72.291 -20.11 71.698 -20.71 71.086 C-21.32 70.479 -21.94 69.871 -22.57 69.246 C-23.86 67.96 -25.14 66.667 -26.42 65.367 C-28.37 63.381 -30.35 61.43 -32.34 59.48 C-33.59 58.226 -34.84 56.969 -36.09 55.711 C-36.98 54.839 -36.98 54.839 -37.88 53.949 C-38.7 53.109 -38.7 53.109 -39.52 52.251 C-40.24 51.525 -40.24 51.525 -40.98 50.785 C-42.54 48.052 -42.39 46.089 -42 43 C-40.45 40.735 -40.45 40.735 -38.25 38.587 C-37.43 37.773 -36.62 36.959 -35.77 36.12 C-34.88 35.261 -33.99 34.401 -33.07 33.516 C-32.16 32.619 -31.25 31.722 -30.32 30.798 C-27.9 28.42 -25.48 26.057 -23.05 23.699 C-19.63 20.367 -16.23 17.011 -12.82 13.659 C-11.01 11.876 -9.19 10.098 -7.36 8.324 C-6.13 7.122 -6.13 7.122 -4.88 5.896 C-3.79 4.837 -3.79 4.837 -2.68 3.757 C-0.92 2.092 -0.92 2.092 0 0 Z" fill="#06BDBA" transform="translate(180,339)"/><path d="M0 0 C5.9 1.389 9.46 5.153 13.81 9.227 C14.75 10.111 15.7 10.994 16.67 11.904 C18.67 13.787 20.65 15.689 22.62 17.599 C24.62 19.528 26.65 21.402 28.73 23.241 C47 39.418 47 39.418 48.17 51.89 C49.26 70.389 49.26 70.389 45.03 76.188 C37.99 81.326 25.07 80.055 16.62 78.841 C5.61 76.606 -2.16 66.408 -9.27 58.351 C-11.14 56.276 -13.07 54.274 -15.02 52.27 C-17.35 49.86 -19.64 47.415 -21.93 44.966 C-22.78 44.061 -23.62 43.157 -24.49 42.225 C-27.76 38.548 -30.02 35.991 -31.16 31.157 C-29.97 26.716 -27.86 24.447 -24.62 21.286 C-24.04 20.697 -23.46 20.107 -22.86 19.5 C-21.62 18.262 -20.38 17.033 -19.13 15.812 C-17.22 13.944 -15.36 12.041 -13.49 10.132 C-12.29 8.931 -11.08 7.732 -9.87 6.536 C-9.32 5.967 -8.76 5.399 -8.19 4.813 C-5.48 2.208 -3.69 0.985 0 0 Z" fill="#06BDBA" transform="translate(168.28,137.12)"/></svg>',
   render: '<svg viewBox="0 0 554 554" xmlns="http://www.w3.org/2000/svg"><path d="M0 0 C182.82 0 365.64 0 554 0 C554 182.82 554 365.64 554 554 C371.18 554 188.36 554 0 554 C0 371.18 0 188.36 0 0 Z" fill="#000000"/><path d="M0 0 C42.57 0 85.14 0 129 0 C129 182.82 129 365.64 129 554 C37.59 554 -53.82 554 -148 554 C-148.1 517.84 -148.21 481.69 -148.31 444.44 C-148.36 433.04 -148.4 421.64 -148.45 409.89 C-148.47 395.93 -148.47 395.93 -148.48 389.38 C-148.48 384.83 -148.5 380.28 -148.53 375.72 C-148.56 369.9 -148.57 364.08 -148.57 358.26 C-148.57 356.13 -148.58 354 -148.6 351.87 C-148.79 330.16 -143.68 313.43 -128.33 297.27 C-111.19 280.56 -93.48 276.56 -70.33 276.56 C-68.32 276.55 -66.31 276.53 -64.3 276.52 C-59.02 276.48 -53.75 276.46 -48.47 276.45 C-40.05 276.42 -31.62 276.38 -23.2 276.33 C-20.28 276.31 -17.36 276.31 -14.44 276.3 C25.01 276.15 59.8 262.77 88 235 C88.9 234.13 89.8 233.27 90.73 232.38 C115.72 206.96 127.57 170.56 127.42 135.47 C127.19 125.02 125.51 115.12 123 105 C122.82 104.24 122.64 103.49 122.45 102.7 C117.57 82.83 107.3 64.49 94 49 C93.28 48.16 92.56 47.31 91.81 46.44 C73.21 25.22 48.33 10.65 20.94 4.31 C20.02 4.1 19.09 3.88 18.14 3.66 C12.11 2.32 6.16 1.47 0 1 C0 0.67 0 0.34 0 0 Z" fill="#FEFEFE" transform="translate(425,0)"/><path d="M0 0 C132.99 0 265.98 0 403 0 C403 0.33 403 0.66 403 1 C401.91 1.16 400.82 1.32 399.7 1.48 C369.66 6.04 343.05 16.49 321 38 C319.84 38.93 318.68 39.84 317.5 40.75 C295.15 59.84 283.46 91.53 279.13 119.63 C274.61 148.32 264.08 175.4 247 199 C246.58 199.59 246.16 200.17 245.73 200.77 C224.81 229.64 194.93 254.21 161 266 C160.27 266.26 159.53 266.51 158.78 266.77 C115.12 281.67 63.91 282.35 21.85 261.96 C18.99 260.52 16.13 259.07 13.31 257.54 C9.74 255.65 7.07 254.44 3 255 C1.36 256.64 1.87 258.51 1.86 260.78 C1.86 261.82 1.85 262.86 1.84 263.93 C1.84 265.09 1.84 266.24 1.84 267.43 C1.84 268.65 1.83 269.87 1.83 271.12 C1.81 274.52 1.81 277.91 1.8 281.31 C1.79 284.97 1.78 288.62 1.76 292.28 C1.74 298.62 1.72 304.96 1.71 311.29 C1.69 320.46 1.66 329.62 1.63 338.79 C1.58 353.66 1.54 368.53 1.5 383.39 C1.46 397.84 1.42 412.29 1.37 426.74 C1.37 427.63 1.37 428.52 1.36 429.43 C1.35 433.9 1.34 438.36 1.32 442.82 C1.21 479.88 1.1 516.94 1 554 C0.67 554 0.34 554 0 554 C0 371.18 0 188.36 0 0 Z" fill="#FEFEFE" transform="translate(0,0)"/></svg>',
+  ai: '<svg viewBox="0 0 24 24" fill="#6d28d9" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9L19 14z"/></svg>',
 };
 
 // ── PROVIDER BADGE ──
@@ -5415,7 +5421,7 @@ function actionColorFor(action) {
     netlify_env: 'info', netlify_env_set: 'success', netlify_deploy: 'success',
     render_list: 'info', render_create_service: 'success', render_delete_service: 'success',
     render_env: 'info', render_env_update: 'success', render_deploy: 'success',
-    confirm_required: 'warning', auth_required: 'warning',
+    confirm_required: 'warning', auth_required: 'warning', ai_setup_required: 'warning',
     vercel_auth_required: 'warning', netlify_auth_required: 'warning', render_auth_required: 'warning',
     error: 'error', warning: 'warning', message: ''
   };
@@ -5707,6 +5713,13 @@ async function sendMsg() {
     if (data.action === 'render_auth_required') {
       addMessage('agent', data.reply, 'warning');
       showRenderModal();
+      return;
+    }
+
+    // ── AI SETUP: koi AI key / model set nahi → AI Gateway kholo ──
+    if (data.action === 'ai_setup_required') {
+      addMessage('agent', data.reply, 'warning');
+      showAIModal();
       return;
     }
 
@@ -6191,7 +6204,7 @@ function renderDrawerProfile() {
     avatarEl.textContent = (authedUser.login || '?').charAt(0).toUpperCase();
   }
   nameEl.textContent = '@' + authedUser.login;
-  const connectedCount = 1 + (authedUser.vercelConnected ? 1 : 0) + (authedUser.netlifyConnected ? 1 : 0) + (authedUser.renderConnected ? 1 : 0);
+  const connectedCount = 1 + (authedUser.vercelConnected ? 1 : 0) + (authedUser.netlifyConnected ? 1 : 0) + (authedUser.renderConnected ? 1 : 0) + (authedUser.aiConnected ? 1 : 0);
   subEl.textContent = `${connectedCount} app${connectedCount === 1 ? '' : 's'} connected`;
 }
 
@@ -6234,6 +6247,15 @@ function renderAppsList() {
       onConnect: () => { closeDrawer(); showRenderModal(); },
       onDisconnect: () => { closeDrawer(); confirmDisconnectRender(); },
     },
+    {
+      key: 'ai', name: 'AI Gateway', icon: PROVIDER_ICONS.ai,
+      connected: !!(authedUser && authedUser.aiConnected),
+      sub: authedUser && authedUser.aiConnected
+        ? `${aiProviderLabel(authedUser.aiProvider)} · ${authedUser.aiModel}`
+        : 'Not set up',
+      manage: true,
+      onManage: () => { closeDrawer(); showAIModal(); },
+    },
   ];
 
   apps.forEach(app => {
@@ -6264,6 +6286,12 @@ function renderAppsList() {
       badge.textContent = '✓';
       badge.disabled = true;
       row.appendChild(badge);
+    } else if (app.manage) {
+      const manageBtn = document.createElement('button');
+      manageBtn.className = 'app-action-btn';
+      manageBtn.textContent = app.connected ? 'Edit' : 'Setup';
+      manageBtn.onclick = () => { vibrate(8); app.onManage(); };
+      row.appendChild(manageBtn);
     } else {
       // Toggle ON → opens the connect modal (same flow as before — still
       // requires pasting/validating a real token server-side, the toggle
@@ -6509,6 +6537,285 @@ function createHexLoader(canvasId, opts = {}) {
     loaders.forEach(l => document.hidden ? l.stop() : l.start());
   });
 })();
+
+// ══════════════════════════════════════════════════════════════════
+// AI GATEWAY — user apni AI key (Google AI Studio / OpenRouter) lagata hai,
+// provider + model chunta hai. Backend: /api/ai-gateway/*. Keys server pe
+// encrypted rehti hain; yahan sirf last-4 hint aati hai.
+// ══════════════════════════════════════════════════════════════════
+let aiState = { providers: [], keys: [], active_provider: null, models: {} };
+let aiModelCache = {};
+
+function aiProviderLabel(id) {
+  const p = (aiState.providers || []).find(x => x.id === id);
+  if (p) return p.label;
+  return { google: 'Google AI Studio', openrouter: 'OpenRouter' }[id] || id || '';
+}
+
+function renderAIMenuState() {
+  const item = document.getElementById('ai-menu-item');
+  const label = document.getElementById('ai-menu-label');
+  if (!item || !label || !authedUser) return;
+  if (authedUser.aiConnected) {
+    item.classList.add('connected');
+    label.textContent = 'AI: ' + aiProviderLabel(authedUser.aiProvider) + ' ✓';
+  } else {
+    item.classList.remove('connected');
+    label.textContent = 'Setup AI Gateway';
+  }
+  renderAppsList();
+  renderDrawerProfile();
+}
+
+function onAIMenuClick() {
+  document.getElementById('user-menu').classList.remove('show');
+  showAIModal();
+}
+
+function aiShowError(msg) {
+  const box = document.getElementById('ai-modal-error');
+  if (!box) return;
+  if (msg) { box.textContent = msg; box.classList.add('show'); }
+  else { box.classList.remove('show'); }
+}
+
+async function loadAIState() {
+  const res = await fetch('/api/ai-gateway', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('state');
+  aiState = await res.json();
+}
+
+// aiState se authedUser + menu/drawer sync
+function syncAuthedAI() {
+  if (!authedUser) return;
+  const prov = aiState.active_provider;
+  const model = prov ? (aiState.models || {})[prov] : null;
+  const hasKey = !!prov && (aiState.keys || []).some(k => k.provider === prov);
+  authedUser.aiConnected = !!(prov && model && hasKey);
+  authedUser.aiProvider = prov || null;
+  authedUser.aiModel = model || null;
+  authedUser.aiKeyCount = (aiState.keys || []).length;
+  renderAIMenuState();
+}
+
+async function showAIModal() {
+  document.getElementById('ai-modal-overlay').classList.add('show');
+  aiShowError('');
+  aiModelCache = {};
+  document.getElementById('ai-key-input').value = '';
+  document.getElementById('ai-key-label').value = '';
+  try {
+    await loadAIState();
+  } catch (e) {
+    aiShowError('AI Gateway load nahi hua. Dubara try karo.');
+  }
+  renderAIModal();
+}
+
+function hideAIModal() {
+  document.getElementById('ai-modal-overlay').classList.remove('show');
+}
+
+function renderAIModal() {
+  const providers = aiState.providers || [];
+  const keys = aiState.keys || [];
+
+  // add-key provider select (ek baar bhar do)
+  const addSel = document.getElementById('ai-add-provider');
+  if (!addSel.options.length) {
+    providers.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.id; o.textContent = p.label;
+      addSel.appendChild(o);
+    });
+  }
+  updateAIKeyLink();
+
+  // saved keys
+  const list = document.getElementById('ai-keys-list');
+  list.innerHTML = '';
+  if (!keys.length) {
+    list.innerHTML = '<div class="ai-empty">Abhi koi key nahi. Neeche se add karo.</div>';
+  } else {
+    keys.forEach(k => {
+      const row = document.createElement('div');
+      row.className = 'ai-key-row';
+      row.innerHTML =
+        '<div class="ai-key-info"><div class="ai-key-prov">' + escHtml(aiProviderLabel(k.provider)) + '</div>' +
+        '<div class="ai-key-hint">••••' + escHtml(k.hint || '') + (k.label ? ' · ' + escHtml(k.label) : '') + '</div></div>';
+      const del = document.createElement('button');
+      del.className = 'ai-key-del';
+      del.title = 'Key hatao';
+      del.textContent = '✕';
+      del.onclick = () => deleteAIKey(Number(k.id));
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  }
+
+  // active model box — sirf un providers ke liye jinki key saved hai
+  const withKeys = providers.filter(p => keys.some(k => k.provider === p.id));
+  const box = document.getElementById('ai-active-box');
+  if (!withKeys.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+
+  const provSel = document.getElementById('ai-active-provider');
+  const keep = provSel.value;
+  provSel.innerHTML = '';
+  withKeys.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p.id; o.textContent = p.label;
+    provSel.appendChild(o);
+  });
+  const want = withKeys.some(p => p.id === keep) ? keep
+    : (withKeys.some(p => p.id === aiState.active_provider) ? aiState.active_provider : withKeys[0].id);
+  provSel.value = want;
+  onAIActiveProviderChange();
+}
+
+function updateAIKeyLink() {
+  const sel = document.getElementById('ai-add-provider');
+  const link = document.getElementById('ai-key-link');
+  const p = (aiState.providers || []).find(x => x.id === sel.value);
+  if (p) {
+    link.href = p.key_url;
+    link.textContent = p.label + ' pe key banao →';
+    document.getElementById('ai-key-input').placeholder = 'Paste API key (' + (p.key_hint || '') + ')';
+  }
+}
+
+async function onAIActiveProviderChange() {
+  const prov = document.getElementById('ai-active-provider').value;
+  const sel = document.getElementById('ai-active-model');
+  const custom = document.getElementById('ai-active-custom');
+  custom.value = '';
+  sel.innerHTML = '<option>Models load ho rahe hain…</option>';
+  sel.disabled = true;
+
+  let models = aiModelCache[prov];
+  if (!models) {
+    try {
+      const res = await fetch('/api/ai-gateway/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ provider: prov }),
+      });
+      const data = await res.json();
+      models = Array.isArray(data.models) ? data.models : [];
+      if (!res.ok) aiShowError(data.reply || 'Models list load nahi hui. Custom model ID likh sakte ho.');
+      aiModelCache[prov] = models;
+    } catch (e) {
+      models = [];
+      aiShowError('Models list load nahi hui. Custom model ID likh sakte ho.');
+    }
+  }
+  // dropdown ab ka provider badal chuka ho to purani response ignore
+  if (document.getElementById('ai-active-provider').value !== prov) return;
+
+  const saved = (aiState.models || {})[prov];
+  const list = models.slice();
+  if (saved && !list.includes(saved)) list.unshift(saved);
+  sel.innerHTML = '';
+  if (!list.length) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = 'Koi model nahi mila — neeche custom ID likho';
+    sel.appendChild(o);
+  } else {
+    list.forEach(id => {
+      const o = document.createElement('option');
+      o.value = id; o.textContent = id;
+      sel.appendChild(o);
+    });
+    sel.value = saved && list.includes(saved) ? saved : list[0];
+  }
+  sel.disabled = false;
+}
+
+async function saveAIActive() {
+  const prov = document.getElementById('ai-active-provider').value;
+  const model = document.getElementById('ai-active-custom').value.trim() || document.getElementById('ai-active-model').value;
+  const btn = document.getElementById('ai-active-save');
+  aiShowError('');
+  if (!prov || !model) { aiShowError('Pehle model chuno ya custom model ID likho.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/ai-gateway/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ provider: prov, model }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) { aiShowError(data.reply || 'Save nahi hua. Dubara try karo.'); return; }
+    aiState.active_provider = prov;
+    aiState.models = Object.assign({}, aiState.models, { [prov]: model });
+    syncAuthedAI();
+    hideAIModal();
+    addMessage('agent', '✅ AI Gateway set ho gaya: ' + aiProviderLabel(prov) + ' → ' + model + '. Ab AI features isi se chalenge.', 'success');
+  } catch (e) {
+    aiShowError('Server se connect nahi ho paya. Dubara try karo.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save model';
+  }
+}
+
+async function submitAIKey() {
+  const prov = document.getElementById('ai-add-provider').value;
+  const key = document.getElementById('ai-key-input').value.trim();
+  const label = document.getElementById('ai-key-label').value.trim();
+  const btn = document.getElementById('ai-add-btn');
+  aiShowError('');
+  if (!key) { aiShowError('API key paste karo pehle.'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  try {
+    const res = await fetch('/api/ai-gateway/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ provider: prov, key, label }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) { aiShowError(data.reply || 'Key add nahi hui. Check karke dubara try karo.'); return; }
+
+    document.getElementById('ai-key-input').value = '';
+    document.getElementById('ai-key-label').value = '';
+    delete aiModelCache[prov]; // nayi key se model list refresh ho
+    await loadAIState();
+    syncAuthedAI();
+    renderAIModal();
+    // is provider ka model abhi set nahi → seedha model chunne pe le aao
+    if (!(aiState.models || {})[prov]) {
+      document.getElementById('ai-active-provider').value = prov;
+      onAIActiveProviderChange();
+      aiShowError('✅ Key add ho gayi. Ab upar model chuno aur Save model dabao.');
+    }
+  } catch (e) {
+    aiShowError('Server se connect nahi ho paya. Dubara try karo.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Key add karo';
+  }
+}
+
+async function deleteAIKey(id) {
+  if (!confirm('Ye key hata du?')) return;
+  aiShowError('');
+  try {
+    await fetch('/api/ai-gateway/keys?id=' + encodeURIComponent(id), { method: 'DELETE', credentials: 'same-origin' });
+    aiModelCache = {};
+    await loadAIState();
+    syncAuthedAI();
+    renderAIModal();
+  } catch (e) {
+    aiShowError('Key hata nahi payi. Dubara try karo.');
+  }
+}
 
 // ── RESTORE ON LOAD ──
 restoreChatOnLoad();
