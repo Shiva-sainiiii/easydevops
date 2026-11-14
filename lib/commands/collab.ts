@@ -6,13 +6,25 @@
  * Vercel/Netlify/Render ke tokens yahan kabhi nahi aate.
  */
 import { req } from "@/lib/commands/pyutil";
-import { ghApi, ghMsg, ghRepoAccess, parseRepoRef, sameLogin, type RepoAccess } from "@/lib/providers/github";
+import { ghApi, ghListAllRepos, ghMsg, ghRepoAccess, parseRepoRef, sameLogin, type RepoAccess } from "@/lib/providers/github";
 
 export const COLLAB_COMMANDS = new Set([
   "INVITE_COLLABORATOR",
   "LIST_COLLABORATORS",
   "REMOVE_COLLABORATOR",
   "CANCEL_INVITE",
+]);
+
+/**
+ * Friend side (Phase 2): mujhe aaye invites accept/decline + mere saath share kiye gaye repos.
+ * Inme `repo` param pe `owner/repo` resolution / access-check NAHI lagta (private repo ka access
+ * invite accept karne se PEHLE hota hi nahi) — isliye executor/guard dono inhe alag se chhodte hain.
+ */
+export const FRIEND_COMMANDS = new Set([
+  "LIST_MY_INVITATIONS",
+  "ACCEPT_INVITATION",
+  "DECLINE_INVITATION",
+  "LIST_SHARED_REPOS",
 ]);
 
 type Result = Record<string, any>;
@@ -35,7 +47,9 @@ export const FOREIGN_OWNER_COMMANDS = new Set([
  * Warna null (aage badho). CREATE_REPO ko touch nahi karta (purana naam-sanitize behaviour).
  */
 export function guardRepoParam(cmd: string, p: Record<string, any>, selfLogin: string): Result | null {
-  if (cmd === "CREATE_REPO" || !p || typeof p.repo !== "string" || !p.repo.includes("/")) return null;
+  if (cmd === "CREATE_REPO" || FRIEND_COMMANDS.has(cmd) || !p || typeof p.repo !== "string" || !p.repo.includes("/")) {
+    return null;
+  }
   const ref = parseRepoRef(p.repo, selfLogin);
   if (!ref) {
     return { reply: `❌ Repo naam galat hai: \`${p.repo}\`. Format: \`repo\` ya \`owner/repo\`.`, action: "error" };
@@ -247,4 +261,142 @@ export async function executeCollabCommand(
   }
 
   return { reply: `❌ Unknown collaboration command: ${cmd}`, action: "error" };
+}
+
+
+// ════════════════════════════════════════════════════════════════
+// FRIEND SIDE — invitations + shared repos
+// ════════════════════════════════════════════════════════════════
+
+const mapInvite = (i: any) => ({
+  id: i?.id,
+  repo: i?.repository?.full_name ?? "",
+  owner: i?.repository?.owner?.login ?? "",
+  inviter: i?.inviter?.login ?? "",
+  permission: INVITE_PERM_LABEL[i?.permissions] ?? i?.permissions ?? "",
+  private: !!i?.repository?.private,
+  url: i?.html_url ?? "",
+  expired: !!i?.expired,
+  created_at: i?.created_at ?? null,
+});
+
+async function fetchMyInvites(ghToken: string): Promise<[ReturnType<typeof mapInvite>[] | null, string | null]> {
+  const r = await ghApi("GET", "/user/repository_invitations?per_page=100", ghToken);
+  if (r.status_code === 401) return [null, "🔒 GitHub token invalid ya expire ho gaya. Logout karke dubara GitHub se connect karo."];
+  if (r.status_code !== 200) return [null, `❌ Invitations fetch nahi hue (${r.status_code}): ${ghMsg(r)}`];
+  const data = r.json();
+  return [Array.isArray(data) ? data.map(mapInvite) : [], null];
+}
+
+export async function executeFriendCommand(cmd: string, p: Record<string, any>, ghToken: string): Promise<Result> {
+  // ── LIST_MY_INVITATIONS ──
+  if (cmd === "LIST_MY_INVITATIONS") {
+    const [all, err] = await fetchMyInvites(ghToken);
+    if (!all) return { reply: err, action: "error" };
+    const live = all.filter((i) => !i.expired);
+    const expiredCount = all.length - live.length;
+    if (!live.length) {
+      return {
+        reply: "📭 Abhi koi pending invitation nahi hai." + (expiredCount ? ` (${expiredCount} expire ho chuke hain — owner se dobara invite maango.)` : ""),
+        action: "invitations",
+        invitations: [],
+      };
+    }
+    const lines = live.map(
+      (i) =>
+        `• **${i.repo}** — @${i.inviter} ne bheja — \`${i.permission}\`${i.private ? " — private" : ""}\n` +
+        `  ✅ \`accept invite ${i.repo}\`  ·  ❌ \`decline invite ${i.repo}\``
+    );
+    let reply = `📨 Tumhare ${live.length} pending invitation${live.length !== 1 ? "s" : ""}:\n\n` + lines.join("\n");
+    if (expiredCount) reply += `\n\n(${expiredCount} aur invite expire ho chuke hain.)`;
+    return { reply, action: "invitations", invitations: live };
+  }
+
+  // ── LIST_SHARED_REPOS ──
+  if (cmd === "LIST_SHARED_REPOS") {
+    const [repos, r] = await ghListAllRepos(ghToken, 100, 300, "collaborator");
+    if (r === null || r.status_code !== 200) return { reply: "❌ Shared repos fetch nahi hue.", action: "error" };
+    // Apne hi repos (agar kabhi aa jaayein) ko hata do
+    const shared = repos.filter((rp) => rp?.owner?.login);
+    if (!shared.length) {
+      return { reply: "🤝 Abhi kisi ne tumhe apne repo me collaborator nahi banaya.", action: "list_shared_repos", repos: [] };
+    }
+    const roleOf = (rp: any) =>
+      rp.permissions?.admin ? "admin" : rp.permissions?.maintain ? "maintain" : rp.permissions?.push ? "push" : rp.permissions?.triage ? "triage" : "pull";
+    const lines = shared.map(
+      (rp) =>
+        `📁 **${rp.full_name}** — @${rp.owner.login} ka repo — \`${roleOf(rp)}\` — \`${rp.private ? "private" : "public"}\`\n🔗 ${rp.html_url}`
+    );
+    const reply =
+      `🤝 Tumhare saath share kiye gaye ${shared.length} repo${shared.length !== 1 ? "s" : ""}:\n\n` +
+      lines.join("\n\n") +
+      "\n\n💡 Inpe abhi dekhna possible hai, jaise: `list files in owner/repo`, `info about owner/repo`.";
+    return {
+      reply,
+      action: "list_shared_repos",
+      repos: shared.map((rp) => ({
+        full_name: rp.full_name,
+        owner: rp.owner.login,
+        name: rp.name,
+        url: rp.html_url,
+        permission: roleOf(rp),
+        private: !!rp.private,
+      })),
+    };
+  }
+
+  // ── ACCEPT / DECLINE ──
+  const raw = String(req(p, "repo")).trim().toLowerCase();
+  if (!raw) return { reply: "❌ Kaunsa invite? `accept invite owner/repo` likho.", action: "error" };
+  const [all, err] = await fetchMyInvites(ghToken);
+  if (!all) return { reply: err, action: "error" };
+  const matches = all.filter((i) => (raw.includes("/") ? i.repo.toLowerCase() === raw : i.repo.toLowerCase().split("/")[1] === raw));
+  if (!matches.length) {
+    return {
+      reply: `ℹ️ \`${raw}\` ka koi pending invitation nahi mila. "my invitations" bolke list dekho.`,
+      action: "warning",
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      reply: `⚠️ \`${raw}\` naam ke ${matches.length} invites hain: ${matches.map((m) => `\`${m.repo}\``).join(", ")}. \`owner/repo\` form me likho.`,
+      action: "warning",
+    };
+  }
+  const inv = matches[0];
+  if (inv.expired) {
+    return { reply: `⌛ \`${inv.repo}\` ka invite expire ho chuka hai. @${inv.inviter} se dobara invite bhejne ko bolo.`, action: "warning" };
+  }
+
+  if (cmd === "ACCEPT_INVITATION") {
+    const r = await ghApi("PATCH", `/user/repository_invitations/${inv.id}`, ghToken);
+    if (r.status_code === 204) {
+      return {
+        reply:
+          `✅ Invite accept ho gaya — ab tum \`${inv.repo}\` ke collaborator ho (\`${inv.permission}\` access).\n` +
+          `Try karo: \`list files in ${inv.repo}\` ya \`info about ${inv.repo}\`.`,
+        action: "invite_accepted",
+        repo: inv.repo,
+        permission: inv.permission,
+      };
+    }
+    if (r.status_code === 404 || r.status_code === 410) {
+      return { reply: `⌛ Invite ab valid nahi hai (expire ho gaya ya owner ne wapas le liya). @${inv.inviter} se dobara bhejne ko bolo.`, action: "warning" };
+    }
+    if (r.status_code === 403) return { reply: `🔒 GitHub ne accept allow nahi kiya (403): ${ghMsg(r)}`, action: "error" };
+    return { reply: `❌ Accept fail hua (${r.status_code}): ${ghMsg(r)}`, action: "error" };
+  }
+
+  if (cmd === "DECLINE_INVITATION") {
+    const r = await ghApi("DELETE", `/user/repository_invitations/${inv.id}`, ghToken);
+    if (r.status_code === 204) {
+      return { reply: `🚫 \`${inv.repo}\` ka invite decline kar diya.`, action: "invite_declined", repo: inv.repo };
+    }
+    if (r.status_code === 404 || r.status_code === 410) {
+      return { reply: "ℹ️ Ye invite pehle hi hat chuka hai.", action: "warning" };
+    }
+    return { reply: `❌ Decline fail hua (${r.status_code}): ${ghMsg(r)}`, action: "error" };
+  }
+
+  return { reply: `❌ Unknown command: ${cmd}`, action: "error" };
 }

@@ -41,6 +41,10 @@ COMMANDS:
 10b. LIST_COLLABORATORS: {"repo":"repo-name"} — collaborators + pending invites
 10c. REMOVE_COLLABORATOR: {"repo":"repo-name","username":"github-username"}
 10d. CANCEL_INVITE: {"repo":"repo-name","username":"github-username"} — cancel a pending invite
+10e. LIST_MY_INVITATIONS: {} — repo invitations that OTHER people sent to the current user
+10f. ACCEPT_INVITATION: {"repo":"owner/repo"} — accept an invitation the user received
+10g. DECLINE_INVITATION: {"repo":"owner/repo"} — decline an invitation the user received
+10h. LIST_SHARED_REPOS: {} — repos other people shared with the current user (collaborator access)
 ${v.vercel_commands}${v.netlify_commands}${v.render_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
@@ -83,6 +87,7 @@ const COMMANDS = [
   "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
   "GENERATE_RENDER_YAML:",
   "INVITE_COLLABORATOR:", "LIST_COLLABORATORS:", "REMOVE_COLLABORATOR:", "CANCEL_INVITE:",
+  "LIST_MY_INVITATIONS:", "ACCEPT_INVITATION:", "DECLINE_INVITATION:", "LIST_SHARED_REPOS:",
   "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
   "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_DOWNLOAD_ENV:", "VERCEL_SET_ENV:",
   "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",

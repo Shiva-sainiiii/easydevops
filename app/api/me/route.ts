@@ -1,5 +1,7 @@
 import { currentUser } from "@/lib/auth";
 import { getAiSettings, listAiKeys } from "@/lib/db";
+import { ghTokenOf } from "@/lib/api-utils";
+import { ghApi } from "@/lib/providers/github";
 import { safeJsonify } from "@/lib/security";
 
 export const runtime = "nodejs";
@@ -27,8 +29,26 @@ export async function GET() {
     // ignore
   }
 
+  // Pending repo invitations ka count (menu badge ke liye). Fail-safe: koi bhi error / 3s se der
+  // ho to 0 — login/connect state is wajah se kabhi nahi bigadna chahiye.
+  let pendingInvites = 0;
+  try {
+    const gh = ghTokenOf(user);
+    const r = await Promise.race([
+      ghApi("GET", "/user/repository_invitations?per_page=100", gh),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+    ]);
+    if (r && r.status_code === 200) {
+      const d = r.json();
+      if (Array.isArray(d)) pendingInvites = d.filter((i: any) => !i?.expired).length;
+    }
+  } catch {
+    // ignore
+  }
+
   return safeJsonify({
     logged_in: true,
+    pending_invites: pendingInvites,
     login: user.github_login,
     avatar_url: user.avatar_url,
     vercel_connected: has(user.vercel_token_encrypted),

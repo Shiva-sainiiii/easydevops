@@ -40,7 +40,7 @@ import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 import { createRenderService } from "@/lib/commands/render_create_service";
 import { createPullRequest } from "@/lib/commands/code_generate";
 import { exportEnvFile } from "@/lib/commands/env_transfer";
-import { COLLAB_COMMANDS, FOREIGN_OWNER_COMMANDS, executeCollabCommand } from "@/lib/commands/collab";
+import { COLLAB_COMMANDS, FOREIGN_OWNER_COMMANDS, FRIEND_COMMANDS, executeCollabCommand, executeFriendCommand } from "@/lib/commands/collab";
 
 /**
  * BUG-1 (old code): executor.py `time` import karna bhool gaya tha, isliye
@@ -97,6 +97,12 @@ export async function executeCommand(
   const p = params;
 
   try {
+    // Friend side (invitations / shared repos): `owner/repo` resolution se PEHLE — accept se pehle
+    // private repo ka access hota hi nahi, isliye ghRepoAccess check yahan galat hoga.
+    if (FRIEND_COMMANDS.has(cmd)) {
+      return await executeFriendCommand(cmd, p, ghToken);
+    }
+
     // ── `owner/repo` addressing ── (sirf `repo` likha ho to kuch nahi badalta: owner = self)
     if (cmd !== "CREATE_REPO" && typeof p.repo === "string" && p.repo.includes("/")) {
       const ref = parseRepoRef(p.repo, owner);

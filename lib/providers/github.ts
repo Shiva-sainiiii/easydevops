@@ -35,9 +35,10 @@ const LINK_NEXT_RE = /<([^>]+)>;\s*rel="next"/;
 export async function ghListAllRepos(
   ghToken: string,
   perPage = 100,
-  maxTotal = 300
+  maxTotal = 300,
+  affiliation = "owner" // "owner" = purana behaviour; "collaborator" = mere saath share kiye gaye repos
 ): Promise<[any[], PyResponse | null]> {
-  let endpoint: string | null = `/user/repos?per_page=${perPage}&sort=updated&affiliation=owner`;
+  let endpoint: string | null = `/user/repos?per_page=${perPage}&sort=updated&affiliation=${affiliation}`;
   const allRepos: any[] = [];
   let r: PyResponse | null = null;
   while (endpoint) {

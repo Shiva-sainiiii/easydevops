@@ -106,6 +106,33 @@ export const INTENT_RULES: Rule[] = [
     r`^(${REPO_REF})\s+(?:se|me|mein)\s+@?(${GH_USER})\s+ka\s+access\s+(?:hata(?:o|\s*do)|band\s+(?:karo|kar\s*do)|remove)(?:\s+(?:karo|kar\s*do))?$`,
   ], (m) => ({ repo: g(m, 1), username: g(m, 2) })],
 
+  // ── FRIEND SIDE (Phase 2): invitations + shared repos ──
+  ["LIST_MY_INVITATIONS", [
+    r`^(?:my|mere|meri|mujhe\s+aaye)\s+(?:pending\s+)?(?:repo(?:sitory)?\s+)?invit(?:e|ation)s?$`,
+    r`^(?:show|list|check|dikhao|dikha)\s+(?:my\s+|mere\s+)?(?:pending\s+)?(?:repo(?:sitory)?\s+)?invit(?:e|ation)s?$`,
+    r`^(?:pending\s+)?(?:repo(?:sitory)?\s+)?invit(?:e|ation)s?\s+(?:dikhao|dikha|batao|list|show)$`,
+    r`^koi\s+invit(?:e|ation)\s+(?:aaya|aya|aayi)(?:\s+hai)?$`,
+  ], () => ({})],
+
+  ["ACCEPT_INVITATION", [
+    r`^accept\s+(?:the\s+)?(?:repo(?:sitory)?\s+)?(?:invite|invitation)\s+(?:to\s+|from\s+|for\s+|of\s+)?(${REPO_REF})$`,
+    r`^accept\s+(${REPO_REF})\s+(?:invite|invitation)$`,
+    r`^(${REPO_REF})\s+(?:ka|ki)\s+(?:invite|invitation)\s+(?:accept|manzoor)\s*(?:karo|kar\s*do|kardo)?$`,
+  ], (m) => ({ repo: g(m, 1) })],
+
+  ["DECLINE_INVITATION", [
+    r`^(?:decline|reject|ignore)\s+(?:the\s+)?(?:repo(?:sitory)?\s+)?(?:invite|invitation)\s+(?:to\s+|from\s+|for\s+|of\s+)?(${REPO_REF})$`,
+    r`^(?:decline|reject|ignore)\s+(${REPO_REF})\s+(?:invite|invitation)$`,
+    r`^(${REPO_REF})\s+(?:ka|ki)\s+(?:invite|invitation)\s+(?:decline|reject|mana)\s*(?:karo|kar\s*do|kardo)?$`,
+  ], (m) => ({ repo: g(m, 1) })],
+
+  ["LIST_SHARED_REPOS", [
+    r`^(?:show|list|dikhao|dikha)\s+(?:my\s+|mere\s+)?(?:shared|collaborat(?:ed|ion|or))\s+repos?(?:sitories)?$`,
+    r`^(?:shared|collaborat(?:ed|ion))\s+repos?(?:sitories)?(?:\s+(?:dikhao|dikha|batao|list|show))?$`,
+    r`^(?:mere\s+saath|mujhe)\s+share\s+(?:kiye|kiya)\s+(?:gaye\s+)?repos?$`,
+    r`^repos?\s+shared\s+with\s+me$`,
+  ], () => ({})],
+
   ["LIST_FILES", [
     r`(?:list|sare|show|dikhao|dikha)\s+(?:all\s+)?files?\s+(?:in|of|from)\s+(${REPO_REF})`,
   ], (m) => ({ repo: g(m, 1), path: "" })],

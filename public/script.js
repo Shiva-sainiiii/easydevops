@@ -60,6 +60,7 @@ async function checkAuth() {
         aiProvider: data.ai_provider || null,
         aiModel: data.ai_model || null,
         aiKeyCount: data.ai_key_count || 0,
+        pendingInvites: data.pending_invites || 0,
       };
       hideLoginGate();
       renderUserBadge();
@@ -117,6 +118,57 @@ function renderUserBadge() {
   renderNetlifyMenuState();
   renderRenderMenuState();
   renderAIMenuState();
+  renderInviteBadge();
+}
+
+// Pending repo invitations: avatar pe chhota emerald dot + menu me "Invitations (N)" item.
+// Markup/CSS ko nahi chhua — dono JS se bante hain, count 0 ho to dono hat jaate hain.
+function renderInviteBadge() {
+  const n = (authedUser && authedUser.pendingInvites) || 0;
+  const badge = document.getElementById('user-badge');
+  const menu = document.getElementById('user-menu');
+  let dot = document.getElementById('invite-dot');
+  if (n > 0 && badge) {
+    if (!dot) {
+      dot = document.createElement('span');
+      dot.id = 'invite-dot';
+      dot.style.cssText = 'position:absolute;top:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid #18181b;pointer-events:none;';
+      if (getComputedStyle(badge).position === 'static') badge.style.position = 'relative';
+      badge.appendChild(dot);
+    }
+  } else if (dot) {
+    dot.remove();
+  }
+  let item = document.getElementById('invites-menu-item');
+  if (n > 0 && menu) {
+    if (!item) {
+      item = document.createElement('div');
+      item.className = 'user-menu-item';
+      item.id = 'invites-menu-item';
+      item.onclick = () => {
+        menu.classList.remove('show');
+        resendMessage('my invitations');
+      };
+      const nameEl = document.getElementById('user-menu-name');
+      if (nameEl) nameEl.insertAdjacentElement('afterend', item);
+      else menu.insertBefore(item, menu.firstChild);
+    }
+    item.textContent = `📨 Invitations (${n})`;
+  } else if (item) {
+    item.remove();
+  }
+}
+
+// Sirf invite count refresh — checkAuth() nahi, kyunki wo network hiccup pe login gate dikha deta hai.
+async function refreshPendingInvites() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    const d = await res.json();
+    if (d && d.logged_in && authedUser) {
+      authedUser.pendingInvites = d.pending_invites || 0;
+      renderInviteBadge();
+    }
+  } catch (e) { /* ignore */ }
 }
 
 function renderVercelMenuState() {
@@ -3843,7 +3895,7 @@ const ACTIVITY_LIST_CONFIG = {
 };
 
 function richBubbleBadgeFor(entry) {
-  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status') return 'github';
+  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status' || entry.action === 'invitations') return 'github';
   if (entry.action === 'vercel_deployments' || entry.action === 'vercel_env') return 'vercel';
   if (entry.action === 'netlify_site_info' || entry.action === 'netlify_env') return 'netlify';
   if (entry.action === 'render_env') return 'render';
@@ -3901,6 +3953,10 @@ function buildRichBubbleNode(entry) {
     return buildEnvVarsBubble('render', entry.service_id, entry.env_vars);
   }
 
+  if (entry.action === 'invitations' && Array.isArray(entry.invitations) && entry.invitations.length) {
+    return buildInvitationsBubble(entry.invitations);
+  }
+
   const activityCfg = ACTIVITY_LIST_CONFIG[entry.action];
   if (activityCfg && Array.isArray(entry[activityCfg.itemsKey]) && entry[activityCfg.itemsKey].length) {
     const items = entry[activityCfg.itemsKey];
@@ -3912,6 +3968,80 @@ function buildRichBubbleNode(entry) {
   }
 
   return null;
+}
+
+// ── INVITATIONS BUBBLE (Phase 2): mujhe aaye repo invites, Accept/Decline buttons ke saath ──
+// Buttons ek normal chat message bhejte hain ("accept invite owner/repo"), isliye same /chat flow,
+// same server-side checks. saveChatEntry me `invitations` nahi jaata: refresh ke baad ye bubble
+// text list ban jaata hai (purane/stale Accept buttons na dikhein).
+function buildInvitationsBubble(invitations) {
+  const wrap = document.createElement('div');
+  wrap.className = 'activity-list-bubble';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'activity-list-hdr';
+  const hdrText = document.createElement('span');
+  hdrText.textContent = `📨 ${invitations.length} pending invitation${invitations.length !== 1 ? 's' : ''}`;
+  hdr.appendChild(hdrText);
+  wrap.appendChild(hdr);
+
+  const grid = document.createElement('div');
+  grid.className = 'activity-grid';
+
+  invitations.forEach((inv) => {
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    card.style.cursor = 'default';
+    card.style.flexWrap = 'wrap';
+
+    const icon = document.createElement('div');
+    icon.className = 'activity-card-icon';
+    icon.textContent = inv.private ? '🔒' : '📨';
+    card.appendChild(icon);
+
+    const main = document.createElement('div');
+    main.className = 'activity-card-main';
+    const title = document.createElement('div');
+    title.className = 'activity-card-title';
+    title.textContent = inv.repo || 'unknown';
+    main.appendChild(title);
+    const sub = document.createElement('div');
+    sub.className = 'activity-card-sub';
+    sub.textContent = `@${inv.inviter || '?'} ne bheja · ${inv.permission || 'push'}${inv.private ? ' · private' : ''}`;
+    main.appendChild(sub);
+    card.appendChild(main);
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:6px;width:100%;margin-top:2px;';
+    const mkBtn = (label, accent) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText =
+        'flex:1;padding:7px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;' +
+        'font-family:var(--font-mono);-webkit-tap-highlight-color:transparent;' +
+        (accent
+          ? 'background:rgba(52,211,153,0.14);border:1px solid rgba(52,211,153,0.4);color:var(--accent);'
+          : 'background:#1f1f23;border:1px solid var(--border-2);color:var(--muted);');
+      return b;
+    };
+    const acceptBtn = mkBtn('✅ Accept', true);
+    const declineBtn = mkBtn('Decline', false);
+    const lock = (clicked) => {
+      acceptBtn.disabled = true;
+      declineBtn.disabled = true;
+      clicked.textContent = '…';
+    };
+    acceptBtn.onclick = () => { lock(acceptBtn); resendMessage(`accept invite ${inv.repo}`); };
+    declineBtn.onclick = () => { lock(declineBtn); resendMessage(`decline invite ${inv.repo}`); };
+    actions.appendChild(acceptBtn);
+    actions.appendChild(declineBtn);
+    card.appendChild(actions);
+
+    grid.appendChild(card);
+  });
+
+  wrap.appendChild(grid);
+  return wrap;
 }
 
 // ── BUILD READ-FILE BUBBLE with a capped preview + full-screen view ──
@@ -5337,6 +5467,8 @@ const PROVIDER_BADGES = {
   create_file: 'github', update_file: 'github', delete_file: 'github',
   list_repos: 'github', list_files: 'github', read_file: 'github', repo_info: 'github',
   check_status: 'github', pr_created: 'github',
+  invitations: 'github', invite_accepted: 'github', invite_declined: 'github', list_shared_repos: 'github',
+  collab_list: 'github', collab_invite: 'github', collab_remove: 'github', collab_cancel_invite: 'github',
   vercel_list: 'vercel', vercel_import: 'vercel', vercel_deploy: 'vercel',
   vercel_deploy_pending: 'vercel', vercel_delete_project: 'vercel',
   vercel_env: 'vercel', vercel_env_set: 'vercel',
@@ -5413,6 +5545,9 @@ function actionColorFor(action) {
     create_file: 'success', update_file: 'success', delete_file: 'success',
     list_repos: 'info', list_files: 'info', read_file: 'info', repo_info: 'info',
     check_status: 'info',
+    invitations: 'info', list_shared_repos: 'info', collab_list: 'info',
+    invite_accepted: 'success', invite_declined: 'success',
+    collab_invite: 'success', collab_remove: 'success', collab_cancel_invite: 'success',
     vercel_list: 'info', vercel_import: 'success', vercel_deploy: 'success',
     vercel_deploy_pending: 'warning', vercel_delete_project: 'success',
     vercel_env: 'info', vercel_env_set: 'success',
@@ -5606,6 +5741,11 @@ async function sendMsg() {
 
     const data = await res.json();
     typing.classList.remove('show');
+
+    // Invite accept/decline ke baad menu badge ka count refresh
+    if (data && (data.action === 'invite_accepted' || data.action === 'invite_declined')) {
+      refreshPendingInvites();
+    }
 
     if (data.action === 'confirm_required') {
       addMessage('agent', data.reply, 'warning', {
