@@ -333,7 +333,9 @@ export async function handleCodeGenerate(
   params: Record<string, any>,
   owner: string,
   ghToken: string,
-  userId: number | string
+  userId: number | string,
+  // forcePr: doosre ke repo pe (collaboration) default branch pe direct commit kabhi nahi — hamesha branch + PR
+  opts: { forcePr?: boolean } = {}
 ): Promise<Record<string, any>> {
   const repo = req(params, "repo");
   const instruction: string = req(params, "instruction");
@@ -432,7 +434,7 @@ export async function handleCodeGenerate(
   const s = n !== 1 ? "s" : "";
   const commitMsg = `${sliceStr(instruction, 60)} via Easy DevOps (${n} file${s})`;
 
-  const wantDirect = DIRECT_COMMIT_RE.test(instruction);
+  const wantDirect = opts.forcePr ? false : DIRECT_COMMIT_RE.test(instruction);
   let prUrl: string | null = null;
   let prErrorNote = "";
   let branchUsed: string | null = null;

@@ -41,6 +41,8 @@ import { createRenderService } from "@/lib/commands/render_create_service";
 import { createPullRequest } from "@/lib/commands/code_generate";
 import { exportEnvFile } from "@/lib/commands/env_transfer";
 import { COLLAB_COMMANDS, FOREIGN_OWNER_COMMANDS, FRIEND_COMMANDS, executeCollabCommand, executeFriendCommand } from "@/lib/commands/collab";
+import { BRANCH_COMMANDS, FOREIGN_FILE_COMMANDS, executeBranchCommand, executeForeignWrite } from "@/lib/commands/collab_write";
+import type { RepoAccess } from "@/lib/providers/github";
 
 /**
  * BUG-1 (old code): executor.py `time` import karna bhool gaya tha, isliye
@@ -104,6 +106,9 @@ export async function executeCommand(
     }
 
     // ── `owner/repo` addressing ── (sirf `repo` likha ho to kuch nahi badalta: owner = self)
+    const selfLogin = owner;
+    let foreign = false;
+    let foreignAcc: RepoAccess | null = null;
     if (cmd !== "CREATE_REPO" && typeof p.repo === "string" && p.repo.includes("/")) {
       const ref = parseRepoRef(p.repo, owner);
       if (!ref) {
@@ -113,8 +118,8 @@ export async function executeCommand(
         if (!FOREIGN_OWNER_COMMANDS.has(cmd)) {
           return {
             reply:
-              `🔒 \`${ref.owner}/${ref.repo}\` doosre ka repo hai — abhi uspe sirf dekhna (files/info/checks) ` +
-              `aur collaborators manage karna allowed hai. Edit/PR/delete jaise kaam baad ke update me aayenge.`,
+              `🔒 \`${ref.owner}/${ref.repo}\` doosre ka repo hai — uspe sirf dekhna, collaborators, ` +
+              `branch/file edit aur PR allowed hain (alag branch pe). Repo delete / deploy / env jaise kaam allowed nahi.`,
             action: "warning",
           };
         }
@@ -122,8 +127,30 @@ export async function executeCommand(
         const [acc, accErr] = await ghRepoAccess(ref.owner, ref.repo, ghToken);
         if (!acc) return { reply: accErr, action: "error" };
         owner = ref.owner;
+        foreign = true;
+        foreignAcc = acc;
       }
       p.repo = ref.repo;
+    }
+
+    // Phase 3: branch commands (apne + doosre ke repo) aur doosre ke repo pe branch-safe file writes
+    if (BRANCH_COMMANDS.has(cmd)) {
+      let acc = foreignAcc;
+      if (!acc) {
+        const [a, aErr] = await ghRepoAccess(owner, String(req(p, "repo")).trim(), ghToken);
+        if (!a) return { reply: aErr, action: "error" };
+        acc = a;
+      }
+      return await executeBranchCommand(cmd, p, owner, ghToken, acc);
+    }
+    if (foreign && FOREIGN_FILE_COMMANDS.has(cmd)) {
+      return await executeForeignWrite(cmd, p, owner, ghToken, selfLogin, foreignAcc as RepoAccess);
+    }
+    if (foreign && cmd === "CREATE_PR" && foreignAcc && !foreignAcc.push) {
+      return {
+        reply: `🔒 PR kholne ke liye is repo pe kam se kam **push** access chahiye (tumhari permission: **${foreignAcc.role}**).`,
+        action: "warning",
+      };
     }
 
     if (COLLAB_COMMANDS.has(cmd)) {

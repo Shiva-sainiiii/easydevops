@@ -40,6 +40,8 @@ export const REPO_REF = String.raw`[\w][\w.\-]*(?:/[\w][\w.\-]*)?`;
 // GitHub username (hyphen allowed, dot nahi)
 export const GH_USER = String.raw`[a-z0-9][a-z0-9\-]*`;
 // Invite ke saath permission ka lafz (admin jaanbujh ke nahi)
+// Branch naam (slash allowed, jaise feature/login). Note: matching lowercase message pe hoti hai.
+export const BRANCH_NAME = String.raw`[\w][\w.\-/]*`;
 export const PERM_WORDS = String.raw`(?:pull|read|triage|push|write|maintain)`;
 export const CODEGEN_VERBS = String.raw`(?:build|banao|bana\s*do|create|add|fix|karo|update|change|edit|refactor|improve)`;
 export const CODEGEN_INSPECT_VERBS_RE = String.raw`\b(?:understand|explain|review|check|what\s+is|kya\s+hai|samjhao|samajh|batao|dekho|dekh)\b`;
@@ -132,6 +134,20 @@ export const INTENT_RULES: Rule[] = [
     r`^(?:mere\s+saath|mujhe)\s+share\s+(?:kiye|kiya)\s+(?:gaye\s+)?repos?$`,
     r`^repos?\s+shared\s+with\s+me$`,
   ], () => ({})],
+
+  // ── BRANCHES (Phase 3) — CODE_GENERATE/CREATE_REPO se pehle, warna "create branch x in repo" unme phans jata ──
+  ["CREATE_BRANCH", [
+    r`^(?:create|make|new|banao|bana\s*do)\s+(?:a\s+|ek\s+)?branch\s+(${BRANCH_NAME})(?:\s+from\s+(${BRANCH_NAME}))?\s+(?:in|of|for|on)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+  ], (m) => ({ repo: g(m, 3), branch: g(m, 1), base: g(m, 2) })],
+
+  ["CREATE_BRANCH", [
+    r`^(${REPO_REF})\s+(?:mein|me)\s+(?:branch|nayi\s+branch)\s+(${BRANCH_NAME})\s+(?:banao|bana\s*do|create)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => ({ repo: g(m, 1), branch: g(m, 2), base: null })],
+
+  ["LIST_BRANCHES", [
+    r`^(?:list|show|dikhao|dikha)\s+(?:all\s+|sare\s+)?branch(?:es)?\s+(?:of|for|in|from)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(${REPO_REF})\s+(?:ki|ke)\s+branch(?:es)?\s+(?:dikhao|dikha|list|batao|show)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => ({ repo: g(m, 1) })],
 
   ["LIST_FILES", [
     r`(?:list|sare|show|dikhao|dikha)\s+(?:all\s+)?files?\s+(?:in|of|from)\s+(${REPO_REF})`,

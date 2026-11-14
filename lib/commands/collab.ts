@@ -7,6 +7,7 @@
  */
 import { req } from "@/lib/commands/pyutil";
 import { ghApi, ghListAllRepos, ghMsg, ghRepoAccess, parseRepoRef, sameLogin, type RepoAccess } from "@/lib/providers/github";
+import { BRANCH_COMMANDS, FOREIGN_WRITE_COMMANDS } from "@/lib/commands/collab_write";
 
 export const COLLAB_COMMANDS = new Set([
   "INVITE_COLLABORATOR",
@@ -30,13 +31,15 @@ export const FRIEND_COMMANDS = new Set([
 type Result = Record<string, any>;
 
 /**
- * Doosre owner ke repo (`owner/repo`) pe abhi sirf ye commands allowed hain: read-only +
- * collaborator management. Write commands (file edit, PR, delete...) Phase 3 me aayenge
- * (branch-safe default ke saath), tab tak block hain.
+ * Doosre owner ke repo (`owner/repo`) pe allowed commands: read-only + collaborator management +
+ * (Phase 3) branch-safe writes — file create/edit/delete, branch, PR, AI codegen. Write hamesha
+ * non-default branch pe hota hai (collab_write.ts); delete_repo / env / deploy jaise kaam block rehte hain.
  */
 export const FOREIGN_OWNER_COMMANDS = new Set([
   "LIST_FILES", "READ_FILE", "GET_REPO_INFO", "GITHUB_CHECK_STATUS",
   ...COLLAB_COMMANDS,
+  ...BRANCH_COMMANDS,
+  ...FOREIGN_WRITE_COMMANDS,
 ]);
 
 /**
@@ -61,8 +64,8 @@ export function guardRepoParam(cmd: string, p: Record<string, any>, selfLogin: s
   if (!FOREIGN_OWNER_COMMANDS.has(cmd)) {
     return {
       reply:
-        `🔒 \`${ref.owner}/${ref.repo}\` doosre ka repo hai — abhi uspe sirf dekhna (files/info/checks) ` +
-        `aur collaborators manage karna allowed hai. Edit/PR/delete jaise kaam baad ke update me aayenge.`,
+        `🔒 \`${ref.owner}/${ref.repo}\` doosre ka repo hai — uspe sirf dekhna, collaborators, ` +
+        `branch/file edit aur PR allowed hain (alag branch pe). Repo delete / deploy / env jaise kaam allowed nahi.`,
       action: "warning",
     };
   }

@@ -45,13 +45,15 @@ COMMANDS:
 10f. ACCEPT_INVITATION: {"repo":"owner/repo"} — accept an invitation the user received
 10g. DECLINE_INVITATION: {"repo":"owner/repo"} — decline an invitation the user received
 10h. LIST_SHARED_REPOS: {} — repos other people shared with the current user (collaborator access)
+10i. CREATE_BRANCH: {"repo":"repo-name or owner/repo","branch":"new-branch","base":"optional-base-branch"} — create a branch (default base = repo default branch)
+10j. LIST_BRANCHES: {"repo":"repo-name or owner/repo"}
 ${v.vercel_commands}${v.netlify_commands}${v.render_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
 - JSON must be valid. Escape quotes as \\" and newlines as \\n in content fields.
 - NEVER invent URLs, IDs, or data you don't have — only the commands above give you real information.
 - NEVER output anything resembling a real token/secret, even as an example.
-- A repo may be written as "owner/repo" (someone else's repo) ONLY for READ_FILE, LIST_FILES, GET_REPO_INFO and the collaborator commands; otherwise use the plain repo name.
+- A repo may be written as "owner/repo" (someone else's repo) ONLY for READ_FILE, LIST_FILES, GET_REPO_INFO, CREATE_FILE, EDIT_FILE, DELETE_FILE, CREATE_BRANCH, LIST_BRANCHES and the collaborator commands; otherwise use the plain repo name. On someone else's repo, writes always go to a separate branch (never the default branch); an optional "branch" field may be added to CREATE_FILE/EDIT_FILE/DELETE_FILE.
 ${v.vercel_note}${v.netlify_note}${v.render_note}`;
 
 const VERCEL_COMMANDS_BLOCK = `11. VERCEL_LIST_PROJECTS
@@ -88,6 +90,7 @@ const COMMANDS = [
   "GENERATE_RENDER_YAML:",
   "INVITE_COLLABORATOR:", "LIST_COLLABORATORS:", "REMOVE_COLLABORATOR:", "CANCEL_INVITE:",
   "LIST_MY_INVITATIONS:", "ACCEPT_INVITATION:", "DECLINE_INVITATION:", "LIST_SHARED_REPOS:",
+  "CREATE_BRANCH:", "LIST_BRANCHES:",
   "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
   "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_DOWNLOAD_ENV:", "VERCEL_SET_ENV:",
   "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",

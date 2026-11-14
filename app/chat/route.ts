@@ -15,6 +15,7 @@ import { NO_ARG_COMMANDS, parseIntent } from "@/lib/commands/intent_parser";
 import { AIError, NoAIKeyError, callOpenrouterChat, extractCommand, handleCreateOrEditFile } from "@/lib/commands/ai_fallback";
 import { handleCodeGenerate } from "@/lib/commands/code_generate";
 import { guardRepoParam } from "@/lib/commands/collab";
+import { ghRepoAccess, parseRepoRef, sameLogin } from "@/lib/providers/github";
 import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 
 export const runtime = "nodejs";
@@ -128,7 +129,29 @@ export async function POST(req: Request) {
     if (cmd === "CODE_GENERATE") {
       try {
         params["instruction"] = userMessage;
-        const result = await handleCodeGenerate(params, owner, ghToken, user.id);
+        // Phase 3: `owner/repo` (doosra owner) -> push access check, phir hamesha branch + PR (direct commit nahi)
+        let cgOwner = owner;
+        let cgForeign = false;
+        const refStr = typeof params["repo"] === "string" ? params["repo"] : "";
+        if (refStr.includes("/")) {
+          const ref = parseRepoRef(refStr, owner);
+          if (ref && !sameLogin(ref.owner, owner)) {
+            const [acc, accErr] = await ghRepoAccess(ref.owner, ref.repo, ghToken);
+            if (!acc) return safeJsonify({ reply: accErr, action: "error", source: "direct" });
+            if (!acc.push) {
+              return safeJsonify({
+                reply: `🔒 \`${ref.owner}/${ref.repo}\` me changes ke liye kam se kam **push** access chahiye (tumhari permission: **${acc.role}**).`,
+                action: "warning",
+                source: "direct",
+              });
+            }
+            cgOwner = ref.owner;
+            cgForeign = true;
+            params["repo"] = ref.repo;
+          }
+        }
+        const result = await handleCodeGenerate(params, cgOwner, ghToken, user.id, { forcePr: cgForeign });
+        if (cgForeign && typeof result["repo"] === "string") result["repo"] = `${cgOwner}/${result["repo"]}`;
         return safeJsonify(result);
       } catch (e: any) {
         if (e instanceof NoAIKeyError) {
