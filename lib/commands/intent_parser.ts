@@ -35,6 +35,12 @@ export function pyRegex(pattern: string, flags = ""): RegExp {
 
 export const SLUG = String.raw`[\w][\w.\-]*`;
 export const PATH = String.raw`[\w][\w./\-]*`;
+// `repo` ya `owner/repo` (collaboration). Non-capturing, isliye group numbers nahi badalte.
+export const REPO_REF = String.raw`[\w][\w.\-]*(?:/[\w][\w.\-]*)?`;
+// GitHub username (hyphen allowed, dot nahi)
+export const GH_USER = String.raw`[a-z0-9][a-z0-9\-]*`;
+// Invite ke saath permission ka lafz (admin jaanbujh ke nahi)
+export const PERM_WORDS = String.raw`(?:pull|read|triage|push|write|maintain)`;
 export const CODEGEN_VERBS = String.raw`(?:build|banao|bana\s*do|create|add|fix|karo|update|change|edit|refactor|improve)`;
 export const CODEGEN_INSPECT_VERBS_RE = String.raw`\b(?:understand|explain|review|check|what\s+is|kya\s+hai|samjhao|samajh|batao|dekho|dekh)\b`;
 export const CODEGEN_STRONG_CHANGE_VERBS_RE = String.raw`\b(?:fix|edit|update|change|add|remove|delete|refactor|debug|improve|build|create|banao|bana|isme|ismein|iska|isko)\b`;
@@ -48,25 +54,76 @@ const r = String.raw;
 
 type Rule = [string, string[], (m: M) => Record<string, any>];
 
+/** Invite ke message me se permission nikalo (read->pull, write->push); na ho to null (executor default push). */
+function invitePerm(m: M): string | null {
+  const t = String(m.input || "");
+  const hit = /\b(pull|read|triage|push|write|maintain)\b/.exec(t);
+  if (!hit) return null;
+  return hit[1] === "read" ? "pull" : hit[1] === "write" ? "push" : hit[1];
+}
+
 export const INTENT_RULES: Rule[] = [
+  // ── COLLABORATION (sabse upar: "list collaborators of repo X" LIST_REPOS me na phanse) ──
+  // "..repo" ke baad "as/with <perm> access" optional; "admin" jaanbujh ke nahi.
+  ["INVITE_COLLABORATOR", [
+    r`^invite\s+@?(${GH_USER})\s+(?:to|in|into)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})(?:\s+(?:as|with)\s+(?:a\s+)?${PERM_WORDS}(?:\s+access)?)?$`,
+    r`^(?:add)\s+@?(${GH_USER})\s+as\s+(?:a\s+)?collaborator\s+(?:to|in|on|into)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})(?:\s+(?:as|with)\s+(?:a\s+)?${PERM_WORDS}(?:\s+access)?)?$`,
+  ], (m) => ({ username: g(m, 1), repo: g(m, 2), permission: invitePerm(m) })],
+
+  ["INVITE_COLLABORATOR", [
+    r`^@?(${GH_USER})\s+ko\s+(${REPO_REF})\s+(?:mein|me)\s+(?:collaborator\s+(?:banao|bana\s*do|add\s+(?:karo|kar\s*do|kardo))|invite\s+(?:karo|kar\s*do|kardo|bhejo))(?:\s+(?:${PERM_WORDS})\s+access\s+ke\s+(?:saath|sath))?$`,
+  ], (m) => ({ username: g(m, 1), repo: g(m, 2), permission: invitePerm(m) })],
+
+  ["INVITE_COLLABORATOR", [
+    r`^(${REPO_REF})\s+(?:mein|me)\s+@?(${GH_USER})\s+ko\s+(?:collaborator\s+(?:banao|bana\s*do|add\s+(?:karo|kar\s*do|kardo))|invite\s+(?:karo|kar\s*do|kardo|bhejo))(?:\s+(?:${PERM_WORDS})\s+access\s+ke\s+(?:saath|sath))?$`,
+  ], (m) => ({ repo: g(m, 1), username: g(m, 2), permission: invitePerm(m) })],
+
+  ["LIST_COLLABORATORS", [
+    r`^(?:list|show|dikhao|dikha)\s+(?:all\s+|sare\s+)?collaborators?\s+(?:of|for|in)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^who\s+(?:has|have)\s+access\s+(?:to|of)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(${REPO_REF})\s+(?:ke|ki|ka)\s+collaborators?\s+(?:dikhao|dikha|list|batao|show)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => ({ repo: g(m, 1) })],
+
+  ["CANCEL_INVITE", [
+    r`^(?:cancel|withdraw)\s+invite\s+(?:of\s+|for\s+)?@?(${GH_USER})\s+(?:from|in|of|for)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(?:cancel|withdraw)\s+@?(${GH_USER})(?:'s|s)?\s+invite\s+(?:from|in|of|for)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+  ], (m) => ({ username: g(m, 1), repo: g(m, 2) })],
+
+  ["CANCEL_INVITE", [
+    r`^(${REPO_REF})\s+(?:se|me|mein)\s+@?(${GH_USER})\s+ka\s+invite\s+(?:cancel|hatao|hata\s*do|wapas\s*lo)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => ({ repo: g(m, 1), username: g(m, 2) })],
+
+  // Bare "remove X from repo" jaanbujh ke nahi (file/collaborator confuse ho jate) — wo AI fallback
+  // sambhalta hai; yahan "collaborator"/"access" lafz zaroori hai.
+  ["REMOVE_COLLABORATOR", [
+    r`^(?:remove|kick)\s+@?(${GH_USER})\s+(?:as\s+)?(?:a\s+)?collaborator\s+(?:from|of)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(?:remove|kick)\s+collaborator\s+@?(${GH_USER})\s+(?:from|of)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(?:remove|revoke)\s+@?(${GH_USER})(?:'s)?\s+access\s+(?:from|to|of)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+  ], (m) => ({ username: g(m, 1), repo: g(m, 2) })],
+
+  ["REMOVE_COLLABORATOR", [
+    r`^(${REPO_REF})\s+(?:se|me|mein)\s+@?(${GH_USER})\s+ko\s+collaborator(?:\s+(?:list\s+)?se)?\s+(?:hata(?:o|\s*do)|nikalo|remove)(?:\s+(?:karo|kar\s*do))?$`,
+    r`^(${REPO_REF})\s+(?:se|me|mein)\s+@?(${GH_USER})\s+ka\s+access\s+(?:hata(?:o|\s*do)|band\s+(?:karo|kar\s*do)|remove)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => ({ repo: g(m, 1), username: g(m, 2) })],
+
   ["LIST_FILES", [
-    r`(?:list|sare|show|dikhao|dikha)\s+(?:all\s+)?files?\s+(?:in|of|from)\s+(${SLUG})`,
+    r`(?:list|sare|show|dikhao|dikha)\s+(?:all\s+)?files?\s+(?:in|of|from)\s+(${REPO_REF})`,
   ], (m) => ({ repo: g(m, 1), path: "" })],
 
   ["READ_FILE", [
-    r`(?:read|padh|padho|show|dikhao|dikha|open|kholo)\s+(?:the\s+)?file\s+(${PATH})\s+(?:from|in|of)\s+(${SLUG})`,
+    r`(?:read|padh|padho|show|dikhao|dikha|open|kholo)\s+(?:the\s+)?file\s+(${PATH})\s+(?:from|in|of)\s+(${REPO_REF})`,
   ], (m) => ({ repo: g(m, 2), path: g(m, 1) })],
 
   ["DELETE_FILE", [
-    r`(?:delete|uda|udado|hata|hatao|remove)\s+(?:the\s+)?file\s+(${PATH})\s+(?:from|in|of)\s+(${SLUG})`,
+    r`(?:delete|uda|udado|hata|hatao|remove)\s+(?:the\s+)?file\s+(${PATH})\s+(?:from|in|of)\s+(${REPO_REF})`,
   ], (m) => ({ repo: g(m, 2), path: g(m, 1) })],
 
   ["EDIT_FILE", [
-    r`(?:edit|change|update|badlo|badal\s*do|modify)\s+(?:the\s+)?file\s+(${PATH})\s+(?:in|of)\s+(${SLUG})`,
+    r`(?:edit|change|update|badlo|badal\s*do|modify)\s+(?:the\s+)?file\s+(${PATH})\s+(?:in|of)\s+(${REPO_REF})`,
   ], (m) => ({ repo: g(m, 2), path: g(m, 1) })],
 
   ["CREATE_FILE", [
-    r`(?:create|bnao|banao|new|naya)\s+(?:a\s+)?file\s+(${PATH})\s+(?:in|inside|for)\s+(${SLUG})`,
+    r`(?:create|bnao|banao|new|naya)\s+(?:a\s+)?file\s+(${PATH})\s+(?:in|inside|for)\s+(${REPO_REF})`,
   ], (m) => ({ repo: g(m, 2), path: g(m, 1) })],
 
   ["CREATE_REPO", [
@@ -77,23 +134,23 @@ export const INTENT_RULES: Rule[] = [
   ], (m) => ({ repo: g(m, 1) })],
 
   ["DELETE_REPO", [
-    r`(?:delete|uda|udado|hata|hatao|remove)\s+(?:the\s+)?repo(?:sitory)?\s+(${SLUG})`,
-    r`repo(?:sitory)?\s+(${SLUG})\s+(?:delete|uda(?:\s*do)?|hata(?:o|\s*do)?|remove)\s*(?:karo|kar\s*do)?$`,
+    r`(?:delete|uda|udado|hata|hatao|remove)\s+(?:the\s+)?repo(?:sitory)?\s+(${REPO_REF})`,
+    r`repo(?:sitory)?\s+(${REPO_REF})\s+(?:delete|uda(?:\s*do)?|hata(?:o|\s*do)?|remove)\s*(?:karo|kar\s*do)?$`,
   ], (m) => ({ repo: g(m, 1) })],
 
   // CI / GitHub Actions check status. ref optional (group 2). "on branch|on|branch" mein
   // do-word form pehle try hota hai (greedy SLUG ki wajah se).
   ["GITHUB_CHECK_STATUS", [
-    r`(?:check|ci|build)\s+status\s+(?:of|for)\s+(${SLUG})(?:\s+(?:on\s+branch|on|branch)\s+(${SLUG}))?`,
-    r`(${SLUG})\s+(?:ki\s+)?(?:(${SLUG})\s+branch\s+(?:ki\s+)?)?(?:ci\s+)?status\s+(?:dikhao|dikha|check\s+karo|batao)`,
-    r`(${SLUG})\s+(?:ke\s+)?(?:checks?|actions?)\s+(?:dikhao|dikha|show)(?:\s+(?:on\s+branch|on|branch)\s+(${SLUG}))?`,
+    r`(?:check|ci|build)\s+status\s+(?:of|for)\s+(${REPO_REF})(?:\s+(?:on\s+branch|on|branch)\s+(${SLUG}))?`,
+    r`(${REPO_REF})\s+(?:ki\s+)?(?:(${SLUG})\s+branch\s+(?:ki\s+)?)?(?:ci\s+)?status\s+(?:dikhao|dikha|check\s+karo|batao)`,
+    r`(${REPO_REF})\s+(?:ke\s+)?(?:checks?|actions?)\s+(?:dikhao|dikha|show)(?:\s+(?:on\s+branch|on|branch)\s+(${SLUG}))?`,
   ], (m) => ({ repo: g(m, 1), ref: g(m, 2) })],
 
   ["GET_REPO_INFO", [
     // netlify/render par negative lookahead: "info about netlify site X" yahan na phanse
-    r`(?:info|information|details)\s+(?:about|of|for)\s+(?:repo\s+)?(?!netlify\b|render\b)(${SLUG})`,
-    r`repo\s+info\s+(${SLUG})`,
-    r`(${SLUG})\s+ki\s+info\s+(?:do|dikhao|dikha)`,
+    r`(?:info|information|details)\s+(?:about|of|for)\s+(?:repo\s+)?(?!netlify\b|render\b)(${REPO_REF})`,
+    r`repo\s+info\s+(${REPO_REF})`,
+    r`(${REPO_REF})\s+ki\s+info\s+(?:do|dikhao|dikha)`,
   ], (m) => ({ repo: g(m, 1) })],
 
   ["LIST_REPOS", [
@@ -235,23 +292,23 @@ export const INTENT_RULES: Rule[] = [
   // ── CREATE_PR — CODE_GENERATE se pehle (warna "open ... in repo" CODE_GENERATE kha jata) ──
   ["CREATE_PR", [
     r`(?:open|create|bana|banao|bana\s*do)\s+(?:a\s+|ek\s+)?(?:pr|pull\s*request)\s+` +
-      r`from\s+(${SLUG})\s+to\s+(${SLUG})\s+(?:in|for|of)\s+(${SLUG})`,
+      r`from\s+(${SLUG})\s+to\s+(${SLUG})\s+(?:in|for|of)\s+(${REPO_REF})`,
   ], (m) => ({ head: g(m, 1), base: g(m, 2), repo: g(m, 3) })],
 
   ["CREATE_PR", [
-    r`(${SLUG})\s+(?:mein|me)\s+(${SLUG})\s+se\s+(${SLUG})\s+(?:tak|mein|ke\s+liye)\s+` +
+    r`(${REPO_REF})\s+(?:mein|me)\s+(${SLUG})\s+se\s+(${SLUG})\s+(?:tak|mein|ke\s+liye)\s+` +
       r`(?:pr|pull\s*request)\s+(?:banao|bana\s*do|create|open)`,
   ], (m) => ({ repo: g(m, 1), head: g(m, 2), base: g(m, 3) })],
 
   ["CREATE_PR", [
     r`(?:open|create|bana|banao|bana\s*do)\s+(?:a\s+|ek\s+)?(?:pr|pull\s*request)\s+` +
-      r`(?:for|from)\s+(${SLUG})\s+(?:in|of)\s+(${SLUG})`,
+      r`(?:for|from)\s+(${SLUG})\s+(?:in|of)\s+(${REPO_REF})`,
   ], (m) => ({ head: g(m, 1), base: null, repo: g(m, 2) })],
 
   // ── CODE_GENERATE — jaanbujh ke sabse last (sabse broad patterns) ──
   ["CODE_GENERATE", [
-    r`^${CODEGEN_VERBS}\b.*\s+(?:in|mein|me)\s+(${SLUG})$`,
-    r`^(${SLUG})\s+(?:mein|me)\s+.*${CODEGEN_VERBS}\b`,
+    r`^${CODEGEN_VERBS}\b.*\s+(?:in|mein|me)\s+(${REPO_REF})$`,
+    r`^(${REPO_REF})\s+(?:mein|me)\s+.*${CODEGEN_VERBS}\b`,
   ], (m) => ({ repo: g(m, 1) })],
 ];
 

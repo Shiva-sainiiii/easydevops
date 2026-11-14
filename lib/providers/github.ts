@@ -121,3 +121,108 @@ export function summarizeCheckRuns(checkRuns: any[]): CheckSummary {
   const overall = pending ? "pending" : failed ? "failure" : "success";
   return { state: overall, total: checkRuns.length, passed, failed, pending, checks };
 }
+
+// ════════════════════════════════════════════════════════════════
+// COLLABORATION helpers — `owner/repo` addressing + permission check
+// ════════════════════════════════════════════════════════════════
+
+export interface RepoRef {
+  owner: string;
+  repo: string;
+}
+
+const REF_NAME_RE = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * "owner/repo" ko todta hai. Sirf `owner/repo` form ke liye (jisme "/" ho) call karo —
+ * bina "/" wale purane `repo` naam ka behaviour (owner = self) caller me hi rehta hai.
+ * Galat format ya "." / ".." jaise path-traversal naam pe null.
+ */
+export function parseRepoRef(raw: string, selfLogin: string): RepoRef | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const parts = s.split("/");
+  if (parts.length === 1) return REF_NAME_RE.test(parts[0]) ? { owner: selfLogin, repo: parts[0] } : null;
+  if (parts.length !== 2) return null;
+  const [o, r] = parts;
+  if (!REF_NAME_RE.test(o) || !REF_NAME_RE.test(r)) return null;
+  if (o === "." || o === ".." || r === "." || r === "..") return null;
+  return { owner: o, repo: r };
+}
+
+/** GitHub logins case-insensitive hote hain. */
+export function sameLogin(a: string, b: string): boolean {
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
+/** GitHub error response se `message` (body JSON na ho to text ka chhota hissa). */
+export function ghMsg(r: PyResponse, def = ""): string {
+  try {
+    const m = r.json()?.message;
+    if (typeof m === "string" && m) return m;
+  } catch {
+    // body JSON nahi tha
+  }
+  return r.text ? r.text.slice(0, 200) : def;
+}
+
+export interface RepoAccess {
+  fullName: string;
+  admin: boolean;
+  push: boolean;
+  pull: boolean;
+  role: "admin" | "maintain" | "push" | "triage" | "pull" | "none";
+  defaultBranch: string | null;
+  ownerType: string | null; // "User" | "Organization"
+  isPrivate: boolean;
+}
+
+/** Non-200 GitHub response ko Hinglish error me badalta hai. */
+export function ghAccessError(r: PyResponse, fullName: string): string {
+  const msg = ghMsg(r);
+  if (r.status_code === 401) return "🔒 GitHub token invalid ya expire ho gaya. Logout karke dubara GitHub se connect karo.";
+  if (/rate limit/i.test(msg)) return "⏳ GitHub rate limit lag gaya. Thodi der baad dobara try karo.";
+  if (r.status_code === 404) {
+    return (
+      `❌ Repo \`${fullName}\` nahi mila — ya to naam galat hai, ya tumhare paas uska access nahi hai ` +
+      `(private repo me pehle invite accept karna padta hai).`
+    );
+  }
+  if (r.status_code === 403) return `🔒 GitHub ne \`${fullName}\` ka access mana kar diya (403)${msg ? `: ${msg}` : "."}`;
+  return `❌ GitHub Error (${r.status_code}): ${msg || "unknown"}`;
+}
+
+/**
+ * Repo ke upar logged-in user ki asli permission GitHub se poochta hai —
+ * client pe bharosa nahi, GitHub hi final judge hai.
+ * Returns [access, null] ya [null, hinglishError].
+ */
+export async function ghRepoAccess(
+  owner: string,
+  repo: string,
+  ghToken: string
+): Promise<[RepoAccess | null, string | null]> {
+  const r = await ghApi("GET", `/repos/${owner}/${repo}`, ghToken);
+  if (r.status_code !== 200) return [null, ghAccessError(r, `${owner}/${repo}`)];
+  const d = r.json();
+  const perms = d?.permissions ?? {};
+  const admin = !!perms.admin;
+  const maintain = !!perms.maintain;
+  const push = !!perms.push;
+  const triage = !!perms.triage;
+  const pull = !!perms.pull;
+  const role = admin ? "admin" : maintain ? "maintain" : push ? "push" : triage ? "triage" : pull ? "pull" : "none";
+  return [
+    {
+      fullName: d?.full_name ?? `${owner}/${repo}`,
+      admin,
+      push: admin || maintain || push,
+      pull: admin || maintain || push || triage || pull,
+      role,
+      defaultBranch: d?.default_branch ?? null,
+      ownerType: d?.owner?.type ?? null,
+      isPrivate: !!d?.private,
+    },
+    null,
+  ];
+}

@@ -37,12 +37,17 @@ COMMANDS:
 8. LIST_FILES: {"repo":"repo-name","path":""}
 9. GET_REPO_INFO: {"repo":"repo-name"}
 10. GENERATE_RENDER_YAML: {"repo":"repo-name"} — auto-detects the repo's stack and commits a render.yaml IaC blueprint
+10a. INVITE_COLLABORATOR: {"repo":"repo-name","username":"github-username","permission":"push"} — invite a friend to the repo; permission optional (pull|triage|push|maintain, default push; never admin)
+10b. LIST_COLLABORATORS: {"repo":"repo-name"} — collaborators + pending invites
+10c. REMOVE_COLLABORATOR: {"repo":"repo-name","username":"github-username"}
+10d. CANCEL_INVITE: {"repo":"repo-name","username":"github-username"} — cancel a pending invite
 ${v.vercel_commands}${v.netlify_commands}${v.render_commands}
 RULES:
 - Output ONLY the command, nothing else, UNLESS the request is conversational/explanatory.
 - JSON must be valid. Escape quotes as \\" and newlines as \\n in content fields.
 - NEVER invent URLs, IDs, or data you don't have — only the commands above give you real information.
 - NEVER output anything resembling a real token/secret, even as an example.
+- A repo may be written as "owner/repo" (someone else's repo) ONLY for READ_FILE, LIST_FILES, GET_REPO_INFO and the collaborator commands; otherwise use the plain repo name.
 ${v.vercel_note}${v.netlify_note}${v.render_note}`;
 
 const VERCEL_COMMANDS_BLOCK = `11. VERCEL_LIST_PROJECTS
@@ -77,6 +82,7 @@ const COMMANDS = [
   "CREATE_REPO:", "DELETE_REPO:", "LIST_REPOS", "CREATE_FILE:",
   "READ_FILE:", "EDIT_FILE:", "DELETE_FILE:", "LIST_FILES:", "GET_REPO_INFO:",
   "GENERATE_RENDER_YAML:",
+  "INVITE_COLLABORATOR:", "LIST_COLLABORATORS:", "REMOVE_COLLABORATOR:", "CANCEL_INVITE:",
   "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
   "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_DOWNLOAD_ENV:", "VERCEL_SET_ENV:",
   "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",

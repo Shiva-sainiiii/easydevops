@@ -10,6 +10,7 @@ export const DESTRUCTIVE_COMMANDS = new Set([
   "DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK",
   "BULK_DELETE_FILES", "BULK_DELETE_REPOS", "BULK_DELETE_VERCEL_PROJECTS",
   "BULK_DELETE_NETLIFY_SITES", "BULK_DELETE_RENDER_SERVICES",
+  "REMOVE_COLLABORATOR",
 ]);
 
 export function confirmToken(cmd: string, value: string | null | undefined, userId: number | string): string {
@@ -26,8 +27,14 @@ export function buildConfirmation(cmd: string, params: Record<string, any>, user
   let actionVerb = "delete"; // confirm prompt ka default headline verb
   let targetDesc: string;
   let warnText: string;
+  let headlineOverride: string | null = null;
 
-  if (cmd === "DELETE_REPO") {
+  if (cmd === "REMOVE_COLLABORATOR") {
+    // confirm_verb "delete" hi rehta hai (frontend button ka label wahi se banta hai)
+    headlineOverride = `\`@${pyStr(params.username)}\` ko repo \`${pyStr(params.repo)}\` se hatane wala hu.`;
+    targetDesc = "";
+    warnText = "Uska access turant band ho jayega. Wapas access dene ke liye naya invite bhejna padega.";
+  } else if (cmd === "DELETE_REPO") {
     targetDesc = `GitHub repo \`${pyStr(params.repo)}\``;
     warnText = "Ye permanently delete ho jayega — saara code, history, sab kuch. Wapas nahi aayega.";
   } else if (cmd === "DELETE_FILE") {
@@ -77,6 +84,7 @@ export function buildConfirmation(cmd: string, params: Record<string, any>, user
   }
 
   const headline =
+    headlineOverride !== null ? headlineOverride :
     actionVerb === "delete" ? `${targetDesc} delete karne wala hu.` : `${targetDesc} ko rollback karne wala hu.`;
 
   return {

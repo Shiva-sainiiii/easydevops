@@ -14,6 +14,7 @@ import { executeCommand } from "@/lib/commands/executor";
 import { NO_ARG_COMMANDS, parseIntent } from "@/lib/commands/intent_parser";
 import { AIError, NoAIKeyError, callOpenrouterChat, extractCommand, handleCreateOrEditFile } from "@/lib/commands/ai_fallback";
 import { handleCodeGenerate } from "@/lib/commands/code_generate";
+import { guardRepoParam } from "@/lib/commands/collab";
 import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 
 export const runtime = "nodejs";
@@ -85,6 +86,13 @@ export async function POST(req: Request) {
   const [cmd, params] = parseIntent(userMessage);
 
   if (cmd) {
+    // `owner/repo`: galat format / doosre ke repo pe write command ko AI call ya confirm prompt se PEHLE rok do
+    const blocked = guardRepoParam(cmd, params, owner);
+    if (blocked) {
+      blocked.source = "direct";
+      return safeJsonify(blocked);
+    }
+
     if (cmd === "CREATE_FILE" || cmd === "EDIT_FILE") {
       try {
         const result = await handleCreateOrEditFile(cmd, params, userMessage, owner, ghToken, user.id);
@@ -193,6 +201,12 @@ export async function POST(req: Request) {
           source: "ai",
         });
       }
+    }
+
+    const aiBlocked = guardRepoParam(aiCmd, aiParams, owner);
+    if (aiBlocked) {
+      aiBlocked.source = "ai";
+      return safeJsonify(aiBlocked);
     }
 
     if (DESTRUCTIVE_COMMANDS.has(aiCmd)) {

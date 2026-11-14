@@ -1,8 +1,10 @@
 /**
  * execute_command — per-user executor (executor.py ka faithful port).
  *
- * `owner` hamesha logged-in user ka apna GitHub login hota hai — commands request
- * se koi arbitrary owner nahi lete.
+ * `owner` default me logged-in user ka apna GitHub login hota hai. Sirf `repo: "owner/repo"`
+ * form me doosra owner aa sakta hai, aur tab bhi: (1) sirf FOREIGN_OWNER_COMMANDS chalte hain,
+ * (2) GitHub se `GET /repos/{o}/{r}` karke access verify hota hai, (3) call hamesha user ke
+ * apne GitHub token se jaati hai (deploy tokens kabhi nahi).
  *
  * Python -> TS farq jo yahan handle kiye gaye:
  *  - dict["key"] KeyError  -> req()/K() helpers wahi KeyError-jaisa message dete hain
@@ -19,6 +21,9 @@ import {
   ghListAllRepos,
   ghGetCheckRuns,
   summarizeCheckRuns,
+  parseRepoRef,
+  sameLogin,
+  ghRepoAccess,
 } from "@/lib/providers/github";
 import {
   vcApi,
@@ -35,6 +40,7 @@ import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 import { createRenderService } from "@/lib/commands/render_create_service";
 import { createPullRequest } from "@/lib/commands/code_generate";
 import { exportEnvFile } from "@/lib/commands/env_transfer";
+import { COLLAB_COMMANDS, FOREIGN_OWNER_COMMANDS, executeCollabCommand } from "@/lib/commands/collab";
 
 /**
  * BUG-1 (old code): executor.py `time` import karna bhool gaya tha, isliye
@@ -91,6 +97,33 @@ export async function executeCommand(
   const p = params;
 
   try {
+    // ── `owner/repo` addressing ── (sirf `repo` likha ho to kuch nahi badalta: owner = self)
+    if (cmd !== "CREATE_REPO" && typeof p.repo === "string" && p.repo.includes("/")) {
+      const ref = parseRepoRef(p.repo, owner);
+      if (!ref) {
+        return { reply: `❌ Repo naam galat hai: \`${p.repo}\`. Format: \`repo\` ya \`owner/repo\`.`, action: "error" };
+      }
+      if (!sameLogin(ref.owner, owner)) {
+        if (!FOREIGN_OWNER_COMMANDS.has(cmd)) {
+          return {
+            reply:
+              `🔒 \`${ref.owner}/${ref.repo}\` doosre ka repo hai — abhi uspe sirf dekhna (files/info/checks) ` +
+              `aur collaborators manage karna allowed hai. Edit/PR/delete jaise kaam baad ke update me aayenge.`,
+            action: "warning",
+          };
+        }
+        // GitHub final judge: asli permission check, 403/404 Hinglish me
+        const [acc, accErr] = await ghRepoAccess(ref.owner, ref.repo, ghToken);
+        if (!acc) return { reply: accErr, action: "error" };
+        owner = ref.owner;
+      }
+      p.repo = ref.repo;
+    }
+
+    if (COLLAB_COMMANDS.has(cmd)) {
+      return await executeCollabCommand(cmd, p, owner, ghToken);
+    }
+
     if (cmd === "CREATE_REPO") {
       const repoName = String(req(p, "repo")).trim().replace(/[^a-zA-Z0-9_.-]/g, "-");
       const r = await ghApi("POST", "/user/repos", ghToken, {
