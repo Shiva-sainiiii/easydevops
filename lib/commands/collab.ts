@@ -159,32 +159,6 @@ export async function executeCollabCommand(
     return { reply, action: "collab_list", repo: full, collaborators: people, pending_invites: pending };
   }
 
-  // ── MULTI INVITE: usernames[] -> ek ek karke wahi single-invite logic, ek summary reply ──
-  if (cmd === "INVITE_COLLABORATOR" && Array.isArray(p.usernames) && p.usernames.length > 1) {
-    const uniq: string[] = [];
-    for (const raw of p.usernames) {
-      const u = cleanUser(raw);
-      if (u && !uniq.some((x) => x.toLowerCase() === u.toLowerCase())) uniq.push(u);
-    }
-    const list = uniq.slice(0, 10);
-    const lines: string[] = [];
-    const invited: string[] = [];
-    for (const u of list) {
-      const one = await executeCollabCommand(cmd, { ...p, username: u, usernames: undefined }, owner, ghToken);
-      const first = String(one.reply ?? "").split("\n")[0];
-      lines.push(`• ${first}`);
-      if (one.action === "collab_invite") invited.push(u);
-    }
-    const extra = uniq.length > list.length ? `\n\n(Ek baar me max 10 users — baaki ${uniq.length - list.length} chhod diye.)` : "";
-    return {
-      reply: `👥 \`${full}\` — ${list.length} users ka invite process hua (${invited.length} OK):\n\n${lines.join("\n")}${extra}`,
-      action: invited.length ? "collab_invite" : "error",
-      repo: full,
-      usernames: invited,
-      permission: p.permission ?? "push",
-    };
-  }
-
   // Baaki teeno commands ko username chahiye aur admin access
   const username = cleanUser(req(p, "username"));
   const bad = badUsername(username);
