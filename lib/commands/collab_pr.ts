@@ -6,10 +6,11 @@
  */
 import { gd, req } from "@/lib/commands/pyutil";
 import { ghApi, ghGetCheckRuns, ghMsg, summarizeCheckRuns } from "@/lib/providers/github";
+import { findPreviewUrl } from "@/lib/commands/collab_extra";
 
 type Result = Record<string, any>;
 
-export const PR_COMMANDS = new Set(["LIST_PRS", "PR_DETAILS", "MERGE_PR", "CLOSE_PR", "COMMENT_PR"]);
+export const PR_COMMANDS = new Set(["LIST_PRS", "PR_DETAILS", "PR_PREVIEW", "MERGE_PR", "CLOSE_PR", "COMMENT_PR"]);
 
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const MAX_PATCH_CHARS = 6000; // per file
@@ -132,6 +133,7 @@ export async function executePrCommand(
       if (cr.status_code === 200) checks = summarizeCheckRuns(runs);
     }
 
+    const prev = await findPreviewUrl(owner, repo, headSha, pr?.head?.ref ?? null, ghToken);
     const state = stateLabel(pr);
     const mergeable: boolean | null = pr?.mergeable ?? null; // null = GitHub abhi compute kar raha hai
     const mstate: string = pr?.mergeable_state ?? "unknown";
@@ -157,6 +159,7 @@ export async function executePrCommand(
       `${pr?.changed_files ?? files.length} files · +${pr?.additions ?? 0}/-${pr?.deletions ?? 0} · ${pr?.commits ?? "?"} commits\n` +
       (mergeNote ? `${mergeNote}\n` : "") +
       (checkLine ? `${checkLine}\n` : "") +
+      (prev ? `🌐 Preview: ${prev.url}\n` : "") +
       (body ? `\n${body.slice(0, 500)}${body.length > 500 ? "…" : ""}\n` : "") +
       `\n**Files:**\n${fileLines.join("\n")}` +
       (files.length > 30 ? `\n…aur ${files.length - 30} files` : "") +
@@ -183,7 +186,30 @@ export async function executePrCommand(
       changed_files: pr?.changed_files ?? files.length,
       files,
       checks_summary: checks,
+      preview_url: prev?.url ?? null,
       body: body.slice(0, 2000),
+    };
+  }
+
+  // ── PR_PREVIEW ──
+  if (cmd === "PR_PREVIEW") {
+    const r = await ghApi("GET", `/repos/${owner}/${repo}/pulls/${number}`, ghToken);
+    if (r.status_code === 404) return { reply: `❌ \`${full}\` me PR #${number} nahi mila.`, action: "error" };
+    if (r.status_code !== 200) return { reply: `❌ PR fetch nahi hua (${r.status_code}): ${ghMsg(r)}`, action: "error" };
+    const pr = r.json();
+    const prev = await findPreviewUrl(owner, repo, pr?.head?.sha ?? null, pr?.head?.ref ?? null, ghToken);
+    if (!prev) {
+      return {
+        reply: `🌐 PR #${number} ka preview URL nahi mila. Ya to repo Vercel/Netlify se linked nahi hai, ya preview abhi ban raha hai — thodi der baad dobara try karo.`,
+        action: "warning",
+      };
+    }
+    return {
+      reply: `🌐 PR #${number} preview (${prev.state || "deployed"}${prev.environment ? " · " + prev.environment : ""}):\n🔗 ${prev.url}`,
+      action: "pr_preview",
+      repo: full,
+      number,
+      preview_url: prev.url,
     };
   }
 

@@ -3895,7 +3895,7 @@ const ACTIVITY_LIST_CONFIG = {
 };
 
 function richBubbleBadgeFor(entry) {
-  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status' || entry.action === 'invitations' || entry.action === 'pr_list' || entry.action === 'pr_details') return 'github';
+  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status' || entry.action === 'invitations' || entry.action === 'pr_list' || entry.action === 'pr_details' || entry.action === 'notifications') return 'github';
   if (entry.action === 'vercel_deployments' || entry.action === 'vercel_env') return 'vercel';
   if (entry.action === 'netlify_site_info' || entry.action === 'netlify_env') return 'netlify';
   if (entry.action === 'render_env') return 'render';
@@ -3963,6 +3963,10 @@ function buildRichBubbleNode(entry) {
 
   if (entry.action === 'pr_details' && Array.isArray(entry.files) && entry.number) {
     return buildPrDetailsBubble(entry);
+  }
+
+  if (entry.action === 'notifications' && Array.isArray(entry.notifications) && entry.notifications.length) {
+    return buildNotificationsBubble(entry);
   }
 
   const activityCfg = ACTIVITY_LIST_CONFIG[entry.action];
@@ -4197,9 +4201,59 @@ function buildPrDetailsBubble(entry) {
     }
     actions.appendChild(prMiniBtn('Close PR', false, () => resendMessage(`close pr ${entry.number} in ${entry.repo}`)));
   }
+  if (entry.preview_url && /^https?:\/\//.test(entry.preview_url)) {
+    actions.appendChild(prMiniBtn('🌐 Preview ↗', false, () => { window.open(entry.preview_url, '_blank', 'noopener'); }));
+  }
   if (entry.url) {
     actions.appendChild(prMiniBtn('GitHub ↗', false, () => { window.open(entry.url, '_blank', 'noopener'); }));
   }
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+// ── NOTIFICATIONS BUBBLE (Phase 4): GitHub activity feed ──
+// Card tap = GitHub link khulta hai; "Sab read" button ek normal chat message bhejta hai.
+// saveChatEntry me notifications nahi jaati: refresh ke baad text list ban jaati hai (stale unread state na dikhe).
+function buildNotificationsBubble(entry) {
+  const wrap = document.createElement('div');
+  wrap.className = 'activity-list-bubble';
+  const hdr = document.createElement('div');
+  hdr.className = 'activity-list-hdr';
+  const hdrText = document.createElement('span');
+  hdrText.textContent = `🔔 ${entry.notifications.length} ${entry.all ? '' : 'unread '}notification${entry.notifications.length !== 1 ? 's' : ''}`;
+  hdr.appendChild(hdrText);
+  wrap.appendChild(hdr);
+
+  const typeIcon = { PullRequest: '🔀', Issue: '🐞', Commit: '📝', CheckSuite: '⚙️', Release: '🏷️', Discussion: '💬', RepositoryInvitation: '📨' };
+  const grid = document.createElement('div');
+  grid.className = 'activity-grid';
+  entry.notifications.forEach((n) => {
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    card.style.cursor = n.url ? 'pointer' : 'default';
+    const icon = document.createElement('div');
+    icon.className = 'activity-card-icon';
+    icon.textContent = typeIcon[n.type] || '🔔';
+    card.appendChild(icon);
+    const main = document.createElement('div');
+    main.className = 'activity-card-main';
+    const title = document.createElement('div');
+    title.className = 'activity-card-title';
+    title.textContent = (n.unread ? '● ' : '') + n.title;
+    main.appendChild(title);
+    const sub = document.createElement('div');
+    sub.className = 'activity-card-sub';
+    sub.textContent = `${n.repo} · ${n.reason_label || n.reason}`;
+    main.appendChild(sub);
+    card.appendChild(main);
+    if (n.url && /^https:\/\//.test(n.url)) card.onclick = () => window.open(n.url, '_blank', 'noopener');
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:6px;width:100%;margin-top:8px;';
+  actions.appendChild(prMiniBtn('✅ Sab read mark karo', true, () => resendMessage('mark notifications read')));
   wrap.appendChild(actions);
   return wrap;
 }

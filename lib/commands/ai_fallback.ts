@@ -52,6 +52,11 @@ COMMANDS:
 10m. MERGE_PR: {"repo":"repo-name or owner/repo","number":3,"method":"squash|merge|rebase","delete_branch":false} — merge a PR (default squash; user is asked to confirm)
 10n. CLOSE_PR: {"repo":"repo-name or owner/repo","number":3} — close a PR without merging (user is asked to confirm)
 10o. COMMENT_PR: {"repo":"repo-name or owner/repo","number":3,"body":"comment text"}
+10q. LIST_NOTIFICATIONS: {"all":false} — the user's GitHub notifications (unread by default)
+10r. MARK_NOTIFICATIONS_READ: {} — mark all notifications read
+10s. PR_PREVIEW: {"repo":"repo-name or owner/repo","number":3} — preview/deploy URL of a PR
+10t. FORK_REPO: {"repo":"owner/repo"} — fork someone else's repo into the user's account (when not invited)
+10u. CREATE_FORK_PR: {"repo":"owner/repo","head":"branch-in-user-fork","base":"optional","title":"optional","body":"optional"} — send a PR from the user's fork to the upstream repo
 10p. CREATE_PR: {"repo":"repo-name or owner/repo","head":"branch","base":"optional-base","title":"optional title","body":"optional description"}
 ${v.vercel_commands}${v.netlify_commands}${v.render_commands}
 RULES:
@@ -59,7 +64,7 @@ RULES:
 - JSON must be valid. Escape quotes as \\" and newlines as \\n in content fields.
 - NEVER invent URLs, IDs, or data you don't have — only the commands above give you real information.
 - NEVER output anything resembling a real token/secret, even as an example.
-- A repo may be written as "owner/repo" (someone else's repo) ONLY for READ_FILE, LIST_FILES, GET_REPO_INFO, CREATE_FILE, EDIT_FILE, DELETE_FILE, CREATE_BRANCH, LIST_BRANCHES, CREATE_PR, LIST_PRS, PR_DETAILS, MERGE_PR, CLOSE_PR, COMMENT_PR and the collaborator commands; otherwise use the plain repo name. On someone else's repo, writes always go to a separate branch (never the default branch); an optional "branch" field may be added to CREATE_FILE/EDIT_FILE/DELETE_FILE.
+- A repo may be written as "owner/repo" (someone else's repo) ONLY for READ_FILE, LIST_FILES, GET_REPO_INFO, CREATE_FILE, EDIT_FILE, DELETE_FILE, CREATE_BRANCH, LIST_BRANCHES, CREATE_PR, LIST_PRS, PR_DETAILS, MERGE_PR, CLOSE_PR, COMMENT_PR, PR_PREVIEW, FORK_REPO, CREATE_FORK_PR and the collaborator commands; otherwise use the plain repo name. On someone else's repo, writes always go to a separate branch (never the default branch); an optional "branch" field may be added to CREATE_FILE/EDIT_FILE/DELETE_FILE.
 ${v.vercel_note}${v.netlify_note}${v.render_note}`;
 
 const VERCEL_COMMANDS_BLOCK = `11. VERCEL_LIST_PROJECTS
@@ -97,7 +102,7 @@ const COMMANDS = [
   "INVITE_COLLABORATOR:", "LIST_COLLABORATORS:", "REMOVE_COLLABORATOR:", "CANCEL_INVITE:",
   "LIST_MY_INVITATIONS:", "ACCEPT_INVITATION:", "DECLINE_INVITATION:", "LIST_SHARED_REPOS:",
   "CREATE_BRANCH:", "LIST_BRANCHES:",
-  "LIST_PRS:", "PR_DETAILS:", "MERGE_PR:", "CLOSE_PR:", "COMMENT_PR:", "CREATE_PR:",
+  "LIST_PRS:", "PR_DETAILS:", "PR_PREVIEW:", "LIST_NOTIFICATIONS:", "MARK_NOTIFICATIONS_READ:", "FORK_REPO:", "CREATE_FORK_PR:", "MERGE_PR:", "CLOSE_PR:", "COMMENT_PR:", "CREATE_PR:",
   "VERCEL_LIST_PROJECTS", "VERCEL_IMPORT_REPO:", "VERCEL_DEPLOY:",
   "VERCEL_DELETE_PROJECT:", "VERCEL_GET_ENV:", "VERCEL_DOWNLOAD_ENV:", "VERCEL_SET_ENV:",
   "VERCEL_ROLLBACK:", "VERCEL_LIST_DEPLOYMENTS:",

@@ -43,6 +43,7 @@ import { exportEnvFile } from "@/lib/commands/env_transfer";
 import { COLLAB_COMMANDS, FOREIGN_OWNER_COMMANDS, FRIEND_COMMANDS, executeCollabCommand, executeFriendCommand } from "@/lib/commands/collab";
 import { BRANCH_COMMANDS, FOREIGN_FILE_COMMANDS, executeBranchCommand, executeForeignWrite } from "@/lib/commands/collab_write";
 import { PR_COMMANDS, executePrCommand } from "@/lib/commands/collab_pr";
+import { FORK_COMMANDS, NOTIFY_COMMANDS, executeForkCommand, executeNotifyCommand } from "@/lib/commands/collab_extra";
 import type { RepoAccess } from "@/lib/providers/github";
 
 /**
@@ -143,6 +144,15 @@ export async function executeCommand(
         acc = a;
       }
       return await executeBranchCommand(cmd, p, owner, ghToken, acc);
+    }
+    if (NOTIFY_COMMANDS.has(cmd)) {
+      return await executeNotifyCommand(cmd, p, ghToken);
+    }
+    if (FORK_COMMANDS.has(cmd)) {
+      if (!foreign || !foreignAcc) {
+        return { reply: "ℹ️ Fork/contribute doosre ke repo ke liye hai — `owner/repo` likho. Jaise: `fork owner/repo`.", action: "warning" };
+      }
+      return await executeForkCommand(cmd, p, owner, ghToken, selfLogin, foreignAcc);
     }
     if (PR_COMMANDS.has(cmd)) {
       return await executePrCommand(cmd, p, owner, ghToken);

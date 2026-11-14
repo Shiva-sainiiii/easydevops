@@ -332,6 +332,38 @@ export const INTENT_RULES: Rule[] = [
     r`^(${SLUG})\s+(?:ke\s+liye\s+)?(?:blueprint|iac)\s+(?:generate|bana|banao)`,
   ], (m) => ({ repo: g(m, 1) })],
 
+  // ── PHASE 4: notifications / preview / fork ──
+  ["MARK_NOTIFICATIONS_READ", [
+    r`^(?:mark\s+)?(?:all\s+)?notifications?\s+(?:as\s+)?read$`,
+    r`^mark\s+all\s+(?:as\s+)?read$`,
+    r`^notifications?\s+(?:clear|saaf)\s*(?:karo|kar\s*do)?$`,
+  ], () => ({})],
+
+  ["LIST_NOTIFICATIONS", [
+    r`^(?:show|list|dikhao|dikha|check)\s+(?:my\s+|mere\s+)?(?:(all)\s+)?(?:notifications?|activity)$`,
+    r`^(?:meri\s+)?(?:(all)\s+)?notifications?\s+(?:dikhao|dikha|batao|show|check\s+karo)$`,
+    r`^(?:what'?s\s+new|kya\s+naya\s+hai)$`,
+  ], (m) => ({ all: !!g(m, 1) })],
+
+  ["PR_PREVIEW", [
+    r`^(?:preview|preview\s+url)\s+(?:of|for)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|of|from|on)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(?:show|get|dikhao)\s+preview\s+(?:of|for)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|of|from|on)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+  ], (m) => ({ repo: g(m, 2), number: g(m, 1) })],
+
+  ["PR_PREVIEW", [
+    r`^(${REPO_REF})\s+(?:ka|ki|ke)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+(?:ka\s+)?preview\s+(?:dikhao|dikha|batao)$`,
+  ], (m) => ({ repo: g(m, 1), number: g(m, 2) })],
+
+  ["FORK_REPO", [
+    r`^fork\s+(?:the\s+)?(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(${REPO_REF})\s+(?:ko\s+)?fork\s+(?:karo|kar\s*do|kardo)$`,
+  ], (m) => ({ repo: g(m, 1) })],
+
+  // Fork se upstream ko PR: "send pr from my-branch to owner/repo [titled ...]" (title original casing me)
+  ["CREATE_FORK_PR", [
+    r`^(?:send|submit)\s+(?:a\s+)?(?:pr|pull\s*request)\s+from\s+(${BRANCH_NAME})\s+to\s+(${REPO_REF})(?:\s+titled\s+(.+))?$`,
+  ], (m) => ({ head: g(m, 1), repo: g(m, 2), title: g(m, 3), base: null })],
+
   // ── PR WORKFLOW (Phase 3) — CREATE_PR/CODE_GENERATE se pehle ──
   ["LIST_PRS", [
     r`^(?:list|show|dikhao|dikha)\s+(?:(?:all|sare)\s+)?(?:(open|closed|merged)\s+)?(?:prs|pull\s*requests)\s+(?:of|for|in|from)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
@@ -461,6 +493,10 @@ export function parseIntent(message: string): [string, Record<string, any>] | [n
         if (cmd === "COMMENT_PR") {
           const om = rx(pat, "i").exec(original);
           if (om && om[3]) params.body = om[3];
+        }
+        if (cmd === "CREATE_FORK_PR" && params.title) {
+          const om = rx(pat, "i").exec(original);
+          if (om && om[3]) params.title = om[3];
         }
         if (cmd === "CREATE_PR" && params.title) {
           const om = rx(pat, "i").exec(original);
