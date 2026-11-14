@@ -119,6 +119,8 @@ function renderUserBadge() {
   renderRenderMenuState();
   renderAIMenuState();
   renderInviteBadge();
+  initNotifBell();
+  refreshNotifications();
 }
 
 // Pending repo invitations: avatar pe chhota emerald dot + menu me "Invitations (N)" item.
@@ -167,8 +169,138 @@ async function refreshPendingInvites() {
     if (d && d.logged_in && authedUser) {
       authedUser.pendingInvites = d.pending_invites || 0;
       renderInviteBadge();
+      refreshNotifications();
     }
   } catch (e) { /* ignore */ }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// NOTIFICATION BELL (header): repo invites (Accept/Decline) + GitHub notifications.
+// Data /api/notifications se; panel DOM textContent se banta hai (XSS safe).
+// ══════════════════════════════════════════════════════════════════
+let notifState = { invitations: [], notifications: [], unread: 0 };
+let notifTimer = null;
+
+function initNotifBell() {
+  if (document.getElementById('notif-btn')) return;
+  const status = document.querySelector('header .status');
+  if (!status) return;
+  const btn = document.createElement('button');
+  btn.id = 'notif-btn';
+  btn.className = 'notif-btn';
+  btn.title = 'Notifications';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0"/></svg>';
+  btn.onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); };
+  const clear = status.querySelector('.clear-chat-btn');
+  status.insertBefore(btn, clear || status.firstChild);
+  const panel = document.createElement('div');
+  panel.id = 'notif-panel';
+  document.body.appendChild(panel);
+  document.addEventListener('click', (e) => {
+    if (!panel.contains(e.target) && e.target !== btn) panel.classList.remove('show');
+  });
+  if (!notifTimer) {
+    notifTimer = setInterval(() => { if (!document.hidden && authedUser) refreshNotifications(); }, 90000);
+  }
+}
+
+async function refreshNotifications() {
+  try {
+    const res = await fetch('/api/notifications', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const d = await res.json();
+    notifState = { invitations: d.invitations || [], notifications: d.notifications || [], unread: d.unread || 0 };
+    renderNotifBell();
+  } catch (e) { /* ignore */ }
+}
+
+function renderNotifBell() {
+  const btn = document.getElementById('notif-btn');
+  if (!btn) return;
+  let badge = btn.querySelector('.notif-badge');
+  const n = notifState.unread;
+  btn.classList.toggle('has-unread', n > 0);
+  if (n > 0) {
+    if (!badge) { badge = document.createElement('span'); badge.className = 'notif-badge'; btn.appendChild(badge); }
+    badge.textContent = n > 9 ? '9+' : String(n);
+  } else if (badge) {
+    badge.remove();
+  }
+  const panel = document.getElementById('notif-panel');
+  if (panel && panel.classList.contains('show')) renderNotifPanel();
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notif-panel');
+  if (!panel) return;
+  if (panel.classList.contains('show')) { panel.classList.remove('show'); return; }
+  renderNotifPanel();
+  panel.classList.add('show');
+  refreshNotifications();
+}
+
+function renderNotifPanel() {
+  const panel = document.getElementById('notif-panel');
+  panel.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'notif-head';
+  const title = document.createElement('span');
+  title.textContent = 'Notifications';
+  head.appendChild(title);
+  if (notifState.notifications.some(x => x.unread)) {
+    const mark = document.createElement('button');
+    mark.textContent = 'Sab read karo';
+    mark.onclick = async () => {
+      try { await fetch('/api/notifications', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'read_all' }) }); } catch (e) {}
+      refreshNotifications();
+    };
+    head.appendChild(mark);
+  }
+  panel.appendChild(head);
+
+  const list = document.createElement('div');
+  list.className = 'notif-list';
+  const inv = notifState.invitations, nts = notifState.notifications;
+  if (!inv.length && !nts.length) {
+    const e = document.createElement('div');
+    e.className = 'notif-empty';
+    e.textContent = 'Koi notification nahi. Sab clear ✨';
+    list.appendChild(e);
+  }
+  if (inv.length) {
+    const sec = document.createElement('div'); sec.className = 'notif-sec'; sec.textContent = 'Invitations'; list.appendChild(sec);
+    inv.forEach(i => {
+      const row = document.createElement('div');
+      row.className = 'notif-item unread';
+      const t = document.createElement('div'); t.className = 'notif-title';
+      t.textContent = `📨 @${i.inviter || '?'} ne tumhe ${i.repo} me invite kiya`;
+      const sub = document.createElement('div'); sub.className = 'notif-sub';
+      sub.textContent = `${i.permission || 'push'}${i.private ? ' · private' : ''}`;
+      const act = document.createElement('div'); act.className = 'notif-actions';
+      const ok = document.createElement('button'); ok.className = 'ok'; ok.textContent = 'Accept';
+      const no = document.createElement('button'); no.textContent = 'Decline';
+      ok.onclick = () => { document.getElementById('notif-panel').classList.remove('show'); resendMessage(`accept invite ${i.repo}`); };
+      no.onclick = () => { document.getElementById('notif-panel').classList.remove('show'); resendMessage(`decline invite ${i.repo}`); };
+      act.appendChild(ok); act.appendChild(no);
+      row.appendChild(t); row.appendChild(sub); row.appendChild(act);
+      list.appendChild(row);
+    });
+  }
+  if (nts.length) {
+    const sec = document.createElement('div'); sec.className = 'notif-sec'; sec.textContent = 'GitHub'; list.appendChild(sec);
+    nts.forEach(x => {
+      const row = document.createElement('a');
+      row.className = 'notif-item' + (x.unread ? ' unread' : '');
+      row.href = x.url || '#'; row.target = '_blank'; row.rel = 'noopener';
+      const t = document.createElement('div'); t.className = 'notif-title';
+      t.textContent = `${x.icon || '🔔'} ${x.title || ''}`;
+      const sub = document.createElement('div'); sub.className = 'notif-sub';
+      sub.textContent = `${x.repo || ''} · ${x.reason_label || ''}${x.updated_at ? ' · ' + timeAgo(new Date(x.updated_at).getTime()) : ''}`;
+      row.appendChild(t); row.appendChild(sub);
+      list.appendChild(row);
+    });
+  }
+  panel.appendChild(list);
 }
 
 function renderVercelMenuState() {
@@ -1004,11 +1136,12 @@ function tabSwitcherCardPreview(session, query) {
     const snip = findMatchSnippet(session, query);
     if (snip) return `<span class="snippet-hit">${escHtml(snip)}</span>`;
   }
-  const recent = session.messages.slice(-3).reverse();
+  const wide = window.matchMedia && window.matchMedia('(min-width: 900px)').matches;
+  const recent = session.messages.slice(-(wide ? 6 : 3)).reverse();
   if (!recent.length) return 'Koi message nahi hai abhi.';
   return recent.map(m => {
     const who = m.role === 'user' ? 'Aap' : 'Agent';
-    const text = (m.content || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const text = (m.content || '').replace(/\s+/g, ' ').trim().slice(0, wide ? 130 : 80);
     return `<strong>${who}:</strong> ${escHtml(text)}`;
   }).join('<br>');
 }
@@ -1120,6 +1253,27 @@ const COMMANDS = [
   // ── AI CODE GENERATION (multi-file, no provider gate) ──
   { id: 'CODE_GENERATE', tpl: 'build {feature} in {repo}',                    desc: 'AI · generate/edit code across the repo', kw: ['build','banao','code','editor','edit','fix','feature','create','refactor'] },
 
+  // ── TEAMWORK (collaboration) — GitHub, koi connect gate nahi ──
+  { id: 'INVITE_COLLABORATOR', team: true, tpl: 'invite {usernames} to {repo}', desc: 'Teamwork · dost ko collaborator invite karo (ek ya zyada usernames)', kw: ['invite','collab','collabration','collaboration','collaborator','dost','friend','team','add','share','username'] },
+  { id: 'LIST_COLLABORATORS', team: true, tpl: 'list collaborators of {repo}', desc: 'Teamwork · repo ke collaborators + pending invites', kw: ['collaborators','collab','collabration','collaboration','list','team','access','who','members'] },
+  { id: 'REMOVE_COLLABORATOR', team: true, tpl: 'remove {username} as collaborator from {repo}', desc: 'Teamwork · collaborator hatao ⚠️', kw: ['remove','kick','collaborator','collab','collabration','hatao','access','revoke'] },
+  { id: 'CANCEL_INVITE', team: true, tpl: 'cancel invite of {username} from {repo}', desc: 'Teamwork · bheja hua invite cancel karo', kw: ['cancel','invite','withdraw','collab','collabration','wapas'] },
+  { id: 'LIST_MY_INVITATIONS', team: true, tpl: 'my invitations', desc: 'Teamwork · mujhe aaye repo invites', kw: ['my','invitations','invites','invite','pending','accept','collab','collabration','aaye'] },
+  { id: 'ACCEPT_INVITATION', team: true, tpl: 'accept invite {invite_repo}', desc: 'Teamwork · mila hua invite accept karo', kw: ['accept','invite','invitation','collab','collabration','manzoor'] },
+  { id: 'DECLINE_INVITATION', team: true, tpl: 'decline invite {invite_repo}', desc: 'Teamwork · mila hua invite decline karo', kw: ['decline','reject','invite','invitation','collab','collabration'] },
+  { id: 'LIST_SHARED_REPOS', team: true, tpl: 'show shared repos', desc: 'Teamwork · mere saath share kiye gaye repos', kw: ['shared','share','repos','collab','collabration','collaboration','mere'] },
+  { id: 'LIST_BRANCHES', team: true, tpl: 'list branches of {repo}', desc: 'Teamwork · repo ki branches', kw: ['branch','branches','list','team','collab'] },
+  { id: 'CREATE_BRANCH', team: true, tpl: 'create branch {branch} in {repo}', desc: 'Teamwork · nayi branch banao', kw: ['branch','create','new','banao','naya','collab','team'] },
+  { id: 'LIST_PRS', team: true, tpl: 'list prs of {repo}', desc: 'Teamwork · pull requests ki list', kw: ['pr','prs','pull','request','requests','list','collab','review'] },
+  { id: 'PR_DETAILS', team: true, tpl: 'compare pr {number} in {repo}', desc: 'Teamwork · PR compare: files, diff, checks', kw: ['pr','compare','pull','request','details','diff','review','collab'] },
+  { id: 'MERGE_PR', team: true, tpl: 'merge pr {number} in {repo}', desc: 'Teamwork · PR merge karo ⚠️', kw: ['merge','pr','pull','request','collab','squash'] },
+  { id: 'CLOSE_PR', team: true, tpl: 'close pr {number} in {repo}', desc: 'Teamwork · PR bina merge ke close karo ⚠️', kw: ['close','pr','pull','request','band','collab'] },
+  { id: 'COMMENT_PR', team: true, tpl: 'comment on pr {number} in {repo}: {comment}', desc: 'Teamwork · PR pe comment likho', kw: ['comment','pr','pull','request','review','collab'] },
+  { id: 'PR_PREVIEW', team: true, tpl: 'preview of pr {number} in {repo}', desc: 'Teamwork · PR ka preview/deploy URL', kw: ['preview','pr','url','deploy','collab'] },
+  { id: 'FORK_REPO', team: true, tpl: 'fork {invite_repo}', desc: 'Teamwork · kisi ka repo fork karo (owner/repo)', kw: ['fork','repo','copy','collab','contribute'] },
+  { id: 'LIST_NOTIFICATIONS', team: true, tpl: 'show my notifications', desc: 'Teamwork · GitHub notifications', kw: ['notifications','notification','activity','alerts','collab','new'] },
+  { id: 'MARK_NOTIFICATIONS_READ', team: true, tpl: 'mark notifications read', desc: 'Teamwork · saari notifications read mark karo', kw: ['notifications','read','mark','clear','saaf'] },
+
   // ── NETLIFY (only surfaced once connected) ──
   { id: 'NETLIFY_LIST',  tpl: 'list netlify sites',                          desc: 'Netlify · list all sites',             kw: ['list','netlify','sites','sare','dikhao'], netlify: true },
   { id: 'NETLIFY_DEPLOY', tpl: 'deploy netlify site {site_name}',            desc: 'Netlify · trigger a deploy',           kw: ['deploy','netlify','site','build'], netlify: true },
@@ -1205,7 +1359,7 @@ function renderSuggestions(rawValue) {
   // activeSuggestions itself stays flat/in-score-order (nothing else
   // about keyboard nav / index-based selection changes) — only the
   // visual grouping below reorders how they're painted into the DOM.
-  const order = ['github', 'vercel', 'netlify', 'render', 'ai'];
+  const order = ['github', 'team', 'vercel', 'netlify', 'render', 'ai'];
   const groups = new Map();
   activeSuggestions.forEach((cmd, i) => {
     const platform = commandPlatform(cmd);
@@ -1218,6 +1372,8 @@ function renderSuggestions(rawValue) {
     groupLabel.className = 'suggest-group-label';
     if (platform === 'ai') {
       groupLabel.textContent = '✨ AI';
+    } else if (platform === 'team') {
+      groupLabel.textContent = '🤝 Teamwork';
     } else {
       groupLabel.innerHTML = `<span class="suggest-group-icon">${PROVIDER_ICONS[platform]}</span>${PROVIDER_NAMES[platform]}`;
     }
@@ -1259,6 +1415,7 @@ function renderSuggestions(rawValue) {
 // to "list files in {repo}").
 function commandPlatform(cmd) {
   if (cmd.id === 'CODE_GENERATE') return 'ai';
+  if (cmd.team) return 'team';
   if (cmd.vercel) return 'vercel';
   if (cmd.netlify) return 'netlify';
   if (cmd.render) return 'render';
@@ -1299,6 +1456,7 @@ function placeholderKind(name, cmdId) {
   if (name === 'project_name') return 'vercel_project';
   if (name === 'site_name') return 'netlify_site';
   if (name === 'service_id') return 'render_service';
+  if (name === 'usernames') return 'usernames';
   if (name === 'path') {
     // CREATE_FILE's {path} is a brand-new file that doesn't exist yet —
     // showing existing files as suggestions would be misleading, so it
@@ -1314,6 +1472,8 @@ function placeholderLabel(name) {
     repo: 'Repository', path: 'File path', message: 'Message',
     project_name: 'Vercel project', site_name: 'Netlify site',
     service_id: 'Render service', KEY: 'Env key', value: 'Env value',
+    usernames: 'GitHub usernames (ek ya zyada)', username: 'GitHub username', branch: 'Branch name', number: 'PR number',
+    comment: 'Comment', invite_repo: 'Repo (owner/repo)',
     ref: 'Branch (optional)', head: 'Head branch', base: 'Base branch (optional)',
   };
   return labels[name] || name.replace(/_/g, ' ');
@@ -1375,11 +1535,60 @@ function buildCommandFormBubble(cmd, placeholders) {
     fieldLabel.textContent = placeholderLabel(name);
     fieldWrap.appendChild(fieldLabel);
 
-    const inputEl = document.createElement('input');
-    inputEl.type = 'text';
-    inputEl.placeholder = placeholderLabel(name);
-    inputEl.autocomplete = 'off';
-    fieldWrap.appendChild(inputEl);
+    let getValue = null;
+    let inputEl;
+    if (kind === 'select') {
+      inputEl = document.createElement('select');
+      [['production', 'Production'], ['preview', 'Preview'], ['development', 'Development']].forEach(([v, l]) => {
+        const o = document.createElement('option'); o.value = v; o.textContent = l; inputEl.appendChild(o);
+      });
+      fieldWrap.appendChild(inputEl);
+    } else if (kind === 'usernames') {
+      // Multi-username chip input: space / comma / enter se chip banta hai (max 10).
+      const box = document.createElement('div');
+      box.className = 'chip-input';
+      inputEl = document.createElement('input');
+      inputEl.type = 'text';
+      inputEl.placeholder = 'rahul123, amit-dev ...';
+      inputEl.autocomplete = 'off';
+      inputEl.autocapitalize = 'off';
+      inputEl.spellcheck = false;
+      const names = [];
+      const addNames = (raw) => {
+        const keep = [];
+        String(raw).split(/[\s,;]+/).forEach(w => {
+          const u = w.replace(/^@+/, '').trim().toLowerCase();
+          if (!u) return;
+          if (!/^[a-z0-9][a-z0-9-]{0,38}$/.test(u)) { keep.push(w); return; }
+          if (names.includes(u) || names.length >= 10) return;
+          names.push(u);
+          const chip = document.createElement('span');
+          chip.className = 'user-chip';
+          chip.appendChild(document.createTextNode('@' + u));
+          const x = document.createElement('button');
+          x.type = 'button'; x.textContent = '×';
+          x.onclick = () => { const i = names.indexOf(u); if (i >= 0) names.splice(i, 1); chip.remove(); };
+          chip.appendChild(x);
+          box.insertBefore(chip, inputEl);
+        });
+        inputEl.value = keep.join(' ');
+      };
+      inputEl.addEventListener('input', () => { if (/[\s,;]/.test(inputEl.value)) addNames(inputEl.value); });
+      inputEl.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ',' || e.key === ' ') && inputEl.value.trim()) { e.preventDefault(); addNames(inputEl.value); }
+        else if (e.key === 'Backspace' && !inputEl.value && names.length) { names.pop(); const chips = box.querySelectorAll('.user-chip'); if (chips.length) chips[chips.length - 1].remove(); }
+      });
+      inputEl.addEventListener('blur', () => addNames(inputEl.value));
+      getValue = () => { addNames(inputEl.value); return names.join(', '); };
+      box.appendChild(inputEl);
+      fieldWrap.appendChild(box);
+    } else {
+      inputEl = document.createElement('input');
+      inputEl.type = 'text';
+      inputEl.placeholder = placeholderLabel(name);
+      inputEl.autocomplete = 'off';
+      fieldWrap.appendChild(inputEl);
+    }
 
     let dropdownCtl = null;
     if (kind === 'repo') {
@@ -1401,7 +1610,7 @@ function buildCommandFormBubble(cmd, placeholders) {
     }
 
     form.appendChild(fieldWrap);
-    fieldRefs[name] = { input: inputEl, kind, dropdownCtl };
+    fieldRefs[name] = { input: inputEl, kind, dropdownCtl, getValue };
   });
 
   // If both a repo field and a real (existing-file) path field exist,
@@ -1434,14 +1643,14 @@ function buildCommandFormBubble(cmd, placeholders) {
   const submit = () => {
     let sentence = cmd.tpl;
     for (const name of placeholders) {
-      let val = fieldRefs[name].input.value.trim();
+      let val = (fieldRefs[name].getValue ? fieldRefs[name].getValue() : fieldRefs[name].input.value).trim();
       if (!val) { fieldRefs[name].input.focus(); return; }
       // Render service dropdown shows "name (id)" — extract just the id.
       if (fieldRefs[name].kind === 'render_service') {
         const idMatch = val.match(/\(([^)]+)\)\s*$/);
         if (idMatch) val = idMatch[1];
       }
-      sentence = sentence.replace(`{${name}}`, val);
+      sentence = sentence.replace(`{${name}}`, () => val);
     }
     goBtn.disabled = true;
     cancelBtn.disabled = true;

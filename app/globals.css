@@ -3218,3 +3218,53 @@
 .pr-diff .pr-add { color: var(--accent); background: rgba(52, 211, 153, 0.08); }
 .pr-diff .pr-del { color: #f87171; background: rgba(248, 113, 113, 0.08); }
 .pr-diff .pr-hunk { color: #71717a; }
+
+/* ── Header notification bell ── */
+.notif-btn { position: relative; display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; margin-right: 6px; border-radius: 8px; border: 1px solid var(--border-2);
+  background: transparent; color: var(--muted); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.notif-btn svg { width: 15px; height: 15px; }
+.notif-btn.has-unread { color: var(--accent); border-color: var(--accent); }
+.notif-badge { position: absolute; top: -7px; right: -7px; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent); color: #09090b; font: 700 10px/16px var(--font-mono); text-align: center; }
+#notif-panel { position: fixed; top: 54px; right: 12px; width: min(390px, calc(100vw - 24px));
+  max-height: min(72vh, 580px); display: none; flex-direction: column; background: var(--surface);
+  border: 1px solid var(--border-2); border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  z-index: 90; overflow: hidden; }
+#notif-panel.show { display: flex; }
+.notif-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
+  border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13.5px; }
+.notif-head button { border: none; background: transparent; color: var(--accent); font-size: 12px; cursor: pointer; }
+.notif-list { overflow-y: auto; padding: 6px; -webkit-overflow-scrolling: touch; }
+.notif-sec { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-2); padding: 8px 8px 4px; }
+.notif-item { display: block; padding: 10px; border-radius: 10px; color: var(--text); text-decoration: none; cursor: pointer; }
+.notif-item:hover { background: var(--surface-2); }
+.notif-item.unread { border-left: 3px solid var(--accent); }
+.notif-title { font-size: 13px; line-height: 1.35; }
+.notif-sub { font-size: 11px; color: var(--muted-2); margin-top: 3px; font-family: var(--font-mono); }
+.notif-actions { display: flex; gap: 8px; margin-top: 8px; }
+.notif-actions button { flex: 1; padding: 7px 0; border-radius: 8px; border: 1px solid var(--border-2);
+  background: transparent; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.notif-actions button.ok { background: var(--accent); border-color: var(--accent); color: #09090b; }
+.notif-empty { text-align: center; color: var(--muted-2); font-size: 13px; padding: 28px 12px; }
+
+/* ── Multi-username chip input + select in command forms ── */
+.chip-input { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border: 1px solid var(--border-2);
+  border-radius: 10px; background: var(--bg-0); }
+.chip-input:focus-within { border-color: var(--accent); }
+.chip-input input { flex: 1 1 120px; min-width: 100px; border: none !important; background: transparent !important;
+  outline: none; padding: 4px !important; box-shadow: none !important; }
+.user-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px 3px 10px; border-radius: 999px;
+  background: var(--accent); color: #09090b; font: 600 12px var(--font-mono); }
+.user-chip button { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+.prompt-form select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-2);
+  background: var(--bg-0); color: var(--text); font-size: 14px; font-family: inherit; }
+
+/* ── Recent tabs: laptop pe 4 column x 2 row, lambe cards ── */
+@media (min-width: 900px) {
+  .tab-switcher-grid { grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: minmax(260px, calc((100dvh - 250px) / 2)); align-items: stretch; gap: 18px; padding: 4px 28px 28px; }
+  .tab-switcher-card { min-height: 0; height: 100%; }
+  .tab-switcher-card-preview { flex: 1 1 auto; height: auto; font-size: 12.5px; padding: 14px; }
+  .tab-switcher-card-title { font-size: 13px; }
+}
