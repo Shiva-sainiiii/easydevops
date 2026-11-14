@@ -67,6 +67,14 @@ function invitePerm(m: M): string | null {
 export const INTENT_RULES: Rule[] = [
   // ── COLLABORATION (sabse upar: "list collaborators of repo X" LIST_REPOS me na phanse) ──
   // "..repo" ke baad "as/with <perm> access" optional; "admin" jaanbujh ke nahi.
+  // Multi-user invite: "invite a, b, c to repo" (comma / and / aur / &) — 2+ usernames, ek hi repo
+  ["INVITE_COLLABORATOR", [
+    r`^invite\s+((?:@?${GH_USER})(?:(?:\s*,\s*|\s+(?:and|aur|&)\s+)@?${GH_USER})+)\s+(?:to|in|into)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})(?:\s+(?:as|with)\s+(?:a\s+)?${PERM_WORDS}(?:\s+access)?)?$`,
+  ], (m) => {
+    const usernames = String(g(m, 1) || "").split(/\s*,\s*|\s+(?:and|aur|&)\s+/).map((u) => u.replace(/^@+/, "").trim()).filter(Boolean);
+    return { usernames, username: usernames[0], repo: g(m, 2), permission: invitePerm(m) };
+  }],
+
   ["INVITE_COLLABORATOR", [
     r`^invite\s+@?(${GH_USER})\s+(?:to|in|into)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})(?:\s+(?:as|with)\s+(?:a\s+)?${PERM_WORDS}(?:\s+access)?)?$`,
     r`^(?:add)\s+@?(${GH_USER})\s+as\s+(?:a\s+)?collaborator\s+(?:to|in|on|into)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})(?:\s+(?:as|with)\s+(?:a\s+)?${PERM_WORDS}(?:\s+access)?)?$`,

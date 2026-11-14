@@ -47,7 +47,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#09090b",
+  themeColor: "#3a1a6e",
 };
 
 // AMOLED theme ka flash na ho: script.js ke applyTheme() jaisa hi logic, paint se pehle.
