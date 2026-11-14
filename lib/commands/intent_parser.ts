@@ -332,6 +332,52 @@ export const INTENT_RULES: Rule[] = [
     r`^(${SLUG})\s+(?:ke\s+liye\s+)?(?:blueprint|iac)\s+(?:generate|bana|banao)`,
   ], (m) => ({ repo: g(m, 1) })],
 
+  // ── PR WORKFLOW (Phase 3) — CREATE_PR/CODE_GENERATE se pehle ──
+  ["LIST_PRS", [
+    r`^(?:list|show|dikhao|dikha)\s+(?:(?:all|sare)\s+)?(?:(open|closed|merged)\s+)?(?:prs|pull\s*requests)\s+(?:of|for|in|from)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(${REPO_REF})\s+(?:ke|ki)\s+(?:(open|closed|merged)\s+)?(?:prs|pull\s*requests)\s+(?:dikhao|dikha|list|batao|show)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => {
+    const t = String(m.input || "");
+    const explicit = [m[1], m[2]].find((x) => x === "open" || x === "closed" || x === "merged");
+    const repoRef = m[1] && !["open", "closed", "merged"].includes(m[1]) ? m[1] : m[2] && !["open", "closed", "merged"].includes(m[2]) ? m[2] : null;
+    return { repo: repoRef, state: explicit || (/^(?:list|show|dikhao|dikha)\s+(?:all|sare)\s/.test(t) ? "all" : "open") };
+  }],
+
+  ["PR_DETAILS", [
+    r`^(?:compare|show|view|dikhao|dikha|dekho)\s+(?:the\s+)?(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|of|from|for|on)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+    r`^(?:details?|info)\s+(?:of|for)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|of|from|for|on)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+  ], (m) => ({ repo: g(m, 2), number: g(m, 1) })],
+
+  ["PR_DETAILS", [
+    r`^(${REPO_REF})\s+(?:ka|ki|ke)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+(?:compare|dikhao|dikha|dekho)(?:\s+(?:karo|kar\s*do))?$`,
+  ], (m) => ({ repo: g(m, 1), number: g(m, 2) })],
+
+  ["MERGE_PR", [
+    r`^merge\s+(?:the\s+)?(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|of|from|on|for)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})(?:\s+(?:using|with|via|by)\s+(squash|merge|rebase)(?:\s+(?:merge|commit))?)?(\s+and\s+delete\s+(?:the\s+)?branch)?$`,
+  ], (m) => ({ repo: g(m, 2), number: g(m, 1), method: g(m, 3), delete_branch: !!g(m, 4) })],
+
+  ["MERGE_PR", [
+    r`^(${REPO_REF})\s+(?:ka|ki|ke|mein|me)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+merge\s+(?:karo|kar\s*do|kardo)$`,
+  ], (m) => ({ repo: g(m, 1), number: g(m, 2), method: null, delete_branch: false })],
+
+  ["CLOSE_PR", [
+    r`^close\s+(?:the\s+)?(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|of|from|on|for)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})$`,
+  ], (m) => ({ repo: g(m, 2), number: g(m, 1) })],
+
+  ["CLOSE_PR", [
+    r`^(${REPO_REF})\s+(?:ka|ki|ke|mein|me)\s+(?:pr|pull\s*request)\s*#?(\d+)\s+(?:close|band)\s+(?:karo|kar\s*do|kardo)$`,
+  ], (m) => ({ repo: g(m, 1), number: g(m, 2) })],
+
+  // Comment ka text original casing me wapas aata hai (parseIntent me)
+  ["COMMENT_PR", [
+    r`^comment\s+(?:on\s+)?(?:pr|pull\s*request)\s*#?(\d+)\s+(?:in|on|of|for)\s+(?:repo(?:sitory)?\s+)?(${REPO_REF})\s*[:\-]\s*(.+)$`,
+  ], (m) => ({ repo: g(m, 2), number: g(m, 1), body: g(m, 3) })],
+
+  // Title ke saath PR (title original casing me)
+  ["CREATE_PR", [
+    r`^(?:open|create|bana|banao|bana\s*do)\s+(?:a\s+|ek\s+)?(?:pr|pull\s*request)\s+from\s+(${SLUG})(?:\s+to\s+(${SLUG}))?\s+(?:in|for|of)\s+(${REPO_REF})\s+(?:titled|with\s+title)\s+(.+)$`,
+  ], (m) => ({ head: g(m, 1), base: g(m, 2), repo: g(m, 3), title: g(m, 4) })],
+
   // ── CREATE_PR — CODE_GENERATE se pehle (warna "open ... in repo" CODE_GENERATE kha jata) ──
   ["CREATE_PR", [
     r`(?:open|create|bana|banao|bana\s*do)\s+(?:a\s+|ek\s+)?(?:pr|pull\s*request)\s+` +
@@ -411,6 +457,14 @@ export function parseIntent(message: string): [string, Record<string, any>] | [n
         if (cmd === "VERCEL_SET_ENV" || cmd === "NETLIFY_SET_ENV") {
           const om = rx(pat, "i").exec(original);
           if (om) params.key = om[1];
+        }
+        if (cmd === "COMMENT_PR") {
+          const om = rx(pat, "i").exec(original);
+          if (om && om[3]) params.body = om[3];
+        }
+        if (cmd === "CREATE_PR" && params.title) {
+          const om = rx(pat, "i").exec(original);
+          if (om && om[4]) params.title = om[4];
         }
         if (cmd === "RENDER_SET_ENV") {
           const om = rx(pat, "i").exec(original);

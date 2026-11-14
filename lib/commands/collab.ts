@@ -8,6 +8,7 @@
 import { req } from "@/lib/commands/pyutil";
 import { ghApi, ghListAllRepos, ghMsg, ghRepoAccess, parseRepoRef, sameLogin, type RepoAccess } from "@/lib/providers/github";
 import { BRANCH_COMMANDS, FOREIGN_WRITE_COMMANDS } from "@/lib/commands/collab_write";
+import { PR_COMMANDS } from "@/lib/commands/collab_pr";
 
 export const COLLAB_COMMANDS = new Set([
   "INVITE_COLLABORATOR",
@@ -40,6 +41,7 @@ export const FOREIGN_OWNER_COMMANDS = new Set([
   ...COLLAB_COMMANDS,
   ...BRANCH_COMMANDS,
   ...FOREIGN_WRITE_COMMANDS,
+  ...PR_COMMANDS,
 ]);
 
 /**

@@ -42,6 +42,7 @@ import { createPullRequest } from "@/lib/commands/code_generate";
 import { exportEnvFile } from "@/lib/commands/env_transfer";
 import { COLLAB_COMMANDS, FOREIGN_OWNER_COMMANDS, FRIEND_COMMANDS, executeCollabCommand, executeFriendCommand } from "@/lib/commands/collab";
 import { BRANCH_COMMANDS, FOREIGN_FILE_COMMANDS, executeBranchCommand, executeForeignWrite } from "@/lib/commands/collab_write";
+import { PR_COMMANDS, executePrCommand } from "@/lib/commands/collab_pr";
 import type { RepoAccess } from "@/lib/providers/github";
 
 /**
@@ -142,6 +143,9 @@ export async function executeCommand(
         acc = a;
       }
       return await executeBranchCommand(cmd, p, owner, ghToken, acc);
+    }
+    if (PR_COMMANDS.has(cmd)) {
+      return await executePrCommand(cmd, p, owner, ghToken);
     }
     if (foreign && FOREIGN_FILE_COMMANDS.has(cmd)) {
       return await executeForeignWrite(cmd, p, owner, ghToken, selfLogin, foreignAcc as RepoAccess);
@@ -422,8 +426,10 @@ export async function executeCommand(
           action: "error",
         };
       }
-      const title = `Merge ${head} into ${base}`;
-      const [ok, errOrEmpty, prUrl] = await createPullRequest(owner, repo, ghToken, head, base, title);
+      const customTitle = String(gd(p, "title", "") || "").trim();
+      const title = customTitle ? customTitle.slice(0, 200) : `Merge ${head} into ${base}`;
+      const prBody = String(gd(p, "body", "") || "").slice(0, 4000);
+      const [ok, errOrEmpty, prUrl] = await createPullRequest(owner, repo, ghToken, head, base, title, prBody);
       if (ok) {
         return {
           reply: `✅ PR khul gaya: \`${head}\` → \`${base}\`\n🔀 ${pyStr(prUrl)}`,

@@ -3198,3 +3198,23 @@
     font-size: 13px; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .ai-key-del:active { background: rgba(248,113,113,0.12); }
+
+
+/* ── PR compare card (Phase 3) ── */
+.pr-diff {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: #0c0c0e;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--muted);
+}
+.pr-diff .pr-add { color: var(--accent); background: rgba(52, 211, 153, 0.08); }
+.pr-diff .pr-del { color: #f87171; background: rgba(248, 113, 113, 0.08); }
+.pr-diff .pr-hunk { color: #71717a; }

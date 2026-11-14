@@ -3895,7 +3895,7 @@ const ACTIVITY_LIST_CONFIG = {
 };
 
 function richBubbleBadgeFor(entry) {
-  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status' || entry.action === 'invitations') return 'github';
+  if (entry.action === 'list_files' || entry.action === 'read_file' || entry.action === 'code_generate' || entry.action === 'repo_info' || entry.action === 'pr_created' || entry.action === 'check_status' || entry.action === 'invitations' || entry.action === 'pr_list' || entry.action === 'pr_details') return 'github';
   if (entry.action === 'vercel_deployments' || entry.action === 'vercel_env') return 'vercel';
   if (entry.action === 'netlify_site_info' || entry.action === 'netlify_env') return 'netlify';
   if (entry.action === 'render_env') return 'render';
@@ -3955,6 +3955,14 @@ function buildRichBubbleNode(entry) {
 
   if (entry.action === 'invitations' && Array.isArray(entry.invitations) && entry.invitations.length) {
     return buildInvitationsBubble(entry.invitations);
+  }
+
+  if (entry.action === 'pr_list' && Array.isArray(entry.prs) && entry.prs.length) {
+    return buildPrListBubble(entry);
+  }
+
+  if (entry.action === 'pr_details' && Array.isArray(entry.files) && entry.number) {
+    return buildPrDetailsBubble(entry);
   }
 
   const activityCfg = ACTIVITY_LIST_CONFIG[entry.action];
@@ -4041,6 +4049,158 @@ function buildInvitationsBubble(invitations) {
   });
 
   wrap.appendChild(grid);
+  return wrap;
+}
+
+// ── PR BUBBLES (Phase 3): PR list + compare card ──
+// Buttons normal chat message bhejte hain ("compare pr 3 in owner/repo", "merge pr 3 in ..."), isliye
+// same /chat flow aur server-side permission checks; merge/close pe confirm prompt aata hai.
+// saveChatEntry me prs/files nahi jaate: refresh ke baad ye text ban jaate hain (stale Merge buttons na dikhein).
+function prMiniBtn(label, accent, onClick) {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText =
+    'flex:1;min-width:90px;padding:7px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;' +
+    'font-family:var(--font-mono);-webkit-tap-highlight-color:transparent;' +
+    (accent
+      ? 'background:rgba(52,211,153,0.14);border:1px solid rgba(52,211,153,0.4);color:var(--accent);'
+      : 'background:#1f1f23;border:1px solid var(--border-2);color:var(--muted);');
+  b.onclick = () => { b.disabled = true; onClick(); };
+  return b;
+}
+
+function buildPrListBubble(entry) {
+  const wrap = document.createElement('div');
+  wrap.className = 'activity-list-bubble';
+  const hdr = document.createElement('div');
+  hdr.className = 'activity-list-hdr';
+  const hdrText = document.createElement('span');
+  hdrText.textContent = `🔀 ${entry.repo} — ${entry.prs.length} ${entry.state === 'all' ? '' : entry.state + ' '}PR${entry.prs.length !== 1 ? 's' : ''}`;
+  hdr.appendChild(hdrText);
+  wrap.appendChild(hdr);
+
+  const grid = document.createElement('div');
+  grid.className = 'activity-grid';
+  entry.prs.forEach((pr) => {
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    card.style.cursor = 'pointer';
+    const icon = document.createElement('div');
+    icon.className = 'activity-card-icon';
+    icon.textContent = pr.state === 'open' ? '🟢' : pr.state === 'merged' ? '🟣' : '🔴';
+    card.appendChild(icon);
+    const main = document.createElement('div');
+    main.className = 'activity-card-main';
+    const title = document.createElement('div');
+    title.className = 'activity-card-title';
+    title.textContent = `#${pr.number} ${pr.title}`;
+    main.appendChild(title);
+    const sub = document.createElement('div');
+    sub.className = 'activity-card-sub';
+    sub.textContent = `@${pr.author} · ${pr.head} → ${pr.base}${pr.draft ? ' · draft' : ''}`;
+    main.appendChild(sub);
+    card.appendChild(main);
+    card.onclick = () => resendMessage(`compare pr ${pr.number} in ${entry.repo}`);
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+  return wrap;
+}
+
+function buildPrDetailsBubble(entry) {
+  const wrap = document.createElement('div');
+  wrap.className = 'activity-list-bubble pr-details';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'activity-list-hdr';
+  const hdrText = document.createElement('span');
+  const icon = entry.state === 'open' ? '🟢' : entry.state === 'merged' ? '🟣' : '🔴';
+  hdrText.textContent = `${icon} PR #${entry.number} · ${entry.title}`;
+  hdr.appendChild(hdrText);
+  wrap.appendChild(hdr);
+
+  const meta = document.createElement('div');
+  meta.className = 'activity-card-sub';
+  meta.style.cssText = 'padding:2px 2px 8px;line-height:1.6;';
+  const cs = entry.checks_summary;
+  const checkTxt = cs
+    ? (cs.state === 'none' ? 'checks: none' : `checks: ${cs.state === 'success' ? '✅' : cs.state === 'pending' ? '⏳' : '❌'} ${cs.passed} pass / ${cs.failed} fail / ${cs.pending} pending`)
+    : '';
+  const lines = [
+    `${entry.repo} · @${entry.author} · ${entry.head} → ${entry.base}`,
+    `${entry.changed_files} files · +${entry.additions} / -${entry.deletions}${entry.commits != null ? ` · ${entry.commits} commits` : ''}`,
+  ];
+  if (entry.merge_note) lines.push(entry.merge_note);
+  if (checkTxt) lines.push(checkTxt);
+  lines.forEach((t) => {
+    const d = document.createElement('div');
+    d.textContent = t;
+    meta.appendChild(d);
+  });
+  wrap.appendChild(meta);
+
+  const grid = document.createElement('div');
+  grid.className = 'activity-grid';
+  entry.files.forEach((f) => {
+    const card = document.createElement('div');
+    card.className = 'activity-card';
+    card.style.cssText = 'cursor:pointer;flex-wrap:wrap;';
+    const main = document.createElement('div');
+    main.className = 'activity-card-main';
+    const title = document.createElement('div');
+    title.className = 'activity-card-title';
+    title.textContent = f.filename;
+    main.appendChild(title);
+    const sub = document.createElement('div');
+    sub.className = 'activity-card-sub';
+    sub.textContent = `${f.status} · +${f.additions} / -${f.deletions}`;
+    main.appendChild(sub);
+    card.appendChild(main);
+
+    const pre = document.createElement('pre');
+    pre.className = 'pr-diff';
+    pre.style.display = 'none';
+    if (f.binary || !f.patch) {
+      pre.textContent = f.binary ? '(binary ya bahut bada diff — GitHub pe dekho)' : '(diff nahi hai)';
+    } else {
+      f.patch.split('\n').forEach((ln) => {
+        const row = document.createElement('div');
+        row.textContent = ln;
+        if (ln.startsWith('+')) row.className = 'pr-add';
+        else if (ln.startsWith('-')) row.className = 'pr-del';
+        else if (ln.startsWith('@@')) row.className = 'pr-hunk';
+        pre.appendChild(row);
+      });
+      if (f.truncated) {
+        const note = document.createElement('div');
+        note.className = 'pr-hunk';
+        note.textContent = '… diff kaata gaya (bada hai)';
+        pre.appendChild(note);
+      }
+    }
+    pre.style.width = '100%';
+    card.appendChild(pre);
+    card.onclick = (ev) => {
+      if (ev.target.closest && ev.target.closest('.pr-diff')) return;
+      pre.style.display = pre.style.display === 'none' ? 'block' : 'none';
+    };
+    grid.appendChild(card);
+  });
+  wrap.appendChild(grid);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;width:100%;margin-top:8px;';
+  if (entry.state === 'open') {
+    if (!entry.draft) {
+      actions.appendChild(prMiniBtn('🟣 Merge (squash)', true, () => resendMessage(`merge pr ${entry.number} in ${entry.repo}`)));
+      actions.appendChild(prMiniBtn('Merge + branch delete', false, () => resendMessage(`merge pr ${entry.number} in ${entry.repo} and delete branch`)));
+    }
+    actions.appendChild(prMiniBtn('Close PR', false, () => resendMessage(`close pr ${entry.number} in ${entry.repo}`)));
+  }
+  if (entry.url) {
+    actions.appendChild(prMiniBtn('GitHub ↗', false, () => { window.open(entry.url, '_blank', 'noopener'); }));
+  }
+  wrap.appendChild(actions);
   return wrap;
 }
 
@@ -5166,10 +5326,12 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     // non-destructive-but-still-consequential actions like
     // VERCEL_ROLLBACK, which is misleading about what's about to happen.
     const isRollback = confirmData.confirm_verb === 'rollback';
+    const isMerge = confirmData.confirm_verb === 'merge';
+    const isClosePr = confirmData.confirm_verb === 'close';
 
     const yesBtn = document.createElement('button');
     yesBtn.className = 'confirm-btn danger';
-    yesBtn.textContent = isRollback ? 'Haan, Rollback Karo' : 'Haan, Delete Karo';
+    yesBtn.textContent = isRollback ? 'Haan, Rollback Karo' : isMerge ? 'Haan, Merge Karo' : isClosePr ? 'Haan, Close Karo' : 'Haan, Delete Karo';
     yesBtn.onclick = () => runConfirmedAction(confirmData, yesBtn, noBtn);
 
     const noBtn = document.createElement('button');
@@ -5178,7 +5340,7 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     noBtn.onclick = () => {
       yesBtn.disabled = true;
       noBtn.disabled = true;
-      addMessage('agent', isRollback ? 'Theek hai, cancel kar diya. Rollback nahi hua.' : 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
+      addMessage('agent', isRollback ? 'Theek hai, cancel kar diya. Rollback nahi hua.' : isMerge ? 'Theek hai, cancel kar diya. Merge nahi hua.' : isClosePr ? 'Theek hai, cancel kar diya. PR close nahi hua.' : 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
     };
 
     actions.appendChild(yesBtn);
@@ -5397,6 +5559,8 @@ const CONFIRM_ACTION_STATUS = {
   NETLIFY_DELETE_SITE: 'Netlify site delete kar raha hu…',
   RENDER_DELETE_SERVICE: 'Render service delete kar raha hu…',
   VERCEL_ROLLBACK: 'Vercel deployment rollback kar raha hu…',
+  MERGE_PR: 'PR merge kar raha hu…',
+  CLOSE_PR: 'PR close kar raha hu…',
   BULK_DELETE_FILES: 'Files delete kar raha hu…',
   BULK_DELETE_REPOS: 'Repos delete kar raha hu…',
   BULK_DELETE_VERCEL_PROJECTS: 'Vercel projects delete kar raha hu…',
@@ -5408,7 +5572,7 @@ const CONFIRM_ACTION_STATUS = {
 async function runConfirmedAction(confirmData, yesBtn, noBtn) {
   yesBtn.disabled = true;
   noBtn.disabled = true;
-  yesBtn.textContent = 'Delete ho raha hai...';
+  yesBtn.textContent = confirmData.pending_command === 'MERGE_PR' ? 'Merge ho raha hai...' : confirmData.pending_command === 'CLOSE_PR' ? 'Close ho raha hai...' : 'Delete ho raha hai...';
 
   const typing = document.getElementById('typing-indicator');
   setThinkingStatus(CONFIRM_ACTION_STATUS[confirmData.pending_command] || 'Delete kar raha hu…');

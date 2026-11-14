@@ -10,7 +10,7 @@ export const DESTRUCTIVE_COMMANDS = new Set([
   "DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK",
   "BULK_DELETE_FILES", "BULK_DELETE_REPOS", "BULK_DELETE_VERCEL_PROJECTS",
   "BULK_DELETE_NETLIFY_SITES", "BULK_DELETE_RENDER_SERVICES",
-  "REMOVE_COLLABORATOR",
+  "REMOVE_COLLABORATOR", "MERGE_PR", "CLOSE_PR",
 ]);
 
 export function confirmToken(cmd: string, value: string | null | undefined, userId: number | string): string {
@@ -29,7 +29,21 @@ export function buildConfirmation(cmd: string, params: Record<string, any>, user
   let warnText: string;
   let headlineOverride: string | null = null;
 
-  if (cmd === "REMOVE_COLLABORATOR") {
+  if (cmd === "MERGE_PR") {
+    actionVerb = "merge";
+    const method = pyStr(params.method || "squash");
+    headlineOverride = `PR #${pyStr(params.number)} ko repo \`${pyStr(params.repo)}\` me merge karne wala hu (\`${method}\`).`;
+    targetDesc = "";
+    warnText =
+      "Changes base branch me chale jayenge" +
+      (params.delete_branch ? " aur PR ki branch delete ho jayegi" : "") +
+      ". Merge wapas nahi hota (sirf naya revert PR bana sakte ho).";
+  } else if (cmd === "CLOSE_PR") {
+    actionVerb = "close";
+    headlineOverride = `PR #${pyStr(params.number)} ko repo \`${pyStr(params.repo)}\` me close karne wala hu.`;
+    targetDesc = "";
+    warnText = "PR merge nahi hoga. Baad me GitHub pe reopen kar sakte ho.";
+  } else if (cmd === "REMOVE_COLLABORATOR") {
     // confirm_verb "delete" hi rehta hai (frontend button ka label wahi se banta hai)
     headlineOverride = `\`@${pyStr(params.username)}\` ko repo \`${pyStr(params.repo)}\` se hatane wala hu.`;
     targetDesc = "";
