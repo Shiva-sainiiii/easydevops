@@ -543,7 +543,8 @@ const MAX_STR = 300;
 
 export function validatePlanSteps(
   raw: unknown,
-  blockCount: number
+  blockCount: number,
+  fallbackInstruction?: string
 ): { steps: PlanStep[]; error?: string } {
   if (!Array.isArray(raw) || raw.length === 0) return { steps: [], error: "empty plan" };
   if (raw.length > MAX_STEPS) return { steps: [], error: `max ${MAX_STEPS} steps allowed` };
@@ -588,13 +589,18 @@ export function validatePlanSteps(
         return { steps: [], error: `${cmd}.${key} naam galat (owner/repo allowed nahi)` };
       }
     }
-    const instruction =
-      typeof (item as any)?.instruction === "string" ? String((item as any).instruction).slice(0, 600) : undefined;
+    // AI kabhi `instruction` top-level pe deta hai, kabhi params ke andar, kabhi bhool jata hai -> teeno handle
+    const rawInstruction = [(item as any)?.instruction, (inP as any)?.instruction, (inP as any)?.prompt].find(
+      (x) => typeof x === "string" && x.trim()
+    );
+    const instruction = rawInstruction ? String(rawInstruction).slice(0, 600) : undefined;
     const step: PlanStep = { cmd, params, summary: "", origin: "planner" };
     if (cmd === "CODE_GENERATE") {
-      if (!instruction) return { steps: [], error: "CODE_GENERATE: instruction missing" };
-      step.params.instruction = instruction;
-      step.instruction = instruction;
+      // phir bhi na mile to user ka original message hi instruction (placeholders samet; code AI ko nahi jaata)
+      const finalInstruction = instruction || (fallbackInstruction ? fallbackInstruction.trim().slice(0, 600) : "");
+      if (!finalInstruction) return { steps: [], error: "CODE_GENERATE: instruction missing" };
+      step.params.instruction = finalInstruction;
+      step.instruction = finalInstruction;
     } else if ((cmd === "CREATE_FILE" || cmd === "EDIT_FILE") && params.content === undefined) {
       step.instruction = instruction ?? `${cmd === "EDIT_FILE" ? "Update" : "Create"} ${params.path}`;
     }
