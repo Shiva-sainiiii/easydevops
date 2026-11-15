@@ -69,7 +69,7 @@ export async function planWithAI(
   if (typeof data.ask === "string" && data.ask.trim() && (!Array.isArray(data.steps) || data.steps.length === 0)) {
     return { ask: data.ask.trim().slice(0, 300) };
   }
-  const v = validatePlanSteps(data.steps, blockCount);
+  const v = validatePlanSteps(data.steps, blockCount, text);
   if (v.error) return { error: v.error };
   for (const s of v.steps) {
     for (const [prefix, flag] of PLATFORM_PREFIX) {
