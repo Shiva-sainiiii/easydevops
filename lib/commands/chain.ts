@@ -552,10 +552,14 @@ export function plannerCommandList(): string {
 const REPO_NAME = /^[A-Za-z0-9_.\-]{1,100}$/;
 const MAX_STR = 300;
 
+/**
+ * `_sourceText` (optional): user ka original message. Kuch callers (planner.ts) ise teesre argument ki tarah
+ * pass karte hain — signature compatible rakhne ke liye accept hota hai (abhi validation me use nahi).
+ */
 export function validatePlanSteps(
   raw: unknown,
   blockCount: number,
-  fallbackInstruction?: string
+  _sourceText?: string
 ): { steps: PlanStep[]; error?: string } {
   if (!Array.isArray(raw) || raw.length === 0) return { steps: [], error: "empty plan" };
   if (raw.length > MAX_STEPS) return { steps: [], error: `max ${MAX_STEPS} steps allowed` };
@@ -600,18 +604,13 @@ export function validatePlanSteps(
         return { steps: [], error: `${cmd}.${key} naam galat (owner/repo allowed nahi)` };
       }
     }
-    // AI kabhi `instruction` top-level pe deta hai, kabhi params ke andar, kabhi bhool jata hai -> teeno handle
-    const rawInstruction = [(item as any)?.instruction, (inP as any)?.instruction, (inP as any)?.prompt].find(
-      (x) => typeof x === "string" && x.trim()
-    );
-    const instruction = rawInstruction ? String(rawInstruction).slice(0, 600) : undefined;
+    const instruction =
+      typeof (item as any)?.instruction === "string" ? String((item as any).instruction).slice(0, 600) : undefined;
     const step: PlanStep = { cmd, params, summary: "", origin: "planner" };
     if (cmd === "CODE_GENERATE") {
-      // phir bhi na mile to user ka original message hi instruction (placeholders samet; code AI ko nahi jaata)
-      const finalInstruction = instruction || (fallbackInstruction ? fallbackInstruction.trim().slice(0, 600) : "");
-      if (!finalInstruction) return { steps: [], error: "CODE_GENERATE: instruction missing" };
-      step.params.instruction = finalInstruction;
-      step.instruction = finalInstruction;
+      if (!instruction) return { steps: [], error: "CODE_GENERATE: instruction missing" };
+      step.params.instruction = instruction;
+      step.instruction = instruction;
     } else if ((cmd === "CREATE_FILE" || cmd === "EDIT_FILE") && params.content === undefined) {
       step.instruction = instruction ?? `${cmd === "EDIT_FILE" ? "Update" : "Create"} ${params.path}`;
     }
