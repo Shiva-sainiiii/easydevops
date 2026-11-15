@@ -890,7 +890,8 @@ async function _syncDelete(url) {
 function titleFromMessages(messages) {
   const firstUser = messages.find(m => m.role === 'user');
   if (!firstUser) return 'Nayi Chat';
-  const t = firstUser.content.trim().replace(/\s+/g, ' ');
+  const base = (firstUser.display && firstUser.display.typed) ? firstUser.display.typed : firstUser.content;
+  const t = base.trim().replace(/\s+/g, ' ');
   return t.length > 42 ? t.slice(0, 42) + '…' : t;
 }
 
@@ -970,7 +971,7 @@ function renderActiveChatIntoView() {
     // /chat response path uses, so a saved entry renders identically to
     // how it looked when it first arrived.
     const richNode = entry.role === 'agent' ? buildRichBubbleNode(entry) : null;
-    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null, entry.action || null);
+    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null, entry.action || null, entry.display || null);
     if (richNode) {
       bubble.innerHTML = '';
       bubble.appendChild(richNode);
@@ -1827,6 +1828,666 @@ function fillInput(text) {
   hideSuggestions();
 }
 
+// ══════════════════════════════════════════════════════════════════
+// ATTACHMENT TRAY + PASTE CHIP + "FILE + TASK" (v2.2)
+//
+// Pehle: file/folder/zip chunte hi turant "kis repo me?" poochha jaata tha,
+// isliye custom task (jaise "isko new-repo me daal ke deploy kar") likhne ka
+// raasta hi nahi tha. Ab:
+//   1. File/folder/zip pehle input ke upar tray me chip ban kar rukti hai.
+//   2. Lambi paste (≥700 chars / ≥12 lines) bhi textarea me nahi, chip me jaati hai.
+//   3. Send dabane par:
+//        - task likha hai + sirf text files/paste  -> content message ke saath
+//          /chat ko jaata hai (chain/AI planner use karta hai, bubble me chips dikhte hain)
+//        - task likha hai + zip/folder/binary       -> ek chhota card: repo + folder
+//          confirm karo, upload hoga, phir task apne aap chalega
+//        - task khaali                               -> purana seedha upload flow
+// ══════════════════════════════════════════════════════════════════
+const PASTE_CHIP_MIN_CHARS = 700;
+const PASTE_CHIP_MIN_LINES = 12;
+const INLINE_FILE_MAX = 150 * 1024;
+const INLINE_TOTAL_MAX = 400 * 1024;
+const AUTO_COLLAPSE_CHARS = 900;
+const AUTO_COLLAPSE_LINES = 18;
+const SAVE_CONTENT_CAP = 100000;
+const INLINE_TEXT_EXT = /\.(html?|css|scss|less|js|mjs|cjs|jsx|ts|tsx|json|md|txt|py|java|c|cpp|h|go|rs|php|rb|sh|yml|yaml|toml|xml|svg|sql|csv|vue|svelte)$/i;
+const SAFE_REPO_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+let pendingAtts = [];   // {id, kind:'pasted'|'text'|'zip'|'folder'|'binary', name, size, ...}
+let attSeq = 0;
+
+function fmtSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+function textStats(t) {
+  return { lines: t.split('\n').length, bytes: new Blob([t]).size };
+}
+function fileExt(name) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
+  return m ? m[1] : '';
+}
+// .env files kabhi chat/AI/session me inline nahi jaati (secrets) — sirf upload.
+function isEnvName(name) {
+  return /(^\.env($|\.))|(\.env$)/i.test(name || '');
+}
+function inlineBytesUsed() {
+  return pendingAtts.reduce((n, a) => n + ((a.kind === 'pasted' || a.kind === 'text') ? a.size : 0), 0);
+}
+function uniqueAttName(name) {
+  const taken = new Set(pendingAtts.filter(a => a.file).map(a => a.name));
+  if (!taken.has(name)) return name;
+  const m = /^(.*?)(\.[^.]*)?$/.exec(name);
+  const base = m[1], ext = m[2] || '';
+  let i = 2;
+  while (taken.has(`${base}-${i}${ext}`)) i++;
+  return `${base}-${i}${ext}`;
+}
+
+// mode: 'files' | 'folder' | 'zip' | 'auto' (drag&drop: folder/loose khud pehchano)
+async function stageFiles(files, mode) {
+  files = Array.from(files || []).filter(Boolean);
+  if (!files.length) return;
+  const asFolders = mode === 'folder' ||
+    (mode === 'auto' && files.some(f => (f.webkitRelativePath || '').includes('/')));
+  const loose = [];
+  if (asFolders) {
+    const groups = new Map();
+    for (const f of files) {
+      const rel = f.webkitRelativePath || '';
+      if (!rel.includes('/')) { loose.push(f); continue; }
+      const top = rel.split('/')[0];
+      if (!groups.has(top)) groups.set(top, []);
+      groups.get(top).push(f);
+    }
+    for (const [name, arr] of groups) {
+      pendingAtts.push({
+        id: ++attSeq, kind: 'folder', name, files: arr,
+        size: arr.reduce((n, f) => n + f.size, 0), count: arr.length
+      });
+    }
+  } else {
+    loose.push(...files);
+  }
+
+  for (let f of loose) {
+    const uniq = uniqueAttName(f.name);
+    if (uniq !== f.name) f = new File([f], uniq, { type: f.type });
+    if (/\.zip$/i.test(f.name)) {
+      pendingAtts.push({ id: ++attSeq, kind: 'zip', name: f.name, file: f, size: f.size });
+      continue;
+    }
+    const canInline = INLINE_TEXT_EXT.test(f.name) && !isEnvName(f.name) &&
+      f.size <= INLINE_FILE_MAX && inlineBytesUsed() + f.size <= INLINE_TOTAL_MAX;
+    if (canInline) {
+      let text = null;
+      try { text = await f.text(); } catch (e) { text = null; }
+      // ``` wali ya binary-jaisi file inline karne se message/fence toot sakta hai -> upload hi rahegi
+      if (text !== null && !text.includes('```') && !text.includes('\u0000')) {
+        pendingAtts.push({ id: ++attSeq, kind: 'text', name: f.name, file: f, text, size: f.size });
+        continue;
+      }
+    }
+    pendingAtts.push({ id: ++attSeq, kind: 'binary', name: f.name, file: f, size: f.size });
+  }
+  renderAttTray();
+  const inp = document.getElementById('userInput');
+  if (inp) inp.focus();
+}
+
+function addPastedAtt(text) {
+  const st = textStats(text);
+  pendingAtts.push({ id: ++attSeq, kind: 'pasted', name: 'Pasted text', text, size: st.bytes, lines: st.lines });
+  renderAttTray();
+}
+
+function removeAtt(id) {
+  pendingAtts = pendingAtts.filter(a => a.id !== id);
+  renderAttTray();
+}
+function clearAtts() {
+  pendingAtts = [];
+  renderAttTray();
+}
+
+function ensureAttTray() {
+  let t = document.getElementById('att-tray');
+  if (t) return t;
+  const dock = document.getElementById('dock');
+  const bar = document.getElementById('chatbar');
+  if (!dock || !bar) return null;
+  t = document.createElement('div');
+  t.id = 'att-tray';
+  dock.insertBefore(t, bar);
+  return t;
+}
+
+function renderAttTray() {
+  const tray = ensureAttTray();
+  if (!tray) return;
+  const input = document.getElementById('userInput');
+  if (input && !input.dataset.defaultPh) input.dataset.defaultPh = input.placeholder;
+  tray.innerHTML = '';
+  if (!pendingAtts.length) {
+    tray.classList.remove('show');
+    if (input) input.placeholder = input.dataset.defaultPh || 'Message Easy DevOps…';
+    return;
+  }
+  tray.classList.add('show');
+  if (input) input.placeholder = 'Apna task likho… (khaali bhejoge to seedha upload)';
+
+  pendingAtts.forEach(a => {
+    const chip = document.createElement('div');
+    chip.className = 'att-chip';
+    const icon = document.createElement('div');
+    icon.className = 'att-chip-icon';
+    icon.innerHTML = a.kind === 'zip' ? iconZip() : a.kind === 'folder' ? iconFolder() : iconFile();
+    const text = document.createElement('div');
+    text.className = 'att-chip-text';
+    const nm = document.createElement('div');
+    nm.className = 'att-chip-name';
+    nm.textContent = a.name;
+    const sub = document.createElement('div');
+    sub.className = 'att-chip-sub';
+    sub.textContent =
+      a.kind === 'pasted' ? `Pasted · ${a.lines} lines` :
+      a.kind === 'folder' ? `Folder · ${a.count} files` :
+      a.kind === 'zip' ? `Zip · ${fmtSize(a.size)}` :
+      `${(fileExt(a.name) || 'file')} · ${fmtSize(a.size)}`;
+    text.appendChild(nm);
+    text.appendChild(sub);
+    const x = document.createElement('button');
+    x.className = 'att-chip-x';
+    x.type = 'button';
+    x.title = 'Hata do';
+    x.textContent = '×';
+    x.onclick = (e) => { e.stopPropagation(); removeAtt(a.id); };
+    chip.appendChild(icon);
+    chip.appendChild(text);
+    chip.appendChild(x);
+    if (a.kind === 'pasted' || a.kind === 'text') {
+      chip.onclick = () => openTextViewer(a.name, `${a.lines || textStats(a.text).lines} lines · ${fmtSize(a.size)}`, a.text);
+    } else {
+      chip.style.cursor = 'default';
+    }
+    tray.appendChild(chip);
+  });
+
+  const hint = document.createElement('div');
+  hint.className = 'att-tray-hint';
+  const hasUpload = pendingAtts.some(a => a.kind !== 'pasted');
+  if (hasUpload) {
+    hint.appendChild(document.createTextNode('Task likho (jaise “isko my-site repo me daal ke deploy kar”) ya '));
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'seedha upload karo →';
+    b.onclick = startPlainUploadFromTray;
+    hint.appendChild(b);
+  } else {
+    hint.textContent = 'Apna task likho aur bhejo — paste/file ka content message ke saath jaayega.';
+  }
+  tray.appendChild(hint);
+}
+
+function startPlainUploadFromTray() {
+  const list = pendingAtts.filter(a => a.kind !== 'pasted');
+  if (!list.length) return;
+  pendingAtts = pendingAtts.filter(a => a.kind === 'pasted');
+  renderAttTray();
+  startPlainUpload(list);
+}
+
+// Purana flow: repo -> folder poochho -> upload (koi task nahi)
+function startPlainUpload(list) {
+  const zips = list.filter(a => a.kind === 'zip');
+  const others = list.filter(a => a.kind !== 'zip');
+  if (others.length) {
+    const files = [];
+    others.forEach(a => { if (a.kind === 'folder') files.push(...a.files); else files.push(a.file); });
+    if (zips.length) {
+      pendingAtts = pendingAtts.concat(zips);
+      renderAttTray();
+      addMessage('agent', 'ℹ️ Pehle baaki files upload hongi. Zip abhi tray me rakhi hai — uske liye alag se send dabana.', 'info');
+    }
+    askUploadRepo(files);
+  } else if (zips.length) {
+    if (zips.length > 1) {
+      pendingAtts = pendingAtts.concat(zips.slice(1));
+      renderAttTray();
+      addMessage('agent', 'ℹ️ Ek baar me ek zip. Baaki zip tray me hain — iske baad send dabana.', 'info');
+    }
+    askZipUploadRepo(zips[0].file);
+  }
+}
+
+// Message + attachments ko ek content me jodta hai; display (chips ke liye) alag se.
+// Text file ka content ek aisi line ke baad fence me jaata hai jo chain parser ko "is file me ye code" samjhaye.
+function buildMessageContent(typed, bodyAtts, staticAtts) {
+  let content = typed || '';
+  const display = { typed: typed || '', atts: [] };
+  for (const a of bodyAtts) {
+    if (content) content += '\n\n';
+    const body = a.text.replace(/\s+$/, '');
+    let start, end;
+    if (a.kind === 'text') {
+      content += `${a.name} file me ye code daalo:\n\`\`\`\n`;
+      start = content.length;
+      content += body;
+      end = content.length;
+      content += '\n```';
+    } else {
+      start = content.length;
+      content += body;
+      end = content.length;
+    }
+    const st = textStats(body);
+    display.atts.push({ kind: a.kind === 'pasted' ? 'pasted' : 'file', name: a.name, start, end, lines: st.lines, size: st.bytes });
+  }
+  for (const a of staticAtts) {
+    display.atts.push({ kind: a.kind, name: a.name, size: a.size, count: a.count || 1 });
+  }
+  return { content, display };
+}
+
+// sendMsg se call hota hai jab tray me kuch ho. null => yahin handle ho gaya (upload flow / task card).
+async function prepareAttachmentSend(typed) {
+  const atts = pendingAtts.slice();
+  const input = document.getElementById('userInput');
+  const pasted = atts.filter(a => a.kind === 'pasted');
+  const uploadish = atts.filter(a => a.kind !== 'pasted');
+  const hasHeavy = atts.some(a => a.kind === 'zip' || a.kind === 'folder' || a.kind === 'binary');
+  const resetInput = () => { input.value = ''; autoResize(input); hideSuggestions(); };
+
+  // Koi task nahi (na typed, na paste) -> seedha purana upload flow
+  if (!typed && !pasted.length) {
+    clearAtts(); resetInput();
+    startPlainUpload(uploadish);
+    return null;
+  }
+
+  // zip/folder/binary + task -> ek card: repo+folder confirm, upload, phir task
+  if (hasHeavy) {
+    const built = buildMessageContent(typed, pasted, uploadish);
+    clearAtts(); resetInput();
+    addMessage('user', built.content, '', null, null, built.display);
+    askUploadWithTask(uploadish, built.content);
+    return null;
+  }
+
+  // Sirf text files / paste + task -> normal chat message (content saath me)
+  const built = buildMessageContent(typed, atts, []);
+  clearAtts();
+  return { msg: built.content, display: built.display };
+}
+
+// Paste: lambi text textarea me nahi, chip me; copy ki hui file/image bhi chip me.
+document.addEventListener('paste', (e) => {
+  const t = e.target;
+  if (!t || t.id !== 'userInput') return;
+  const cd = e.clipboardData;
+  if (!cd) return;
+  const pf = Array.from(cd.files || []);
+  if (pf.length) {
+    e.preventDefault();
+    stageFiles(pf, 'files');
+    return;
+  }
+  const txt = cd.getData('text/plain') || '';
+  if (!txt) return;
+  const lines = txt.split('\n').length;
+  if (txt.length >= PASTE_CHIP_MIN_CHARS || lines >= PASTE_CHIP_MIN_LINES) {
+    e.preventDefault();
+    addPastedAtt(txt);
+  }
+});
+
+// ── User bubble: typed text + PASTED / file cards (live aur reload dono me) ──
+function capEntryForSave(content, display) {
+  if (content.length <= SAVE_CONTENT_CAP) return { content, display };
+  const clamp = (n) => Math.min(n, SAVE_CONTENT_CAP);
+  const d = display
+    ? { ...display, atts: (display.atts || []).map(a => typeof a.end === 'number' ? { ...a, start: clamp(a.start), end: clamp(a.end) } : a) }
+    : null;
+  return { content: content.slice(0, SAVE_CONTENT_CAP) + '\n…[bahut lamba message — save ke liye chhota kiya]', display: d };
+}
+
+function makeAttCard(att, content) {
+  const hasBody = typeof att.start === 'number' && typeof att.end === 'number' &&
+    att.end > att.start && att.end <= content.length;
+  const el = document.createElement(hasBody ? 'button' : 'div');
+  el.className = 'msg-att-card' + (hasBody ? '' : ' static');
+  if (hasBody) el.type = 'button';
+  const body = hasBody ? content.slice(att.start, att.end) : '';
+  const bodyLines = body ? body.split('\n') : [];
+  const firstLine = (bodyLines.find(l => l.trim()) || '').trim();
+
+  const badge = document.createElement('div');
+  badge.className = 'msg-att-badge';
+  badge.textContent =
+    att.kind === 'pasted' ? 'Pasted' :
+    att.kind === 'zip' ? 'ZIP' :
+    att.kind === 'folder' ? 'Folder' :
+    (fileExt(att.name) || 'file').toUpperCase();
+
+  const title = document.createElement('div');
+  title.className = 'msg-att-title';
+  const titleText = att.kind === 'pasted' && firstLine
+    ? (firstLine.length > 90 ? firstLine.slice(0, 90) + '…' : firstLine)
+    : att.name;
+  title.textContent = titleText;
+
+  el.appendChild(title);
+  if (att.kind === 'pasted' && bodyLines.length > 1) {
+    const pv = document.createElement('div');
+    pv.className = 'msg-att-preview';
+    pv.textContent = bodyLines.filter(l => l.trim()).slice(1, 4).join('\n').slice(0, 160);
+    if (pv.textContent) el.appendChild(pv);
+  }
+  const meta = document.createElement('div');
+  meta.className = 'msg-att-meta';
+  const lines = att.lines || bodyLines.length;
+  meta.textContent = hasBody
+    ? `${lines} lines · ${fmtSize(att.size || new Blob([body]).size)}`
+    : (att.kind === 'folder' ? `${att.count || 0} files` : fmtSize(att.size || 0));
+  el.appendChild(meta);
+  el.appendChild(badge);
+  if (hasBody) {
+    const sub = `${lines} lines · ${fmtSize(att.size || new Blob([body]).size)}`;
+    el.onclick = () => openTextViewer(att.kind === 'pasted' ? 'Pasted text' : att.name, sub, body);
+  }
+  return el;
+}
+
+function renderUserBubble(bubble, content, display) {
+  let typed = null, atts = null;
+  if (display && Array.isArray(display.atts) && display.atts.length) {
+    typed = display.typed || '';
+    atts = display.atts;
+  } else {
+    // Purani / seedhi-paste hui lambi message: chhota lead dikhao, poora PASTED card me
+    const lines = content.split('\n').length;
+    if (content.length > AUTO_COLLAPSE_CHARS || lines > AUTO_COLLAPSE_LINES) {
+      const nl = content.indexOf('\n');
+      let lead;
+      if (nl > 0 && nl <= 240) {
+        lead = content.slice(0, nl);
+      } else {
+        lead = content.slice(0, 200);
+        const sp = lead.lastIndexOf(' ');
+        if (sp > 100) lead = lead.slice(0, sp);
+        lead += '…';
+      }
+      typed = lead;
+      atts = [{ kind: 'pasted', name: 'Pasted text', start: 0, end: content.length }];
+    }
+  }
+  if (!atts) {
+    bubble.innerHTML = `<div class="msg-user-text">${escHtml(content)}</div>`;
+    return;
+  }
+  bubble.innerHTML = '';
+  const t = document.createElement('div');
+  t.className = 'msg-user-text';
+  t.textContent = typed;
+  bubble.appendChild(t);
+  const row = document.createElement('div');
+  row.className = 'msg-att-row';
+  atts.forEach(a => row.appendChild(makeAttCard(a, content)));
+  bubble.appendChild(row);
+}
+
+// ── Text viewer modal ──
+function openTextViewer(title, sub, text) {
+  let ov = document.getElementById('txt-viewer-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'txt-viewer-overlay';
+    ov.className = 'txt-viewer-overlay';
+    ov.innerHTML =
+      '<div class="txt-viewer">' +
+        '<div class="txt-viewer-head">' +
+          '<div class="txt-viewer-title"><span id="txt-viewer-title"></span><div class="txt-viewer-sub" id="txt-viewer-sub"></div></div>' +
+          '<button class="txt-viewer-btn" id="txt-viewer-copy" type="button">Copy</button>' +
+          '<button class="txt-viewer-btn" id="txt-viewer-close" type="button">Close</button>' +
+        '</div>' +
+        '<pre class="txt-viewer-body txt-viewer-nl" id="txt-viewer-body"></pre>' +
+      '</div>';
+    document.body.appendChild(ov);
+    const close = () => ov.classList.remove('show');
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.querySelector('#txt-viewer-close').onclick = close;
+    ov.querySelector('#txt-viewer-copy').onclick = async (e) => {
+      const btn = e.currentTarget;
+      try { await navigator.clipboard.writeText(ov._text || ''); btn.textContent = 'Copied ✓'; }
+      catch (err) { btn.textContent = 'Copy fail'; }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1300);
+    };
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.classList.contains('show')) close(); });
+  }
+  ov._text = text;
+  ov.querySelector('#txt-viewer-title').textContent = title;
+  ov.querySelector('#txt-viewer-sub').textContent = sub || '';
+  const bodyEl = ov.querySelector('#txt-viewer-body');
+  bodyEl.textContent = text;
+  bodyEl.scrollTop = 0;
+  ov.classList.add('show');
+}
+
+// ── "File + task": zip/folder/binary ke saath prompt ──
+function guessRepoFromText(text, names) {
+  const tokens = new Set(String(text).toLowerCase().match(/[a-z0-9._-]+/g) || []);
+  let best = '';
+  for (const n of names) {
+    const nm = String(n);
+    if (nm.length >= 3 && tokens.has(nm.toLowerCase()) && nm.length > best.length) best = nm;
+  }
+  if (best) return best;
+  // naya repo: sirf quoted naam ("new-repo") aur text me 'repo' lafz ho tab hi guess
+  if (/\brepo/i.test(text)) {
+    const q = /["'“‘]([A-Za-z0-9][A-Za-z0-9._-]{1,60})["'”’]/.exec(text);
+    if (q && SAFE_REPO_NAME.test(q[1])) return q[1];
+  }
+  return '';
+}
+
+function relPathOfFile(f) {
+  if (f.webkitRelativePath) {
+    const parts = f.webkitRelativePath.split('/');
+    return parts.slice(1).join('/') || f.name;
+  }
+  return f.name;
+}
+
+async function createRepoViaChat(repo) {
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `create repo ${repo}`, history: [] })
+    });
+    const data = await res.json();
+    addMessage('agent', data.reply || '', actionColorFor(data.action), null, data.action);
+    if (data.action === 'create_repo') {
+      if (Array.isArray(cachedRepoNames)) cachedRepoNames.push(repo);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    addMessage('agent', '❌ Repo nahi ban paya. Server se connect nahi ho paya.', 'error');
+    return false;
+  }
+}
+
+async function runUploads(uploadables, repo, dir) {
+  let allOk = true;
+  for (const z of uploadables.filter(a => a.kind === 'zip')) {
+    const ok = await doZipUpload(z.file, repo, dir);
+    if (!ok) allOk = false;
+  }
+  const files = [], paths = [];
+  for (const a of uploadables) {
+    if (a.kind === 'zip') continue;
+    const list = a.kind === 'folder' ? a.files : [a.file];
+    for (const f of list) {
+      const rel = relPathOfFile(f);
+      files.push(f);
+      paths.push(dir ? `${dir}/${rel}` : rel);
+    }
+  }
+  if (files.length) {
+    const ok = await doUploadMany(files, repo, paths);
+    if (!ok) allOk = false;
+  }
+  return allOk;
+}
+
+function askUploadWithTask(uploadables, taskText) {
+  const es = document.getElementById('empty-state');
+  if (es) es.style.display = 'none';
+  const messages = document.getElementById('messages');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap agent';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'Agent';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble info';
+
+  const nFiles = uploadables.reduce((n, a) => n + (a.kind === 'folder' ? a.count : 1), 0);
+  const head = document.createElement('div');
+  head.innerHTML = `📎 <strong>${nFiles} file${nFiles > 1 ? 's' : ''}</strong> tayyar. Kahan upload karni hain? Upload ke baad tumhara task chalega:`;
+  bubble.appendChild(head);
+
+  const taskLine = document.createElement('div');
+  taskLine.className = 'task-card-line';
+  taskLine.textContent = taskText.length > 260 ? taskText.slice(0, 260) + '…' : taskText;
+  bubble.appendChild(taskLine);
+
+  const form = document.createElement('div');
+  form.className = 'prompt-form';
+  const row = document.createElement('div');
+  row.className = 'task-card-row';
+
+  const repoCell = document.createElement('div');
+  const repoLbl = document.createElement('span');
+  repoLbl.className = 'task-card-label';
+  repoLbl.textContent = 'Repo';
+  const repoWrap = document.createElement('div');
+  const repoInput = document.createElement('input');
+  repoInput.type = 'text';
+  repoInput.placeholder = 'repo-name';
+  repoInput.autocomplete = 'off';
+  repoInput.value = lastUploadRepo || '';
+  repoWrap.appendChild(repoInput);
+  attachSuggestDropdown(repoInput, repoWrap, getRepoNames);
+  repoCell.appendChild(repoLbl);
+  repoCell.appendChild(repoWrap);
+
+  const dirCell = document.createElement('div');
+  const dirLbl = document.createElement('span');
+  dirLbl.className = 'task-card-label';
+  dirLbl.textContent = 'Folder (optional)';
+  const dirWrap = document.createElement('div');
+  const dirInput = document.createElement('input');
+  dirInput.type = 'text';
+  dirInput.placeholder = 'khaali = root';
+  dirInput.autocomplete = 'off';
+  dirWrap.appendChild(dirInput);
+  dirCell.appendChild(dirLbl);
+  dirCell.appendChild(dirWrap);
+
+  row.appendChild(repoCell);
+  row.appendChild(dirCell);
+
+  const hint = document.createElement('div');
+  hint.className = 'prompt-hint';
+
+  const actions = document.createElement('div');
+  actions.className = 'prompt-actions';
+  const goBtn = document.createElement('button');
+  goBtn.className = 'prompt-btn go';
+  goBtn.textContent = 'Upload + task chalao';
+  const onlyBtn = document.createElement('button');
+  onlyBtn.className = 'prompt-btn cancel';
+  onlyBtn.textContent = 'Sirf upload';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'prompt-btn cancel';
+  cancelBtn.textContent = 'Cancel';
+  actions.appendChild(goBtn);
+  actions.appendChild(onlyBtn);
+  actions.appendChild(cancelBtn);
+
+  form.appendChild(row);
+  form.appendChild(hint);
+  form.appendChild(actions);
+  bubble.appendChild(form);
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  messages.appendChild(wrap);
+  scrollToBottom();
+
+  // Repo list fresh lao: guess + "ye repo naya hai" pehchan ke liye
+  let knownNames = null; // null = list nahi mili -> auto-create kabhi nahi
+  const refreshState = () => {
+    const r = repoInput.value.trim();
+    const isNew = !!(knownNames && knownNames.size && r && SAFE_REPO_NAME.test(r) && !knownNames.has(r.toLowerCase()));
+    goBtn.textContent = isNew ? 'Repo banao + upload + task' : 'Upload + task chalao';
+    onlyBtn.textContent = isNew ? 'Repo banao + sirf upload' : 'Sirf upload';
+    hint.textContent = isNew ? `“${r}” naam ka repo abhi nahi hai — pehle ban jayega.` : '';
+    return isNew;
+  };
+  cachedRepoNames = null;
+  repoNamesFetchPromise = null;
+  getRepoNames().then(names => {
+    const list = (names || []).map(n => (typeof n === 'string' ? n : (n && n.name) || '')).filter(Boolean);
+    if (list.length) knownNames = new Set(list.map(n => n.toLowerCase()));
+    if (!repoInput.value.trim() || repoInput.value === lastUploadRepo) {
+      const g = guessRepoFromText(taskText, list);
+      if (g) repoInput.value = g;
+    }
+    refreshState();
+  }).catch(() => {});
+  repoInput.addEventListener('input', refreshState);
+
+  const lock = (v) => {
+    goBtn.disabled = v; onlyBtn.disabled = v; cancelBtn.disabled = v;
+    repoInput.disabled = v; dirInput.disabled = v;
+  };
+
+  const run = async (withTask) => {
+    const repo = repoInput.value.trim();
+    if (!SAFE_REPO_NAME.test(repo)) {
+      hint.textContent = 'Repo ka naam sahi likho (letters, numbers, - _ . hi).';
+      repoInput.focus();
+      return;
+    }
+    const dir = dirInput.value.trim().replace(/^\/+|\/+$/g, '');
+    lock(true);
+    lastUploadRepo = repo;
+    lastUploadDir = dir;
+    if (refreshState()) {
+      const created = await createRepoViaChat(repo);
+      if (!created) { lock(false); return; }
+    }
+    const ok = await runUploads(uploadables, repo, dir);
+    if (ok && withTask) {
+      await sendMsg({ text: taskText, context: { repo }, silentUser: true });
+    } else if (!ok && withTask) {
+      addMessage('agent', '⚠️ Upload poora nahi hua, isliye task nahi chalaya. Theek karke dobara try karo.', 'warning');
+    }
+  };
+
+  goBtn.onclick = () => run(true);
+  onlyBtn.onclick = () => run(false);
+  repoInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); run(true); } };
+  cancelBtn.onclick = () => {
+    lock(true);
+    addMessage('agent', 'Theek hai, upload cancel kar diya.', '');
+  };
+  repoInput.focus();
+}
+
 // ── FILE UPLOAD (attach button) ──
 // Remembers the last repo/path the user typed, so repeat uploads to the
 // same place don't re-prompt every time.
@@ -1846,7 +2507,8 @@ function onFilePicked(event) {
     askUploadPath(files, repo);
     return;
   }
-  askUploadRepo(files);
+  // Ab turant repo/folder nahi poochte — pehle tray me rakhte hain, user task likh sakta hai.
+  stageFiles(files, 'files');
 }
 
 // Folder picker (webkitdirectory) — browser gives us every file inside the
@@ -1859,7 +2521,7 @@ function onFolderPicked(event) {
   const files = Array.from(event.target.files || []);
   event.target.value = '';
   if (!files.length) return;
-  askUploadRepo(files);
+  stageFiles(files, 'folder');
 }
 
 // Zip picker — routed to a separate flow since it needs its own /upload-zip
@@ -1882,7 +2544,7 @@ function onZipPicked(event) {
     askZipUploadPath(file, repo);
     return;
   }
-  askZipUploadRepo(file);
+  stageFiles([file], 'zip');
 }
 
 // .env picker — separate 2-step flow (pick platform, then pick target
@@ -2515,11 +3177,14 @@ async function doUpload(file, repo, path) {
 
     const cls = actionColorFor(data.action);
     const msgRef = addMessage('agent', data.reply, cls, null, data.action);
-    if (status >= 200 && status < 300) appendPostUploadDeployAction(msgRef, repo);
+    const okUp = status >= 200 && status < 300;
+    if (okUp) appendPostUploadDeployAction(msgRef, repo);
     history.push({ role: 'assistant', content: data.reply });
+    return okUp;
   } catch (err) {
     ring.remove();
     addMessage('agent', '❌ Upload fail ho gaya. Server se connect nahi ho paya.', 'error');
+    return false;
   } finally {
     isLoading = false;
     document.getElementById('sendBtn').disabled = false;
@@ -2531,8 +3196,7 @@ async function doUpload(file, repo, path) {
 // doesn't stop the rest from going through. Ends with a summary line.
 async function doUploadMany(files, repo, paths) {
   if (files.length === 1) {
-    await doUpload(files[0], repo, paths[0]);
-    return;
+    return await doUpload(files[0], repo, paths[0]);
   }
 
   addMessage('user', `📎 Uploading ${files.length} files → ${repo}${paths[0].includes('/') ? '/' + paths[0].split('/').slice(0, -1).join('/') : ''}`);
@@ -2579,6 +3243,7 @@ async function doUploadMany(files, repo, paths) {
     : `⚠️ ${okCount}/${files.length} files upload hui. Fail hui: ${failed.join(', ')}`;
   const msgRef = addMessage('agent', summary, failed.length === 0 ? 'success' : 'warning');
   if (okCount > 0) appendPostUploadDeployAction(msgRef, repo);
+  return failed.length === 0 && okCount > 0;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2773,9 +3438,11 @@ async function doZipUpload(file, repo, dir) {
     const msgRef = addMessage('agent', data.reply, cls, null, data.action);
     if (data.action === 'create_file') appendPostUploadDeployAction(msgRef, repo);
     history.push({ role: 'assistant', content: data.reply });
+    return data.action === 'create_file';
   } catch (err) {
     ring.remove();
     addMessage('agent', '❌ Zip upload fail ho gaya. Server se connect nahi ho paya.', 'error');
+    return false;
   } finally {
     isLoading = false;
     document.getElementById('sendBtn').disabled = false;
@@ -5534,7 +6201,7 @@ function makeMsgLabel(role, timestamp = null) {
   return label;
 }
 
-function renderMessage(role, content, actionClass = '', timestamp = null, action = null) {
+function renderMessage(role, content, actionClass = '', timestamp = null, action = null, display = null) {
   const es = document.getElementById('empty-state');
   if (es) es.style.display = 'none';
 
@@ -5565,7 +6232,8 @@ function renderMessage(role, content, actionClass = '', timestamp = null, action
 
   const bubble = document.createElement('div');
   bubble.className = `msg-bubble ${actionClass}`;
-  bubble.innerHTML = role === 'user' ? escHtml(content) : renderMarkdown(content);
+  if (role === 'user') renderUserBubble(bubble, content, display);
+  else bubble.innerHTML = renderMarkdown(content);
 
   wrap.appendChild(label);
   wrap.appendChild(bubble);
@@ -5573,9 +6241,9 @@ function renderMessage(role, content, actionClass = '', timestamp = null, action
   return { wrap, bubble };
 }
 
-function addMessage(role, content, actionClass = '', confirmData = null, action = null) {
+function addMessage(role, content, actionClass = '', confirmData = null, action = null, display = null) {
   const ts = Date.now();
-  const { wrap, bubble } = renderMessage(role, content, actionClass, ts, action);
+  const { wrap, bubble } = renderMessage(role, content, actionClass, ts, action, display);
 
   // Confirm-action buttons are intentionally NOT saved to localStorage —
   // see the note above SESSIONS_KEY. They only ever exist live.
@@ -5614,7 +6282,10 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     // Only persist messages that aren't a live confirm-prompt — the prompt
     // text itself ("Pakka delete karna hai?") is fine to keep, just not
     // the still-clickable buttons.
-    saveChatEntry({ role, content, actionClass, ts, action });
+    const saved = role === 'user' ? capEntryForSave(content, display) : { content, display };
+    const entry = { role, content: saved.content, actionClass, ts, action };
+    if (saved.display) entry.display = saved.display;
+    saveChatEntry(entry);
     addMessageActions(wrap, bubble, role, content, actionClass, () => resendMessage(content));
   }
 
@@ -6064,11 +6735,7 @@ function initDragDrop() {
     const files = await filesFromDataTransfer(e.dataTransfer);
     if (!files.length) return;
 
-    if (files.length === 1 && /\.zip$/i.test(files[0].name)) {
-      askZipUploadRepo(files[0]);
-    } else {
-      askUploadRepo(files);
-    }
+    stageFiles(files, 'auto');
   });
 
   // Dropping outside the window entirely (e.g. onto another app) never
@@ -6124,11 +6791,24 @@ function filesFromDataTransfer(dataTransfer) {
 }
 
 // ── SEND ──
-async function sendMsg() {
+async function sendMsg(opts = {}) {
   if (isLoading) return;
+  if (!opts || typeof opts !== 'object' || typeof opts.preventDefault === 'function') opts = {};
 
   const input = document.getElementById('userInput');
-  const msg = input.value.trim();
+  const fromInput = opts.text === undefined;
+  const typed = (fromInput ? input.value : String(opts.text)).trim();
+  let msg = typed;
+  let msgDisplay = null;
+  const ctxRepo = (opts.context && typeof opts.context.repo === 'string') ? opts.context.repo : '';
+
+  // Tray me files/paste hain: ya to upload-flow/task-card khulega (null), ya inline message banega.
+  if (fromInput && pendingAtts.length) {
+    const prepared = await prepareAttachmentSend(typed);
+    if (!prepared) return;
+    msg = prepared.msg;
+    msgDisplay = prepared.display;
+  }
   if (!msg) return;
 
   // Mobile keyboards only reopen on a real user gesture — calling
@@ -6144,12 +6824,15 @@ async function sendMsg() {
 
   isLoading = true;
   userCancelled = false;
-  input.value = '';
-  autoResize(input);
+  if (fromInput) {
+    input.value = '';
+    autoResize(input);
+  }
   hideSuggestions();
   setSendBtnState(true);
 
-  addMessage('user', msg);
+  // silentUser: "file + task" flow me user ka message (chips ke saath) pehle hi chat me dikh chuka hai
+  if (!opts.silentUser) addMessage('user', msg, '', null, null, msgDisplay);
   history.push({ role: 'user', content: msg });
 
   const typing = document.getElementById('typing-indicator');
@@ -6164,7 +6847,11 @@ async function sendMsg() {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history: history.slice(0, -1) }),
+      body: JSON.stringify({
+        message: msg,
+        history: history.slice(0, -1),
+        ...(ctxRepo ? { context: { repo: ctxRepo } } : {})
+      }),
       signal: controller.signal
     });
 

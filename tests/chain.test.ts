@@ -125,3 +125,27 @@ test("validatePlanSteps: unknown command / galat repo / AI ka likha content reje
   assert.equal(ok.steps[1].instruction, "simple page");
   assert.equal(validatePlanSteps(Array.from({ length: 9 }, () => ({ cmd: "LIST_REPOS", params: {} })), 0).error, "max 8 steps allowed");
 });
+
+// ── seedRepo: UI "file/zip + task" flow — upload ke baad repo context me hota hai ──
+test("seedRepo: 'isko deploy kar' repo naam ke bina bhi chalta hai", () => {
+  const c = classifyMessage("isko deploy kar do", "goldy-gym");
+  assert.equal(c.kind, "chain");
+  if (c.kind !== "chain") return;
+  assert.ok(c.steps.some((s: any) => s.cmd === "VERCEL_DEPLOY" || s.cmd === "VERCEL_IMPORT_REPO"));
+  assert.ok(c.steps.every((s: any) => JSON.stringify(s.params).includes("goldy-gym")));
+});
+
+test("seedRepo ke bina wahi message pehle jaisa hi (none / single) rehta hai", () => {
+  const c = classifyMessage("isko deploy kar do");
+  assert.notEqual(c.kind, "chain");
+});
+
+test("seedRepo: galat/unsafe naam ignore hota hai", () => {
+  const c = classifyMessage("isko deploy kar do", "x; rm -rf /");
+  assert.notEqual(c.kind, "chain");
+});
+
+test("seedRepo: explicit single command (list repos) pehle jaisa hi single", () => {
+  const c = classifyMessage("list repos", "goldy-gym");
+  assert.equal(c.kind, "single");
+});

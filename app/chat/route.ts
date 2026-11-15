@@ -34,7 +34,7 @@ import { NO_ARG_COMMANDS } from "@/lib/commands/intent_parser";
 import { AIError, NoAIKeyError, callOpenrouterChat, extractCommand, handleCreateOrEditFile } from "@/lib/commands/ai_fallback";
 import { handleCodeGenerate } from "@/lib/commands/code_generate";
 import { guardRepoParam } from "@/lib/commands/collab";
-import { classifyMessage, isDestructiveStep, MAX_STEPS, type PlanStep } from "@/lib/commands/chain";
+import { classifyMessage, isDestructiveStep, MAX_STEPS, SAFE_SEED_REPO, type PlanStep } from "@/lib/commands/chain";
 import { planWithAI } from "@/lib/commands/planner";
 import { runPlan } from "@/lib/commands/plan_runner";
 import { isKnownCommand, needsConfirmation } from "@/lib/commands/risk";
@@ -170,8 +170,12 @@ export async function POST(req: Request) {
     return safeJsonify(await runPlan(steps, blocks, { ...runCtx, source }));
   };
 
+  // UI ne "file/zip + task" bheja ho to upload ke baad ka repo context (sirf safe naam, warna ignore)
+  const ctxRepoRaw = body.context && typeof body.context === "object" ? (body.context as any).repo : "";
+  const seedRepo = typeof ctxRepoRaw === "string" && SAFE_SEED_REPO.test(ctxRepoRaw) ? ctxRepoRaw : "";
+
   // 2. CLASSIFY (rules, 0 AI tokens)
-  const cls = classifyMessage(userMessage);
+  const cls = classifyMessage(userMessage, seedRepo || null);
 
   if (cls.kind === "chain") {
     return respondPlan(cls.steps, cls.blocks, "direct");
@@ -200,7 +204,10 @@ export async function POST(req: Request) {
       });
     };
     try {
-      const plan = await planWithAI(cls.text, cls.blocks.length, user.id, {
+      const plannerText = seedRepo
+        ? `[Context: user ne abhi apni files/zip repo "${seedRepo}" me upload kar di hain. Upload ka kaam ho chuka hai — usse dobara plan mat karo, sirf baaki task ke steps do. Repo ka naam "${seedRepo}" hai.]\n${cls.text}`
+        : cls.text;
+      const plan = await planWithAI(plannerText, cls.blocks.length, user.id, {
         vercel: !!vcToken,
         netlify: !!nlToken,
         render: !!rdToken,
