@@ -1,4 +1,5 @@
 import { currentUser } from "@/lib/auth";
+import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
 import { formFile, formStr, readForm } from "@/lib/api-utils";
 import { getUserNetlifyToken, getUserRenderToken, getUserVercelToken } from "@/lib/db";
 import { safeJsonify } from "@/lib/security";
@@ -14,6 +15,7 @@ const MAX_ENV_UPLOAD_BYTES = 256 * 1024; // .env chhoti text file hoti hai
 export async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return safeJsonify({ reply: "❌ Login chahiye.", action: "error" }, 401);
+  { const rl = await rateLimitUser(user.id, "upload", 30, 60); if (!rl.ok) return tooManyRequests(rl); }
 
   const form = await readForm(req);
   const platform = formStr(form, "platform").toLowerCase();

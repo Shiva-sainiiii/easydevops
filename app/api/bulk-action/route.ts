@@ -5,7 +5,8 @@
  */
 import { currentUser } from "@/lib/auth";
 import { ghTokenOf, sstr } from "@/lib/api-utils";
-import { getUserNetlifyToken, getUserRenderToken, getUserVercelToken } from "@/lib/db";
+import { consumeConfirmToken, getUserNetlifyToken, getUserRenderToken, getUserVercelToken } from "@/lib/db";
+import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
 import { pyStr } from "@/lib/pyjson";
 import { readJsonBody } from "@/lib/route-utils";
 import { safeJsonify } from "@/lib/security";
@@ -17,7 +18,7 @@ import {
   bulkDeleteVercelProjects,
   bulkSetRepoVisibility,
 } from "@/lib/commands/bulk_actions";
-import { buildConfirmation, confirmToken } from "@/lib/commands/confirmation";
+import { buildConfirmation, verifyConfirmToken } from "@/lib/commands/confirmation";
 import { pyTruthy } from "@/lib/commands/pyutil";
 
 export const runtime = "nodejs";
@@ -38,6 +39,8 @@ const field = (body: Record<string, any>, k: string) => (k in body ? body[k] : [
 export async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return safeJsonify({ reply: "🔒 Login chahiye.", action: "error" }, 401);
+  const rl = await rateLimitUser(user.id, "bulk", 15, 60);
+  if (!rl.ok) return tooManyRequests(rl);
   const ghToken = ghTokenOf(user);
   const owner = user.github_login;
 
@@ -52,8 +55,15 @@ export async function POST(req: Request) {
     const cmd = body.pending_command;
     const value = body.pending_value;
     const token = body.confirm_token;
-    if (token !== confirmToken(pyStr(cmd ?? null), value, user.id)) {
+    const check = verifyConfirmToken(token, pyStr(cmd ?? null), typeof value === "string" ? value : "", user.id);
+    if (check === "expired") {
+      return safeJsonify({ reply: "⌛ Confirmation expire ho gaya. Dobara select karke try karo.", action: "error" });
+    }
+    if (check !== "ok") {
       return safeJsonify({ reply: "❌ Confirmation token match nahi hua. Dobara try kar.", action: "error" });
+    }
+    if (!(await consumeConfirmToken(String(token), user.id))) {
+      return safeJsonify({ reply: "ℹ️ Ye action pehle hi chal chuka hai.", action: "warning" });
     }
     let params: Record<string, any> = {};
     try {

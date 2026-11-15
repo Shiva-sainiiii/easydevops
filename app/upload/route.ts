@@ -1,4 +1,5 @@
 import { currentUser } from "@/lib/auth";
+import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
 import { formFile, formStr, ghTokenOf, readForm } from "@/lib/api-utils";
 import { ghApi, getFileSha } from "@/lib/providers/github";
 import { safeJsonify, safeRepoPath, UnsafePathError } from "@/lib/security";
@@ -13,6 +14,7 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return safeJsonify({ reply: "❌ Login chahiye.", action: "error", source: "direct" }, 401);
+  { const rl = await rateLimitUser(user.id, "upload", 30, 60); if (!rl.ok) return tooManyRequests(rl); }
   const ghToken = ghTokenOf(user);
   const owner = user.github_login;
 

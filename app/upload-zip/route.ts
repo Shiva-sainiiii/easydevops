@@ -3,6 +3,7 @@
  * Zip-slip fix: har entry ka path safeRepoPath() se guzarta hai.
  */
 import { currentUser } from "@/lib/auth";
+import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
 import { formFile, formStr, ghTokenOf, readForm } from "@/lib/api-utils";
 import { ghApi } from "@/lib/providers/github";
 import { safeJsonify, safeRepoPath, UnsafePathError } from "@/lib/security";
@@ -22,6 +23,7 @@ const msgOf = (r: { content: Buffer; json(): any }, d: string) => (r.content.len
 export async function POST(req: Request) {
   const user = await currentUser();
   if (!user) return err("❌ Login chahiye.", 401);
+  { const rl = await rateLimitUser(user.id, "upload", 30, 60); if (!rl.ok) return tooManyRequests(rl); }
   const ghToken = ghTokenOf(user);
   const owner = user.github_login;
 

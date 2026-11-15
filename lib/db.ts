@@ -8,6 +8,7 @@
  * Flask mein init_db() app startup pe chalta tha. Yahan har query se pehle
  * `ensureDb()` ek baar (per cold start) schema create/migrate kar deta hai.
  */
+import crypto from "node:crypto";
 import { Pool } from "pg";
 
 import { config } from "@/lib/config";
@@ -25,13 +26,17 @@ export interface UserRow {
   netlify_email: string | null;
   render_token_encrypted: Buffer | null;
   render_email: string | null;
+  /** "Logout everywhere" ke liye: badhne pe purani cookies invalid ho jati hain */
+  session_version?: number;
   created_at: Date;
   updated_at: Date;
 }
 
-let _fernet: Fernet | undefined;
-function fernet(): Fernet {
-  return (_fernet ??= new Fernet(config.FERNET_KEY));
+// MultiFernet: naya key FERNET_KEY, purane keys FERNET_KEYS_OLD (comma-separated). Encrypt hamesha naye se,
+// decrypt sab try karta hai — isse key rotate karne pe users logout/data-loss nahi hote.
+let _fernets: Fernet[] | undefined;
+function fernets(): Fernet[] {
+  return (_fernets ??= [config.FERNET_KEY, ...config.FERNET_KEYS_OLD].map((k) => new Fernet(k)));
 }
 
 let _pool: Pool | undefined;
@@ -77,6 +82,16 @@ async function runInit(): Promise<void> {
   await p.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS render_token_encrypted BYTEA");
   await p.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS render_email TEXT");
 
+  // Session revocation + single-use confirm tokens
+  await p.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0");
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS used_confirm_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        used_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   // AI Gateway: har user ki apni AI keys (encrypted) + active provider/model
   await p.query(`
     CREATE TABLE IF NOT EXISTS ai_keys (
@@ -117,16 +132,19 @@ async function query<T = any>(text: string, params: unknown[] = []): Promise<T[]
 }
 
 export function encryptToken(rawToken: string): Buffer {
-  return fernet().encrypt(Buffer.from(rawToken, "utf-8"));
+  return fernets()[0].encrypt(Buffer.from(rawToken, "utf-8"));
 }
 
 export function decryptToken(blob: Buffer | Uint8Array | null | undefined): string | null {
   if (!blob) return null;
-  try {
-    return fernet().decrypt(Buffer.from(blob)).toString("utf-8");
-  } catch {
-    return null; // InvalidToken
+  for (const f of fernets()) {
+    try {
+      return f.decrypt(Buffer.from(blob)).toString("utf-8");
+    } catch {
+      /* agla key try karo */
+    }
   }
+  return null; // InvalidToken
 }
 
 export async function upsertUser(
@@ -331,4 +349,32 @@ export async function setAiActive(userId: number | string, provider: string, mod
      ON CONFLICT (user_id) DO UPDATE SET active_provider = $2, models = $3::jsonb, updated_at = NOW()`,
     [userId, provider, JSON.stringify(models)]
   );
+}
+
+// ---- Security: session revocation + single-use confirm tokens ----
+
+/** Version +1: is user ki saari purani session cookies turant invalid. Naya version return karta hai. */
+export async function bumpSessionVersion(userId: number | string): Promise<number> {
+  const rows = await query<{ session_version: number }>(
+    "UPDATE users SET session_version = session_version + 1, updated_at = NOW() WHERE id = $1 RETURNING session_version",
+    [userId]
+  );
+  return rows[0]?.session_version ?? 0;
+}
+
+/**
+ * Confirm token ko "use ho gaya" mark karta hai. true = pehli baar (aage badho), false = pehle use ho chuka (replay).
+ * Token ka sirf SHA-256 store hota hai.
+ */
+export async function consumeConfirmToken(token: string, userId: number | string): Promise<boolean> {
+  const hash = crypto.createHash("sha256").update(token).digest("hex");
+  const rows = await query(
+    "INSERT INTO used_confirm_tokens (token_hash, user_id) VALUES ($1, $2) ON CONFLICT (token_hash) DO NOTHING RETURNING token_hash",
+    [hash, userId]
+  );
+  if (Math.random() < 0.02) {
+    // purane rows saaf (token waise bhi 15 min me expire ho jata hai)
+    query("DELETE FROM used_confirm_tokens WHERE used_at < NOW() - INTERVAL '1 day'").catch(() => {});
+  }
+  return rows.length > 0;
 }

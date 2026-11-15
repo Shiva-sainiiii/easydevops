@@ -48,6 +48,14 @@ export const CODEGEN_INSPECT_VERBS_RE = String.raw`\b(?:understand|explain|revie
 export const CODEGEN_STRONG_CHANGE_VERBS_RE = String.raw`\b(?:fix|edit|update|change|add|remove|delete|refactor|debug|improve|build|create|banao|bana|isme|ismein|iska|isko)\b`;
 export const CODEGEN_GENERIC_DO_RE = String.raw`\b(?:karo|kar\s*do)\b`;
 
+// ── Naam parse karne ke helpers (CREATE_REPO) ──
+// Stopwords naam nahi ban sakte: pehle `create a repo name "practice"` me repo ka naam "name" ban jata tha.
+const NAME_STOP = String.raw`(?!(?:name|named|called|naam|nam|with|and|aur|for|in|on|to|me|mein|se|ka|ki|ke|ek|a|an|the|repo|repository|file|wala|wali|wale|do|de|dena|dedo|kar|karo|kardo|bana|banao|bna|bnao|please|plz)\b)`;
+export const NEW_NAME = String.raw`${NAME_STOP}[\w][\w.\-]*`;
+const NAME_WORD = String.raw`(?:(?:called|named|name|naam)\s+)?`;
+// "bana do / bna de / bnado / banao ..." — Hinglish "banana" ke saare common roop
+export const MAKE_VERB = String.raw`(?:create|make|new|naya|nayi|bnao|banao|bana\s*do|bana\s*de|bna\s*do|bna\s*de|bnado|banado|bnade|banade|bana|bna)`;
+
 export const NO_ARG_COMMANDS = new Set(["LIST_REPOS", "VERCEL_LIST_PROJECTS", "NETLIFY_LIST_SITES", "RENDER_LIST_SERVICES"]);
 
 type M = RegExpExecArray;
@@ -178,9 +186,16 @@ export const INTENT_RULES: Rule[] = [
   ], (m) => ({ repo: g(m, 2), path: g(m, 1) })],
 
   ["CREATE_REPO", [
+    // purana style: "create repo banao x"
     r`(?:create|bnao|banao|naya|new)\s+(?:a\s+|ek\s+)?repo(?:sitory)?\s+` +
       r`(?:called\s+|named\s+)?(?:bnao|banao|bana\s*do)\s+(${SLUG})`,
-    r`(?:create|bnao|banao|naya|new)\s+(?:a\s+|ek\s+)?repo(?:sitory)?\s+(?:called\s+|named\s+)?(${SLUG})`,
+    // "create a repo name practice" / "create repo named practice" / "naya repo practice"
+    r`${MAKE_VERB}\s+(?:a\s+|an\s+|ek\s+)?(?:new\s+|naya\s+|nayi\s+)?repo(?:sitory)?\s+${NAME_WORD}(${NEW_NAME})`,
+    // "ek repo bna de practice naam se" / "repo bana do practice"
+    r`repo(?:sitory)?\s+${MAKE_VERB}\s+${NAME_WORD}(${NEW_NAME})`,
+    // "practice naam se repo bana do" / "practice naam ka repo banao"
+    r`(${NEW_NAME})\s+(?:naam|name)\s+(?:se|ka|ki|ke)\s+(?:ek\s+|a\s+)?(?:naya\s+)?repo(?:sitory)?\s+${MAKE_VERB}`,
+    // "repo x create/banao"
     r`repo(?:sitory)?\s+(${SLUG})\s+(?:create|bnao|banao|bana(?:\s*do)?)\s*(?:karo|kar\s*do)?$`,
   ], (m) => ({ repo: g(m, 1) })],
 
@@ -469,8 +484,42 @@ function rulePlatform(cmd: string): string | null {
   return null;
 }
 
-export function parseIntent(message: string): [string, Record<string, any>] | [null, null] {
-  const original = message.trim();
+// ── Message normalize: "practice" / 'practice' / `practice` jaise akele-token quotes hata do ──
+export function stripWrapQuotes(text: string): string {
+  return text.replace(/["“”‘’`]([\w./\-]+)["“”‘’`]/gu, "$1");
+}
+
+// Match ke baad bacha hua text ginte waqt in lafzon ko ignore karte hain (filler / politeness / grammar)
+const FILLER = new Set(
+  ("bhai yaar bro please plz pls zara jaldi ek a an the my mere meri mera mujhe me mein ko se ka ki ke de do dena dedo " +
+    "kar karo kardo hai h tum tu aap can you could would will now abhi just bas sirf ye yeh wo woh is isko iska isme ise na " +
+    "thoda thodi sab saare sare all koi kuch show list create make new naya repo repository file named called name naam " +
+    "in on of for to from with and aur also too bhi pe par wala wali wale jo it this that same").split(/\s+/)
+);
+
+// AI-assisted commands: poora message hi unka instruction hota hai, isliye "leftover" check unpe nahi lagta
+export const AI_ASSISTED_COMMANDS = new Set(["CREATE_FILE", "EDIT_FILE", "CODE_GENERATE"]);
+
+// Casing wapas: lowercase pe match hota hai, par file path / naya repo naam case-sensitive hote hain (README.md)
+const CASE_RESTORE: Record<string, string[]> = {
+  CREATE_FILE: ["path"],
+  EDIT_FILE: ["path"],
+  READ_FILE: ["path"],
+  DELETE_FILE: ["path"],
+  CREATE_REPO: ["repo"],
+};
+
+export interface IntentMatch {
+  cmd: string;
+  params: Record<string, any>;
+  /** message ka kitna hissa regex ne samjha nahi (filler hata ke, lafz) */
+  leftoverWords: number;
+  leftover: string;
+  aiAssisted: boolean;
+}
+
+export function parseIntentEx(message: string): IntentMatch | null {
+  const original = stripWrapQuotes(message.trim());
   const lowered = original.toLowerCase();
 
   // Message jis platform ka naam leta hai, doosre platform ke rules skip
@@ -482,7 +531,7 @@ export function parseIntent(message: string): [string, Record<string, any>] | [n
     const rp = rulePlatform(cmd);
     if (rp && mentioned.size > 0 && !mentioned.has(rp)) continue;
     for (const pat of patterns) {
-      const m = rx(pat).exec(lowered);
+      const m = rx(pat, "d").exec(lowered) as (RegExpExecArray & { indices?: [number, number][] }) | null;
       if (m) {
         let params: Record<string, any>;
         try {
@@ -517,9 +566,41 @@ export function parseIntent(message: string): [string, Record<string, any>] | [n
             params.env_vars = { [om[1]]: firstVal };
           }
         }
-        return [cmd, params];
+        // Path / naya repo naam ka original casing (indices se, same-length strings pe hi)
+        const restore = CASE_RESTORE[cmd];
+        if (restore && m.indices && original.length === lowered.length) {
+          for (const key of restore) {
+            const val = params[key];
+            if (typeof val !== "string") continue;
+            for (let gi = 1; gi < m.indices.length; gi++) {
+              const ix = m.indices[gi];
+              if (ix && lowered.slice(ix[0], ix[1]) === val) {
+                params[key] = original.slice(ix[0], ix[1]);
+                break;
+              }
+            }
+          }
+        }
+
+        // Leftover: match ke baahar ka text (filler hata ke)
+        const span = m.indices ? m.indices[0] : [m.index, m.index + m[0].length];
+        const rest = (lowered.slice(0, span[0]) + " " + lowered.slice(span[1])).trim();
+        const words = rest.split(/[^\p{L}\p{N}_.\-]+/u).filter((w) => w && !FILLER.has(w));
+        return {
+          cmd,
+          params,
+          leftoverWords: words.length,
+          leftover: words.join(" "),
+          aiAssisted: AI_ASSISTED_COMMANDS.has(cmd),
+        };
       }
     }
   }
-  return [null, null];
+  return null;
+}
+
+/** Purana API (tuple) — parseIntentEx ke upar wrapper. */
+export function parseIntent(message: string): [string, Record<string, any>] | [null, null] {
+  const r = parseIntentEx(message);
+  return r ? [r.cmd, r.params] : [null, null];
 }

@@ -62,6 +62,37 @@ Destructive commands (`DELETE_*`, `VERCEL_ROLLBACK`, `BULK_DELETE_*`) hamesha co
 - Har GitHub write se pehle `safeRepoPath()` (path traversal / `.github/` block), zip-slip guard `/upload-zip` me.
 - Commands kabhi arbitrary `owner` nahi lete — hamesha logged-in user ka login.
 
+## Multi-step prompts (v2.1) — ek message, kai kaam, 0 AI tokens
+
+Ab ek hi message me kai kaam likh sakte ho; tool unhe todke ek ke baad ek chalata hai:
+
+> `Create a repo name "practice" and add a index.html file with <pasted code>` aur phir `deploy it to vercel`
+
+Kaise (code: `lib/commands/chain.ts`):
+1. **Pasted code alag nikalta hai** (``` fence, `<!DOCTYPE…</html>`, ya code-run) -> `{{BLOCK_n}}`. Code AI ko jaata hi nahi (tokens bachte hain, code badalta nahi).
+2. **Kaam todta hai** `and add`, `aur`, `phir`, `then`, newline, `1.` pe — sirf tab jab agla lafz action verb ho (`invite a and b` nahi tootta).
+3. **Har kaam regex se command banta hai**, context ke saath ("usi repo me", "isko deploy karo"). Naye repo + Vercel deploy ke beech **import apne aap** insert hota hai.
+4. Sab resolve ho gaya -> chalta hai (**0 AI**). Kuch samajh na aaye -> tab hi **AI planner** (ek chhota call, sirf plan; code kabhi nahi bhejta). AI key na ho to tool kuch chalata nahi, bata deta hai kaunsa hissa samajh nahi aaya.
+5. Plan me delete/rollback/merge ho to **poore plan ka ek confirm** aata hai. Pehla fail hote hi plan ruk jata hai aur checklist dikhti hai.
+
+Partial-match guard: agar regex ne message ka sirf chhota hissa samjha aur bahut extra text bacha, to ab ek command chupchap nahi chalta (pehle yahi bug tha).
+
+## Security hardening (v2.1)
+
+- **Confirm token** ab HMAC(secret) + 15 min expiry + single-use (Neon table `used_confirm_tokens`). Pehle unsalted sha256 tha.
+- **Origin/CSRF check + security headers + IP rate limit**: `middleware.ts`.
+- **User-level rate limits**: chat 40/min, AI calls 12/min, bulk 15/min, uploads 30/min, AI-key add 10/min (`lib/ratelimit.ts`; Upstash optional).
+- **Risk tiers** (`lib/commands/risk.ts`): read / write / destructive. AI-fallback ka koi bhi write command ab user ke "Haan" ke baad hi chalta hai (prompt-injection guard).
+- **Session revocation**: `session_version` + chat me `logout everywhere` / `POST /auth/logout-all`.
+- **Env validation** (saari problems ek saath) + `FERNET_KEYS_OLD` se key rotation.
+- Decrypt fail hone pe ab user ka data **delete nahi** hota (pehle ho jata tha).
+
+## Tests
+
+```bash
+npx tsx --test tests/*.test.ts
+```
+
 ## Deploy (sirf phone se)
 
 1. GitHub repo me ye files push karo (Phase ZIPs), purani Python files delete karo (`MIGRATION.md` ki list).

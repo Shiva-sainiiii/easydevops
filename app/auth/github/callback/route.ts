@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { readAndClearOauthStateCookie, setSessionCookie } from "@/lib/auth";
 import { config } from "@/lib/config";
-import { upsertUser } from "@/lib/db";
+import { getUserById, upsertUser } from "@/lib/db";
 import { get, post } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -59,6 +59,7 @@ export async function GET(req: Request) {
   const who = whoR.json();
   const userId = await upsertUser(who.id, who.login, who.avatar_url ?? null, accessToken);
 
-  setSessionCookie(redirectResp, userId);
+  const row = await getUserById(userId);
+  setSessionCookie(redirectResp, userId, row?.session_version ?? 0);
   return redirectResp;
 }

@@ -1,5 +1,6 @@
 import { isProvider, validateKey } from "@/lib/ai";
 import { addAiKey, deleteAiKey } from "@/lib/db";
+import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
 import { readJsonBody, requireUser } from "@/lib/route-utils";
 import { safeJsonify } from "@/lib/security";
 
@@ -11,6 +12,8 @@ export const maxDuration = 60;
 export async function POST(req: Request) {
   const { user, err } = await requireUser();
   if (err) return err;
+  const rl = await rateLimitUser(user.id, "aikeys", 10, 60);
+  if (!rl.ok) return tooManyRequests(rl);
 
   const body = await readJsonBody(req);
   const provider = body.provider;

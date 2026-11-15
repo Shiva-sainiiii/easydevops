@@ -4,18 +4,57 @@
  */
 import crypto from "node:crypto";
 
+import { config } from "@/lib/config";
 import { pyJsonDumps, pyRepr, pyStr } from "@/lib/pyjson";
+import { DESTRUCTIVE } from "@/lib/commands/risk";
 
-export const DESTRUCTIVE_COMMANDS = new Set([
-  "DELETE_REPO", "DELETE_FILE", "VERCEL_DELETE_PROJECT", "NETLIFY_DELETE_SITE", "RENDER_DELETE_SERVICE", "VERCEL_ROLLBACK",
-  "BULK_DELETE_FILES", "BULK_DELETE_REPOS", "BULK_DELETE_VERCEL_PROJECTS",
-  "BULK_DELETE_NETLIFY_SITES", "BULK_DELETE_RENDER_SERVICES",
-  "REMOVE_COLLABORATOR", "MERGE_PR", "CLOSE_PR",
-]);
+export const DESTRUCTIVE_COMMANDS = DESTRUCTIVE as Set<string>;
 
-export function confirmToken(cmd: string, value: string | null | undefined, userId: number | string): string {
-  const raw = `${cmd}:${value || ""}:${userId}`;
-  return crypto.createHash("sha256").update(raw, "utf-8").digest("hex").slice(0, 16);
+/** Confirm token kitni der valid rehta hai (page khula chhodke chale gaye to purana "Haan" kaam na kare) */
+export const CONFIRM_TTL_SECONDS = 15 * 60;
+
+interface TokenOpts {
+  now?: number; // ms (tests ke liye)
+  secret?: string;
+}
+
+function macOf(cmd: string, value: string | null | undefined, userId: number | string, ts: string, secret?: string): string {
+  const key = crypto.createHmac("sha256", secret ?? config.FLASK_SECRET_KEY).update("easydevops/confirm/v1").digest();
+  return crypto
+    .createHmac("sha256", key)
+    .update(`${cmd}\n${value || ""}\n${userId}\n${ts}`, "utf-8")
+    .digest("hex")
+    .slice(0, 40);
+}
+
+/**
+ * Confirm token = "<time-base36>.<HMAC>". HMAC server ke secret se banta hai (pehle sirf unsalted sha256 tha,
+ * jise koi bhi guess/forge kar sakta tha). Token (command, value, user, time) se bandha hai.
+ */
+export function confirmToken(cmd: string, value: string | null | undefined, userId: number | string, opts: TokenOpts = {}): string {
+  const ts = Math.floor((opts.now ?? Date.now()) / 1000).toString(36);
+  return `${ts}.${macOf(cmd, value, userId, ts, opts.secret)}`;
+}
+
+export type ConfirmCheck = "ok" | "expired" | "bad";
+
+export function verifyConfirmToken(
+  token: unknown,
+  cmd: string,
+  value: string | null | undefined,
+  userId: number | string,
+  opts: TokenOpts = {}
+): ConfirmCheck {
+  if (typeof token !== "string") return "bad";
+  const m = /^([0-9a-z]{1,10})\.([0-9a-f]{40})$/.exec(token);
+  if (!m) return "bad";
+  const expected = macOf(cmd, value, userId, m[1], opts.secret);
+  const a = Buffer.from(m[2]);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return "bad";
+  const age = Math.floor((opts.now ?? Date.now()) / 1000) - parseInt(m[1], 36);
+  if (age < 0 || age > CONFIRM_TTL_SECONDS) return "expired";
+  return "ok";
 }
 
 const plural = (n: number) => (n !== 1 ? "s" : "");
@@ -109,5 +148,45 @@ export function buildConfirmation(cmd: string, params: Record<string, any>, user
     confirm_token: token,
     confirm_verb: actionVerb,
     source: "direct",
+  };
+}
+
+// ── Multi-step PLAN ka confirm (jab plan me koi destructive step ho) ──
+const redactLong = (v: any): any => (typeof v === "string" && v.length > 80 ? `<${v.length} chars>` : v);
+
+export function buildPlanConfirmation(
+  steps: { cmd: string; summary: string }[],
+  value: string,
+  userId: number | string
+) {
+  const lines = steps.map((s, i) => `${i + 1}. ${DESTRUCTIVE.has(s.cmd) ? "⚠️ " : ""}${s.summary}`);
+  const risky = steps.filter((s) => DESTRUCTIVE.has(s.cmd)).length;
+  return {
+    reply:
+      `📋 **${steps.length} steps ka plan:**\n\n${lines.join("\n")}\n\n` +
+      `⚠️ Isme ${risky} step risky hai (delete / rollback / merge). Chalau? Saare steps ek ke baad ek chalenge.`,
+    action: "confirm_required",
+    pending_command: "PLAN",
+    pending_value: value,
+    confirm_token: confirmToken("PLAN", value, userId),
+    confirm_verb: "run",
+    source: "direct",
+  };
+}
+
+// ── AI-suggested (non-destructive) action ka confirm: AI ka output bina tap ke nahi chalta ──
+export function buildAiConfirmation(cmd: string, params: Record<string, any>, userId: number | string) {
+  const value = pyJsonDumps(params, true);
+  const preview = Object.entries(params)
+    .map(([k, v]) => `${k}: ${pyStr(redactLong(v))}`)
+    .join(", ");
+  return {
+    reply: `🤖 AI ne ye action suggest kiya hai:\n\n\`${cmd}\` ${preview ? `(${preview})` : ""}\n\nChalau?`,
+    action: "confirm_required",
+    pending_command: cmd,
+    pending_value: value,
+    confirm_token: confirmToken(cmd, value, userId),
+    confirm_verb: "run",
+    source: "ai",
   };
 }

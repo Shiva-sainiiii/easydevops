@@ -5591,10 +5591,11 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     const isRollback = confirmData.confirm_verb === 'rollback';
     const isMerge = confirmData.confirm_verb === 'merge';
     const isClosePr = confirmData.confirm_verb === 'close';
+    const isRun = confirmData.confirm_verb === 'run'; // multi-step plan / AI-suggested action
 
     const yesBtn = document.createElement('button');
     yesBtn.className = 'confirm-btn danger';
-    yesBtn.textContent = isRollback ? 'Haan, Rollback Karo' : isMerge ? 'Haan, Merge Karo' : isClosePr ? 'Haan, Close Karo' : 'Haan, Delete Karo';
+    yesBtn.textContent = isRollback ? 'Haan, Rollback Karo' : isMerge ? 'Haan, Merge Karo' : isClosePr ? 'Haan, Close Karo' : isRun ? 'Haan, Chalao' : 'Haan, Delete Karo';
     yesBtn.onclick = () => runConfirmedAction(confirmData, yesBtn, noBtn);
 
     const noBtn = document.createElement('button');
@@ -5603,7 +5604,7 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     noBtn.onclick = () => {
       yesBtn.disabled = true;
       noBtn.disabled = true;
-      addMessage('agent', isRollback ? 'Theek hai, cancel kar diya. Rollback nahi hua.' : isMerge ? 'Theek hai, cancel kar diya. Merge nahi hua.' : isClosePr ? 'Theek hai, cancel kar diya. PR close nahi hua.' : 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
+      addMessage('agent', isRollback ? 'Theek hai, cancel kar diya. Rollback nahi hua.' : isMerge ? 'Theek hai, cancel kar diya. Merge nahi hua.' : isClosePr ? 'Theek hai, cancel kar diya. PR close nahi hua.' : isRun ? 'Theek hai, cancel kar diya. Kuch nahi chalaya.' : 'Theek hai, cancel kar diya. Kuch delete nahi hua.', '');
     };
 
     actions.appendChild(yesBtn);
@@ -5835,10 +5836,10 @@ const CONFIRM_ACTION_STATUS = {
 async function runConfirmedAction(confirmData, yesBtn, noBtn) {
   yesBtn.disabled = true;
   noBtn.disabled = true;
-  yesBtn.textContent = confirmData.pending_command === 'MERGE_PR' ? 'Merge ho raha hai...' : confirmData.pending_command === 'CLOSE_PR' ? 'Close ho raha hai...' : 'Delete ho raha hai...';
+  yesBtn.textContent = confirmData.pending_command === 'MERGE_PR' ? 'Merge ho raha hai...' : confirmData.pending_command === 'CLOSE_PR' ? 'Close ho raha hai...' : confirmData.confirm_verb === 'run' ? 'Chal raha hai...' : 'Delete ho raha hai...';
 
   const typing = document.getElementById('typing-indicator');
-  setThinkingStatus(CONFIRM_ACTION_STATUS[confirmData.pending_command] || 'Delete kar raha hu…');
+  setThinkingStatus(CONFIRM_ACTION_STATUS[confirmData.pending_command] || (confirmData.confirm_verb === 'run' ? 'Plan chala raha hu…' : 'Delete kar raha hu…'));
   typing.classList.add('show');
   scrollToBottom();
 
@@ -5985,6 +5986,7 @@ function actionColorFor(action) {
     render_env: 'info', render_env_update: 'success', render_deploy: 'success',
     confirm_required: 'warning', auth_required: 'warning', ai_setup_required: 'warning',
     vercel_auth_required: 'warning', netlify_auth_required: 'warning', render_auth_required: 'warning',
+    plan_done: 'success', plan_failed: 'warning',
     error: 'error', warning: 'warning', message: ''
   };
   return actionColors[action] || '';

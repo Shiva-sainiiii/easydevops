@@ -1,20 +1,43 @@
 /**
- * POST /chat — main command entrypoint. Teen stage:
- *  1. Confirmed destructive-action replay (pichle confirm_required se)
- *  2. Regex intent match -> direct execution, ya do AI-assisted paths (CREATE/EDIT_FILE, CODE_GENERATE)
- *  3. Full AI fallback jab koi regex rule match na kare
+ * POST /chat — main command entrypoint. Stages:
+ *  0. Rate limit + "logout everywhere"
+ *  1. Confirmed action replay (HMAC token, 15 min expiry, single-use) — single command ya multi-step PLAN
+ *  2. classifyMessage (rules, 0 AI tokens):
+ *       chain     -> multi-step plan rules se (jaise "create repo x and add index.html with <code> and deploy")
+ *       single    -> ek command (purana flow, AI-assisted CREATE/EDIT_FILE + CODE_GENERATE samet)
+ *       needs_ai  -> message partial/uncertain: tab hi AI planner (ek chhota call)
+ *       none      -> koi rule nahi
+ *  3. AI chat fallback (sirf jab upar kuch na mile). AI-origin write commands confirm maangte hain.
  */
 import { clearSessionCookie, currentUser } from "@/lib/auth";
-import { decryptToken, deleteUser, getUserNetlifyToken, getUserRenderToken, getUserVercelToken } from "@/lib/db";
+import {
+  bumpSessionVersion,
+  consumeConfirmToken,
+  decryptToken,
+  getUserNetlifyToken,
+  getUserRenderToken,
+  getUserVercelToken,
+} from "@/lib/db";
 import { Timeout } from "@/lib/http";
+import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
 import { readJsonBody } from "@/lib/route-utils";
 import { safeJsonify } from "@/lib/security";
-import { buildConfirmation, confirmToken, DESTRUCTIVE_COMMANDS } from "@/lib/commands/confirmation";
+import {
+  buildAiConfirmation,
+  buildConfirmation,
+  buildPlanConfirmation,
+  verifyConfirmToken,
+  DESTRUCTIVE_COMMANDS,
+} from "@/lib/commands/confirmation";
 import { executeCommand } from "@/lib/commands/executor";
-import { NO_ARG_COMMANDS, parseIntent } from "@/lib/commands/intent_parser";
+import { NO_ARG_COMMANDS } from "@/lib/commands/intent_parser";
 import { AIError, NoAIKeyError, callOpenrouterChat, extractCommand, handleCreateOrEditFile } from "@/lib/commands/ai_fallback";
 import { handleCodeGenerate } from "@/lib/commands/code_generate";
 import { guardRepoParam } from "@/lib/commands/collab";
+import { classifyMessage, isDestructiveStep, MAX_STEPS, type PlanStep } from "@/lib/commands/chain";
+import { planWithAI } from "@/lib/commands/planner";
+import { runPlan } from "@/lib/commands/plan_runner";
+import { isKnownCommand, needsConfirmation } from "@/lib/commands/risk";
 import { ghRepoAccess, parseRepoRef, sameLogin } from "@/lib/providers/github";
 import { generateRenderYaml } from "@/lib/commands/render_blueprint";
 
@@ -35,10 +58,13 @@ export async function POST(req: Request) {
     );
   }
 
+  const rl = await rateLimitUser(user.id, "chat", 40, 60);
+  if (!rl.ok) return tooManyRequests(rl);
+
   const ghToken = decryptToken(user.github_token_encrypted);
   if (!ghToken) {
-    // Token decrypt nahi hua (jaise FERNET_KEY rotate hui) — force re-login
-    await deleteUser(user.id);
+    // Token decrypt nahi hua (FERNET_KEY badli / galat env). User ka data DELETE NAHI karte (pehle karte the —
+    // galat env wale preview deploy se asli users ka data ud sakta tha); bas dubara login karwao, login pe token re-encrypt hota hai.
     const resp = await safeJsonify(
       { reply: "🔒 Session expire ho gayi, dubara connect karo.", action: "auth_required", source: "direct" },
       401
@@ -53,21 +79,62 @@ export async function POST(req: Request) {
   const rdToken = getUserRenderToken(user);
   const body = await readJsonBody(req);
 
-  // 1. CONFIRMED DESTRUCTIVE ACTION REPLAY
+  const runCtx = {
+    owner,
+    ghToken,
+    vcToken,
+    nlToken,
+    rdToken,
+    userId: user.id,
+  };
+
+  // 1. CONFIRMED ACTION REPLAY (destructive, AI-suggested, ya multi-step PLAN)
   if (body.confirmed) {
-    const cmd = body.pending_command;
-    const value = body.pending_value;
+    const cmd = typeof body.pending_command === "string" ? body.pending_command : "";
+    const value = typeof body.pending_value === "string" ? body.pending_value : "";
     const token = body.confirm_token;
-    if (!DESTRUCTIVE_COMMANDS.has(cmd) || token !== confirmToken(cmd, value, user.id)) {
+    const check = isKnownCommand(cmd) || cmd === "PLAN" ? verifyConfirmToken(token, cmd, value, user.id) : "bad";
+    if (check === "expired") {
+      return safeJsonify({
+        reply: "⌛ Confirmation expire ho gaya (15 min se zyada ho gaye). Command dobara bhejo.",
+        action: "error",
+        source: "direct",
+      });
+    }
+    if (check !== "ok") {
       return safeJsonify({
         reply: "❌ Confirmation token match nahi hua. Dobara try kar.",
         action: "error",
         source: "direct",
       });
     }
+    // Single-use: wahi "Haan" do baar (double-tap / replay) nahi chalega
+    if (!(await consumeConfirmToken(String(token), user.id))) {
+      return safeJsonify({
+        reply: "ℹ️ Ye action pehle hi chal chuka hai (confirmation ek hi baar kaam karta hai).",
+        action: "warning",
+        source: "direct",
+      });
+    }
+
+    if (cmd === "PLAN") {
+      let plan: { steps?: PlanStep[]; blocks?: string[] } = {};
+      try {
+        plan = JSON.parse(value);
+      } catch {
+        plan = {};
+      }
+      const steps = Array.isArray(plan.steps) ? plan.steps : [];
+      if (!steps.length || steps.length > MAX_STEPS || !steps.every((st) => st && isKnownCommand(String(st.cmd)))) {
+        return safeJsonify({ reply: "❌ Plan padha nahi ja saka. Dobara bhejo.", action: "error", source: "direct" });
+      }
+      const blocks = Array.isArray(plan.blocks) ? plan.blocks.map(String) : [];
+      return safeJsonify(await runPlan(steps, blocks, { ...runCtx, source: "direct" }));
+    }
+
     let params: Record<string, any> = {};
     try {
-      params = value && typeof value === "string" ? JSON.parse(value) : {};
+      params = value ? JSON.parse(value) : {};
     } catch {
       params = {};
     }
@@ -83,15 +150,89 @@ export async function POST(req: Request) {
     return safeJsonify({ reply: "Kuch toh bol bhai 😅", action: null, source: "direct" });
   }
 
-  // 2. STRUCTURAL INTENT MATCH
-  const [cmd, params] = parseIntent(userMessage);
+  // "Logout everywhere" — rules se, 0 AI
+  if (/^(?:log\s*out|sign\s*out|logout)\s+(?:from\s+)?(?:all|everywhere|sab|saare|sare)(?:\s+(?:devices?|sessions?|jagah))?$/i.test(userMessage)) {
+    await bumpSessionVersion(user.id);
+    const resp = await safeJsonify({
+      reply: "🔐 Saare devices/browsers se logout ho gaya. Dubara use karne ke liye GitHub se connect karo.",
+      action: "auth_required",
+      source: "direct",
+    });
+    clearSessionCookie(resp);
+    return resp;
+  }
 
-  if (cmd) {
+  // Plan chalane ka common helper: destructive step ho to pehle poore plan ka ek confirm
+  const respondPlan = async (steps: PlanStep[], blocks: string[], source: "direct" | "hybrid") => {
+    if (steps.some(isDestructiveStep)) {
+      return safeJsonify(buildPlanConfirmation(steps, JSON.stringify({ steps, blocks }), user.id));
+    }
+    return safeJsonify(await runPlan(steps, blocks, { ...runCtx, source }));
+  };
+
+  // 2. CLASSIFY (rules, 0 AI tokens)
+  const cls = classifyMessage(userMessage);
+
+  if (cls.kind === "chain") {
+    return respondPlan(cls.steps, cls.blocks, "direct");
+  }
+
+  if (cls.kind === "needs_ai") {
+    // Message ek se zyada kaam ka lagta hai ya rules poora samajh nahi paaye -> AI planner (ek chhota call)
+    const aiRl = await rateLimitUser(user.id, "ai", 12, 60);
+    if (!aiRl.ok) return tooManyRequests(aiRl);
+    const manual = () => {
+      if (cls.reason === "partial" && cls.understood) {
+        return safeJsonify({
+          reply:
+            `⚠️ Maine \`${cls.understood.cmd}\` samjha, par message me kuch aur bhi hai (\`${cls.unresolved[0]}\`). ` +
+            `Kuch galat na ho isliye abhi kuch nahi chalaya — ek-ek kaam alag message me bhejo, ya AI Gateway me key lagao to main multi-step khud samajh lunga.`,
+          action: "warning",
+          source: "direct",
+        });
+      }
+      return safeJsonify({
+        reply:
+          `⚠️ Is message ke ye hisse mujhe samajh nahi aaye: ${cls.unresolved.map((u) => `\`${u}\``).join(", ")}.\n` +
+          `Kuch nahi chalaya. Ek-ek kaam alag message me bhejo, ya AI Gateway me key lagao to main complex tasks khud todke chala dunga.`,
+        action: "warning",
+        source: "direct",
+      });
+    };
+    try {
+      const plan = await planWithAI(cls.text, cls.blocks.length, user.id, {
+        vercel: !!vcToken,
+        netlify: !!nlToken,
+        render: !!rdToken,
+      });
+      if (plan.ask) return safeJsonify({ reply: plan.ask, action: "message", source: "ai" });
+      if (plan.steps?.length) return respondPlan(plan.steps, cls.blocks, "hybrid");
+      return safeJsonify({
+        reply: `🤔 AI plan nahi bana paya${plan.error ? ` (${plan.error})` : ""}. Ek-ek kaam alag message me bhejo.`,
+        action: "warning",
+        source: "ai",
+      });
+    } catch (e: any) {
+      if (e instanceof NoAIKeyError) return manual();
+      if (e instanceof AIError || e instanceof Timeout) return manual();
+      return safeJsonify({ reply: `❌ Error: ${e?.message ?? String(e)}`, action: "error", source: "ai" });
+    }
+  }
+
+  const [cmd, params]: [string | null, Record<string, any> | null] =
+    cls.kind === "single" ? [cls.match.cmd, cls.match.params] : [null, null];
+
+  if (cmd && params) {
     // `owner/repo`: galat format / doosre ke repo pe write command ko AI call ya confirm prompt se PEHLE rok do
     const blocked = guardRepoParam(cmd, params, owner);
     if (blocked) {
       blocked.source = "direct";
       return safeJsonify(blocked);
+    }
+
+    if (cmd === "CREATE_FILE" || cmd === "EDIT_FILE" || cmd === "CODE_GENERATE") {
+      const aiRl = await rateLimitUser(user.id, "ai", 12, 60);
+      if (!aiRl.ok) return tooManyRequests(aiRl);
     }
 
     if (cmd === "CREATE_FILE" || cmd === "EDIT_FILE") {
@@ -182,6 +323,8 @@ export async function POST(req: Request) {
   }
 
   // 3. AI FALLBACK
+  const fbRl = await rateLimitUser(user.id, "ai", 12, 60);
+  if (!fbRl.ok) return tooManyRequests(fbRl);
   let aiText: string;
   try {
     aiText = await callOpenrouterChat(userMessage, convHistory, owner, !!vcToken, !!nlToken, !!rdToken, user.id);
@@ -234,6 +377,10 @@ export async function POST(req: Request) {
 
     if (DESTRUCTIVE_COMMANDS.has(aiCmd)) {
       return safeJsonify(buildConfirmation(aiCmd, aiParams, user.id));
+    }
+    // AI ka suggest kiya hua koi bhi write action bina user ke "Haan" ke nahi chalta (prompt-injection guard)
+    if (needsConfirmation(aiCmd, "ai")) {
+      return safeJsonify(buildAiConfirmation(aiCmd, aiParams, user.id));
     }
 
     const result = await executeCommand(aiCmd, aiParams, owner, ghToken, vcToken, nlToken, rdToken);
