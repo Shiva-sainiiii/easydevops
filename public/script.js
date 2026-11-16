@@ -971,7 +971,7 @@ function renderActiveChatIntoView() {
     // /chat response path uses, so a saved entry renders identically to
     // how it looked when it first arrived.
     const richNode = entry.role === 'agent' ? buildRichBubbleNode(entry) : null;
-    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null, entry.action || null, entry.display || null);
+    const { wrap, bubble } = renderMessage(entry.role, entry.content, entry.actionClass || '', entry.ts || null, entry.action || null, entry.display || null, entry.usage || null);
     if (richNode) {
       bubble.innerHTML = '';
       bubble.appendChild(richNode);
@@ -6188,6 +6188,43 @@ function resetDividerTracking() {
 // Shared label builder (role name + timestamp) used by renderMessage and
 // every one-off interactive bubble (env forms, confirm prompts, etc.) so
 // the timestamp styling stays consistent everywhere a bubble appears.
+// ── USAGE BADGE: har agent reply ke saath "⚡ Rules · 0 AI" ya "🤖 AI · model" ──
+// Server /chat response me `usage: {mode, ai_calls, provider, model, tokens, ms}` bhejta hai.
+// sendMsg/runConfirmedAction use _pendingUsage me rakhte hain; pehla agent bubble use utha leta hai
+// (15s ke andar), aur saved entry me bhi jaata hai taaki reload ke baad badge dikhe.
+let _pendingUsage = null;
+function setPendingUsage(u) { _pendingUsage = u && u.mode ? { u, t: Date.now() } : null; }
+function takePendingUsage() {
+  const p = _pendingUsage;
+  _pendingUsage = null;
+  return p && Date.now() - p.t < 15000 ? p.u : null;
+}
+function buildUsageBadge(u) {
+  if (!u || !u.mode) return null;
+  const el = document.createElement('span');
+  const calls = u.ai_calls || 0;
+  const model = u.model ? String(u.model).replace(/^models\//, '') : '';
+  const tip = [];
+  if (u.provider) tip.push(u.provider);
+  if (model) tip.push(model);
+  if (u.tokens) tip.push(u.tokens + ' tokens');
+  if (u.ms) tip.push((u.ms / 1000).toFixed(1) + 's AI time');
+  if (u.mode === 'rules') {
+    el.className = 'usage-badge rules';
+    el.textContent = '⚡ Rules · 0 AI';
+    el.title = 'Bina AI ke, command parser se ho gaya';
+  } else if (u.mode === 'ai') {
+    el.className = 'usage-badge ai';
+    el.textContent = '🤖 AI · ' + (model || (calls + ' call' + (calls > 1 ? 's' : '')));
+    el.title = 'AI call hui (' + calls + ' API call). ' + tip.join(' · ');
+  } else {
+    el.className = 'usage-badge hybrid';
+    el.textContent = '⚡+🤖 Rules + AI · ' + calls + ' call' + (calls > 1 ? 's' : '');
+    el.title = 'Command rules se, content/plan ke liye AI. ' + tip.join(' · ');
+  }
+  return el;
+}
+
 function makeMsgLabel(role, timestamp = null) {
   const label = document.createElement('div');
   label.className = 'msg-label';
@@ -6201,7 +6238,7 @@ function makeMsgLabel(role, timestamp = null) {
   return label;
 }
 
-function renderMessage(role, content, actionClass = '', timestamp = null, action = null, display = null) {
+function renderMessage(role, content, actionClass = '', timestamp = null, action = null, display = null, usage = null) {
   const es = document.getElementById('empty-state');
   if (es) es.style.display = 'none';
 
@@ -6228,6 +6265,8 @@ function renderMessage(role, content, actionClass = '', timestamp = null, action
       badge.innerHTML = providerBadgeHtml(badgeKey);
       label.appendChild(badge);
     }
+    const ub = buildUsageBadge(usage);
+    if (ub) label.appendChild(ub);
   }
 
   const bubble = document.createElement('div');
@@ -6243,7 +6282,8 @@ function renderMessage(role, content, actionClass = '', timestamp = null, action
 
 function addMessage(role, content, actionClass = '', confirmData = null, action = null, display = null) {
   const ts = Date.now();
-  const { wrap, bubble } = renderMessage(role, content, actionClass, ts, action, display);
+  const usage = role === 'agent' ? takePendingUsage() : null;
+  const { wrap, bubble } = renderMessage(role, content, actionClass, ts, action, display, usage);
 
   // Confirm-action buttons are intentionally NOT saved to localStorage —
   // see the note above SESSIONS_KEY. They only ever exist live.
@@ -6285,6 +6325,7 @@ function addMessage(role, content, actionClass = '', confirmData = null, action 
     const saved = role === 'user' ? capEntryForSave(content, display) : { content, display };
     const entry = { role, content: saved.content, actionClass, ts, action };
     if (saved.display) entry.display = saved.display;
+    if (usage) entry.usage = usage;
     saveChatEntry(entry);
     addMessageActions(wrap, bubble, role, content, actionClass, () => resendMessage(content));
   }
@@ -6535,6 +6576,7 @@ async function runConfirmedAction(confirmData, yesBtn, noBtn) {
     });
     const data = await res.json();
     typing.classList.remove('show');
+    setPendingUsage(data && data.usage);
 
     const cls = actionColorFor(data.action);
     addMessage('agent', data.reply, cls, null, data.action);
@@ -6857,6 +6899,7 @@ async function sendMsg(opts = {}) {
 
     const data = await res.json();
     typing.classList.remove('show');
+    setPendingUsage(data && data.usage);
 
     // Invite accept/decline ke baad menu badge ka count refresh
     if (data && (data.action === 'invite_accepted' || data.action === 'invite_declined')) {
@@ -6891,6 +6934,7 @@ async function sendMsg(opts = {}) {
         const label = document.createElement('div');
         label.className = 'msg-label';
         label.textContent = 'Agent';
+        const richUsage = takePendingUsage();
         const badgeKey = richBubbleBadgeFor(data);
         if (badgeKey) {
           const badge = document.createElement('span');
@@ -6898,6 +6942,8 @@ async function sendMsg(opts = {}) {
           badge.innerHTML = providerBadgeHtml(badgeKey);
           label.appendChild(badge);
         }
+        const richUb = buildUsageBadge(richUsage);
+        if (richUb) label.appendChild(richUb);
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble info';
         bubble.appendChild(richNode);
@@ -6909,6 +6955,7 @@ async function sendMsg(opts = {}) {
         // survive a page refresh instead of degrading to a text bubble.
         saveChatEntry({
           role: 'agent', content: data.reply, actionClass: 'info', ts: Date.now(),
+          usage: richUsage || undefined,
           action: data.action, repo: data.repo, path: data.path,
           items: data.items, repos: data.repos, projects: data.projects,
           sites: data.sites, services: data.services,
@@ -8076,3 +8123,202 @@ async function deleteAIKey(id) {
 // ── RESTORE ON LOAD ──
 restoreChatOnLoad();
 checkAuth();
+
+
+// ═══════════════════════════════════════════════════════════════
+// USAGE DASHBOARD — requests per minute / day / month, rules vs AI, free-limit meters
+// Data: GET /api/usage (sirf counts/metadata; prompts kabhi store nahi hote)
+// ═══════════════════════════════════════════════════════════════
+const USAGE_LIMITS_KEY = 'ed_usage_limits_v1';
+// Approx free-tier defaults — providers inhe badalte rehte hain, isliye editable (apne provider dashboard se verify karo)
+const USAGE_DEFAULT_LIMITS = { google: { rpm: 10, rpd: 250 }, openrouter: { rpm: 20, rpd: 50 } };
+const USAGE_PROVIDER_LABEL = { google: 'Google AI Studio', openrouter: 'OpenRouter' };
+
+function loadUsageLimits() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(USAGE_LIMITS_KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  const out = {};
+  Object.keys(USAGE_DEFAULT_LIMITS).forEach(p => { out[p] = Object.assign({}, USAGE_DEFAULT_LIMITS[p], saved[p] || {}); });
+  Object.keys(saved).forEach(p => { if (!out[p]) out[p] = saved[p]; });
+  return out;
+}
+function saveUsageLimit(provider, field, value) {
+  const all = loadUsageLimits();
+  const n = Math.max(0, Math.floor(Number(value) || 0));
+  all[provider] = Object.assign({}, all[provider] || {}, { [field]: n });
+  try { localStorage.setItem(USAGE_LIMITS_KEY, JSON.stringify(all)); } catch (e) {}
+  if (window.__lastUsageData) renderUsageDashboard(window.__lastUsageData);
+}
+
+function onUsageMenuClick() {
+  const m = document.getElementById('user-menu');
+  if (m) m.classList.remove('show');
+  openUsageDashboard();
+}
+
+async function openUsageDashboard() {
+  const overlay = document.getElementById('usage-overlay');
+  const body = document.getElementById('usage-body');
+  if (!overlay || !body) return;
+  overlay.classList.add('show');
+  body.innerHTML = '<div class="ud-loading">Load ho raha hai…</div>';
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const res = await fetch('/api/usage?tz=' + encodeURIComponent(tz), { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    window.__lastUsageData = data;
+    renderUsageDashboard(data);
+  } catch (e) {
+    body.innerHTML = '<div class="ud-error">Usage data load nahi hua. Thodi der baad ↻ dabao.</div>';
+  }
+}
+
+function closeUsageDashboard() {
+  const overlay = document.getElementById('usage-overlay');
+  if (overlay) overlay.classList.remove('show');
+}
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUsageDashboard(); });
+
+function _udPct(part, whole) { return whole > 0 ? Math.round((part / whole) * 100) : 0; }
+
+function _udChart(buckets, series, labelOf) {
+  const max = Math.max(1, ...buckets.map(b => series.reduce((n, s) => n + (b[s.key] || 0), 0)));
+  const cols = buckets.map(b => {
+    const total = series.reduce((n, s) => n + (b[s.key] || 0), 0);
+    const parts = series.map(s => {
+      const h = ((b[s.key] || 0) / max) * 100;
+      return h > 0 ? '<i class="' + s.cls + '" style="height:' + h.toFixed(1) + '%"></i>' : '';
+    }).join('');
+    const tip = labelOf(b) + ' — ' + series.map(s => s.name + ': ' + (b[s.key] || 0)).join(', ');
+    return '<div class="col" title="' + escHtml(tip) + '">' + (total ? parts : '') + '</div>';
+  }).join('');
+  return '<div class="ud-chart">' + cols + '</div>';
+}
+
+function _udFillMinutes(rows) {
+  const map = new Map(rows.map(r => [Math.floor(new Date(r.t).getTime() / 60000), r]));
+  const nowMin = Math.floor(Date.now() / 60000);
+  const out = [];
+  for (let i = 59; i >= 0; i--) {
+    const k = nowMin - i;
+    const r = map.get(k) || {};
+    out.push({ t: k * 60000, chats: r.chats || 0, calls: r.calls || 0 });
+  }
+  return out;
+}
+
+function _udFillDays(rows, tz) {
+  const map = new Map(rows.map(r => [r.d, r]));
+  const out = [];
+  for (let i = 29; i >= 0; i--) {
+    const dt = new Date(Date.now() - i * 86400000);
+    let key;
+    try { key = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt); }
+    catch (e) { key = dt.toISOString().slice(0, 10); }
+    const r = map.get(key) || {};
+    out.push({ d: key, rules: r.rules || 0, hybrid: r.hybrid || 0, ai: r.ai || 0, calls: r.calls || 0 });
+  }
+  return out;
+}
+
+function _udMeter(label, used, limit, field, provider) {
+  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const cls = pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : '';
+  return '<div class="ud-meter"><div class="ud-meter-row"><span>' + label + ': <b>' + used + '</b> / ' +
+    '<input type="number" min="0" value="' + limit + '" onchange="saveUsageLimit(\'' + provider + '\',\'' + field + '\',this.value)" aria-label="' + label + ' limit"></span>' +
+    '<span>' + (limit > 0 ? pct + '%' : 'limit set karo') + '</span></div>' +
+    '<div class="ud-bar"><i class="' + cls + '" style="width:' + pct + '%"></i></div></div>';
+}
+
+function renderUsageDashboard(d) {
+  const body = document.getElementById('usage-body');
+  if (!body) return;
+  const t = d.totals || {};
+  const limits = loadUsageLimits();
+  const tz = d.tz || 'UTC';
+
+  const card = (k, v, s, cls) => '<div class="ud-card ' + (cls || '') + '"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>';
+  const split = (rules, hybrid, ai) => {
+    const tot = rules + hybrid + ai;
+    return '<div class="ud-stack">' +
+      '<i class="c-rules" style="width:' + _udPct(rules, tot) + '%"></i>' +
+      '<i class="c-hybrid" style="width:' + _udPct(hybrid, tot) + '%"></i>' +
+      '<i class="c-ai" style="width:' + _udPct(ai, tot) + '%"></i></div>';
+  };
+  const legend = '<div class="ud-legend"><span><b class="c-rules"></b>Rules (0 AI)</span><span><b class="c-hybrid"></b>Rules + AI</span><span><b class="c-ai"></b>Sirf AI</span><span><b class="c-calls"></b>AI API calls</span></div>';
+
+  let html = '';
+
+  // ── Aaj / is mahine ──
+  const block = (title, chats, rules, hybrid, ai, calls) =>
+    '<div><div class="ud-section-title">' + title + '</div><div class="ud-cards">' +
+    card('Total requests', chats, '') +
+    card('⚡ Bina AI ke', rules, _udPct(rules, chats) + '% kaam rules se', 'good') +
+    card('🤖 AI involved', hybrid + ai, hybrid + ' hybrid · ' + ai + ' pure AI', 'ai') +
+    card('AI API calls', calls, 'provider ko gayi hui calls') + '</div>' +
+    split(rules, hybrid, ai) + '</div>';
+  html += block('Aaj', t.chats_today || 0, t.rules_today || 0, t.hybrid_today || 0, t.ai_today || 0, t.calls_today || 0);
+  html += block('Is mahine', t.chats_month || 0, t.rules_month || 0, t.hybrid_month || 0, t.ai_month || 0, t.calls_month || 0);
+  html += legend;
+
+  // ── Live + peaks ──
+  html += '<div><div class="ud-section-title">Requests per minute</div><div class="ud-cards">' +
+    card('Abhi (last 1 min)', (t.chats_1m || 0) + ' req', (t.calls_1m || 0) + ' AI calls') +
+    card('Peak / min (24h)', (d.peaks && d.peaks.chats_per_min) || 0, 'requests') +
+    card('Peak AI / min (24h)', (d.peaks && d.peaks.calls_per_min) || 0, 'AI calls') + '</div></div>';
+
+  // ── Free limit meters (provider-wise) ──
+  const byProv = {};
+  (d.models || []).forEach(m => {
+    const p = m.provider || 'unknown';
+    const o = byProv[p] || (byProv[p] = { calls_1m: 0, calls_today: 0, limited_today: 0 });
+    o.calls_1m += m.calls_1m; o.calls_today += m.calls_today; o.limited_today += m.limited_today;
+  });
+  Object.keys(limits).forEach(p => { if (!byProv[p]) byProv[p] = { calls_1m: 0, calls_today: 0, limited_today: 0 }; });
+  html += '<div><div class="ud-section-title">Free limit meters</div><div class="ud-two">';
+  Object.keys(byProv).forEach(p => {
+    const lim = limits[p] || { rpm: 0, rpd: 0 };
+    const u = byProv[p];
+    html += '<div class="ud-meter-box"><div class="ud-meter-head"><span>' + escHtml(USAGE_PROVIDER_LABEL[p] || p) + '</span></div>' +
+      _udMeter('Per minute', u.calls_1m, lim.rpm || 0, 'rpm', p) +
+      _udMeter('Aaj (per day)', u.calls_today, lim.rpd || 0, 'rpd', p) +
+      (u.limited_today ? '<div class="ud-warn">⚠️ Aaj ' + u.limited_today + ' baar provider ne limit (429) di.</div>' : '') + '</div>';
+  });
+  html += '</div><div class="ud-note" style="margin-top:8px">Limits sirf default/approx hain (providers badalte rehte hain) — apne provider dashboard se verify karke upar edit kar lo. ' +
+    'Sirf Easy DevOps se gayi calls gini jaati hain; us key ko kahin aur use kiya to wo yahan nahi dikhega.</div></div>';
+
+  // ── Charts ──
+  const mins = _udFillMinutes(d.per_minute || []);
+  html += '<div><div class="ud-section-title">Last 60 minutes (per minute)</div>' +
+    _udChart(mins, [{ key: 'chats', cls: 'c-rules', name: 'Requests' }, { key: 'calls', cls: 'c-calls', name: 'AI calls' }],
+      b => new Date(b.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) +
+    '<div class="ud-axis"><span>60 min pehle</span><span>abhi</span></div></div>';
+
+  const days = _udFillDays(d.per_day || [], tz);
+  html += '<div><div class="ud-section-title">Last 30 din (per day)</div>' +
+    _udChart(days, [{ key: 'rules', cls: 'c-rules', name: 'Rules' }, { key: 'hybrid', cls: 'c-hybrid', name: 'Rules+AI' }, { key: 'ai', cls: 'c-ai', name: 'AI' }], b => b.d) +
+    '<div class="ud-axis"><span>' + days[0].d + '</span><span>' + days[days.length - 1].d + '</span></div></div>';
+
+  const months = d.per_month || [];
+  if (months.length) {
+    html += '<div><div class="ud-section-title">Per month</div><table class="ud-table"><tr><th>Month</th><th class="num">Requests</th><th class="num">⚡ Rules</th><th class="num">Rules+AI</th><th class="num">AI</th><th class="num">AI API calls</th></tr>' +
+      months.slice().reverse().map(m => {
+        const tot = m.rules + m.hybrid + m.ai;
+        return '<tr><td>' + escHtml(m.m) + '</td><td class="num">' + tot + '</td><td class="num">' + m.rules + ' (' + _udPct(m.rules, tot) + '%)</td><td class="num">' + m.hybrid + '</td><td class="num">' + m.ai + '</td><td class="num">' + m.calls + '</td></tr>';
+      }).join('') + '</table></div>';
+  }
+
+  // ── Model-wise ──
+  if ((d.models || []).length) {
+    html += '<div><div class="ud-section-title">Model wise (is mahine)</div><table class="ud-table"><tr><th>Model</th><th class="num">Aaj</th><th class="num">Month</th><th class="num">Tokens</th><th class="num">429</th></tr>' +
+      d.models.map(m => '<tr><td>' + escHtml((USAGE_PROVIDER_LABEL[m.provider] || m.provider || '?') + ' · ' + String(m.model || '?').replace(/^models\//, '')) + '</td><td class="num">' + m.calls_today +
+        '</td><td class="num">' + m.calls_month + '</td><td class="num">' + (m.tokens_month || 0).toLocaleString() + '</td><td class="num">' + m.limited_today + '</td></tr>').join('') + '</table></div>';
+  } else {
+    html += '<div class="ud-note">Is mahine abhi tak koi AI call nahi hui — sab kaam rules se ho gaya 🎉</div>';
+  }
+
+  html += '<div class="ud-note">Timezone: ' + escHtml(tz) + '. Sirf counts/metadata store hote hain — tumhare messages ya AI replies nahi.</div>';
+  body.innerHTML = html;
+}

@@ -10,6 +10,7 @@
 import { get, post, RequestException, Timeout } from "@/lib/http";
 import { getAiKeys, getAiSettings } from "@/lib/db";
 import { AIError, NoAIKeyError } from "@/lib/commands/errors";
+import { recordAiAttempt } from "@/lib/usage";
 
 export type AiProviderId = "google" | "openrouter";
 
@@ -136,6 +137,7 @@ export async function aiChat(
     for (let i = 0; i < keys.length; i++) {
       const key = keys[(start + i) % keys.length];
       let resp;
+      const t0 = Date.now();
       try {
         resp = await post(`${AI_PROVIDERS[prov].base}/chat/completions`, {
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -143,12 +145,22 @@ export async function aiChat(
           timeout,
         });
       } catch (e) {
+        await recordAiAttempt(userId, { provider: prov, model, status: 0, ms: Date.now() - t0 });
         if (e instanceof Timeout) throw e;
         lastReason = `${AI_PROVIDERS[prov].label}: connection error`;
         continue;
       }
 
       const j = safeJson(resp.text);
+      // Har HTTP attempt provider ke rate-limit me gini jaati hai (429/retry samet) — dashboard ke liye record
+      await recordAiAttempt(userId, {
+        provider: prov,
+        model,
+        status: resp.status_code,
+        ms: Date.now() - t0,
+        tokensIn: Number.isFinite(j?.usage?.prompt_tokens) ? j.usage.prompt_tokens : null,
+        tokensOut: Number.isFinite(j?.usage?.completion_tokens) ? j.usage.completion_tokens : null,
+      });
       if (resp.status_code === 429) {
         lastReason = `${AI_PROVIDERS[prov].label}: limit khatam (429)`;
         continue;

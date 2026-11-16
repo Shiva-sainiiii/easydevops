@@ -61,3 +61,16 @@ test("risk tiers + AI-origin gating", () => {
   assert.equal(needsConfirmation("DELETE_REPO", "rules"), true);
   assert.equal(isKnownCommand("RM_RF"), false);
 });
+
+import { summarizeUsage } from "../lib/usage_core";
+
+test("usage: bina AI call = rules; AI call + source ai = ai; baaki hybrid", () => {
+  assert.deepEqual(summarizeUsage([]), { mode: "rules", ai_calls: 0 });
+  const a = { provider: "google", model: "gemini-x", status: 200, ms: 400, tokensIn: 10, tokensOut: 5 };
+  assert.equal(summarizeUsage([a], "ai").mode, "ai");
+  assert.equal(summarizeUsage([a], "hybrid").mode, "hybrid");
+  const u = summarizeUsage([a, { ...a, status: 429, ms: 100, tokensIn: null, tokensOut: null }], "direct");
+  assert.equal(u.ai_calls, 2);
+  assert.equal(u.tokens, 15);
+  assert.equal(u.ms, 500);
+});

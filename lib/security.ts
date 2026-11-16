@@ -8,6 +8,7 @@
  * Yahin safeRepoPath() bhi hai: GitHub pe har write (CREATE/EDIT/DELETE FILE,
  * codegen commit, /upload, /upload-zip) se pehle path-traversal guard.
  */
+import { finalizeUsage } from "@/lib/usage";
 import { NextResponse } from "next/server";
 
 import { currentUser } from "@/lib/auth";
@@ -60,6 +61,11 @@ export function redact<T>(text: T, extraSecrets: string[] = []): T {
 
 /** NextResponse.json() ka wrapper jo payload ki har string value redact karta hai. */
 export async function safeJsonify(payload: unknown, status = 200, headers?: HeadersInit): Promise<NextResponse> {
+  // /chat request ke scope me ho to is reply ka usage (rules vs AI) attach + log
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const usage = await finalizeUsage(payload as Record<string, any>);
+    if (usage) payload = { ...(payload as Record<string, any>), usage };
+  }
   const user = await currentUser();
   const extra: string[] = [];
   if (user) {

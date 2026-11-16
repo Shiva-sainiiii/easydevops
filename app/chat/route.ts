@@ -20,6 +20,7 @@ import {
 } from "@/lib/db";
 import { Timeout } from "@/lib/http";
 import { rateLimitUser, tooManyRequests } from "@/lib/ratelimit";
+import { bindUsageUser, runUsageScope } from "@/lib/usage";
 import { readJsonBody } from "@/lib/route-utils";
 import { safeJsonify } from "@/lib/security";
 import {
@@ -46,6 +47,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  // Har /chat request ka usage scope: is request me AI call hui ya nahi -> response me `usage` (rules/hybrid/ai)
+  return runUsageScope(() => handleChat(req));
+}
+
+async function handleChat(req: Request) {
   const user = await currentUser();
   if (!user) {
     return safeJsonify(
@@ -58,6 +64,7 @@ export async function POST(req: Request) {
     );
   }
 
+  bindUsageUser(user.id);
   const rl = await rateLimitUser(user.id, "chat", 40, 60);
   if (!rl.ok) return tooManyRequests(rl);
 

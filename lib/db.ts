@@ -92,6 +92,25 @@ async function runInit(): Promise<void> {
     )
   `);
 
+  // Usage dashboard: har chat request + har AI API attempt (sirf counts/metadata, prompts nahi)
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS usage_log (
+        id BIGSERIAL PRIMARY KEY,
+        github_id BIGINT NOT NULL,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        kind TEXT NOT NULL,
+        mode TEXT,
+        action TEXT,
+        provider TEXT,
+        model TEXT,
+        status INTEGER,
+        ms INTEGER,
+        tokens_in INTEGER,
+        tokens_out INTEGER
+    )
+  `);
+  await p.query("CREATE INDEX IF NOT EXISTS usage_log_gh_ts ON usage_log (github_id, ts DESC)");
+
   // AI Gateway: har user ki apni AI keys (encrypted) + active provider/model
   await p.query(`
     CREATE TABLE IF NOT EXISTS ai_keys (
@@ -125,7 +144,7 @@ export function initDb(): Promise<void> {
   return _init;
 }
 
-async function query<T = any>(text: string, params: unknown[] = []): Promise<T[]> {
+export async function query<T = any>(text: string, params: unknown[] = []): Promise<T[]> {
   await initDb();
   const res = await pool().query(text, params as any[]);
   return res.rows as T[];
