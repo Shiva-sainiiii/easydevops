@@ -4,8 +4,8 @@ Disallow: /chat
 Disallow: /auth/
 Disallow: /api/
 Disallow: /download
+Disallow: /download-env
 Disallow: /download-repo-zip
 Disallow: /upload
-Disallow: /upload-zip
 
 Sitemap: https://easydevops.vercel.app/sitemap.xml

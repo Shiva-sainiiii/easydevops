@@ -2,17 +2,21 @@ import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
 
-const TITLE = "Easy DevOps — GitHub, Vercel, Netlify & Render se Chat karo";
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://easydevops.vercel.app").replace(/\/+$/, "");
+const TITLE = "Easy DevOps — Deploy from chat: GitHub, Vercel, Netlify & Render";
+// ~155 chars: Google snippet me poora dikhta hai
+const DESCRIPTION =
+  "Create GitHub repos, deploy to Vercel, Netlify & Render and manage env vars from a simple chat — no CLI needed. Built for students. English & Hinglish.";
+const OG_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Easy DevOps — deploy from chat, no CLI" };
 
 export const metadata: Metadata = {
-  title: TITLE,
-  description:
-    "Easy DevOps ek AI-powered chat tool hai jo GitHub repos banata hai, Vercel/Netlify pe deploy karta hai, aur Render services manage karta hai — sab kuch tumhare khud ke account me, Hindi/English chat commands se. Mobile-first, secure OAuth login.",
-  keywords:
-    "devops agent, ai devops tool, github automation, vercel deploy chatbot, netlify deployment ai, render service manager, chat based deployment, devops chatbot, github repo manager ai, hinglish devops tool",
-  authors: [{ name: "Shiva Saini" }],
-  robots: "index, follow",
-  alternates: { canonical: "https://easydevops.vercel.app/" },
+  metadataBase: new URL(SITE_URL),
+  title: { default: TITLE, template: "%s | Easy DevOps" },
+  description: DESCRIPTION,
+  applicationName: "Easy DevOps",
+  authors: [{ name: "Shiva Saini", url: "https://github.com/Shiva-sainiiii" }],
+  creator: "Shiva Saini",
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 } },
   verification: { google: "P01x9soQMkl7WRKM-EGjKulOwN_Tqe-ytv7ZaOpKFLI" },
   icons: {
     icon: [
@@ -26,26 +30,25 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
   openGraph: {
     type: "website",
-    title: TITLE,
-    description:
-      "Ek chat interface se GitHub repos banao, Vercel/Netlify pe deploy karo, aur Render services manage karo — apne khud ke account me, secure OAuth ke saath.",
-    images: ["https://multitenant-agent.vercel.app/android-chrome-512x512.png"],
-    url: "https://multitenant-agent.vercel.app/",
     siteName: "Easy DevOps",
+    title: TITLE,
+    description: DESCRIPTION,
+    url: SITE_URL + "/",
+    locale: "en_IN",
+    images: [OG_IMAGE],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: TITLE,
-    description:
-      "Ek chat interface se GitHub repos banao, Vercel/Netlify pe deploy karo, aur Render services manage karo — apne khud ke account me.",
-    images: ["https://multitenant-agent.vercel.app/android-chrome-512x512.png"],
+    description: DESCRIPTION,
+    images: [OG_IMAGE.url],
   },
 };
 
+// maximumScale hata diya: pinch-zoom band karna accessibility issue hai (Lighthouse/WCAG).
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: "cover",
   themeColor: "#09090b",
 };

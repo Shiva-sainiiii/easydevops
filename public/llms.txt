@@ -1,0 +1,20 @@
+# Easy DevOps
+
+> Easy DevOps lets students and beginners create GitHub repos, deploy to Vercel, Netlify and Render, and manage env vars from a simple chat — no CLI, no switching platforms.
+
+Easy DevOps is a chat-based DevOps tool by Shiva Saini. Users sign in with GitHub, connect Vercel, Netlify or Render, and run tasks in English or Hinglish. Most commands are handled by a rule-based parser (no AI call); AI is used only for complex tasks, with the user's own API key.
+
+## Pages
+- [Everything you can do from one chat](https://easydevops.vercel.app/features): Create GitHub repos, deploy to Vercel, Netlify and Render, manage env vars and pull requests from a single chat. Rules-first, AI only when needed.
+- [How Easy DevOps works](https://easydevops.vercel.app/how-it-works): How a chat message becomes a GitHub, Vercel, Netlify or Render action: rule-based parsing first, an AI planner only for complex tasks, confirmation for risky steps.
+- [Easy DevOps command cookbook](https://easydevops.vercel.app/commands): Copy-paste chat commands for GitHub, Vercel, Netlify and Render, in English and Hinglish: create repos, push files, deploy, set env vars, merge pull requests.
+- [Frequently asked questions](https://easydevops.vercel.app/faq): Answers about Easy DevOps: what it is, which platforms it supports, whether it uses AI, how safe it is, Hinglish support, multi-step prompts and deploying without the CLI.
+- [How to create a GitHub repo and deploy it to Vercel without the CLI](https://easydevops.vercel.app/guides/deploy-to-vercel-without-cli): Step-by-step: create a GitHub repository, add your index.html and deploy it to Vercel from a chat, plus the equivalent git and Vercel CLI commands for comparison.
+- [About Easy DevOps](https://easydevops.vercel.app/about): Easy DevOps is an independent project by full-stack developer Shiva Saini, built so students can ship projects without learning the CLI first.
+- [Privacy](https://easydevops.vercel.app/privacy): What Easy DevOps stores (encrypted provider tokens, AI keys, chat history, usage counts), what it does not, and how to disconnect or revoke access.
+
+## Key facts
+- Platforms: GitHub, Vercel, Netlify, Render
+- Languages understood: English and Hinglish
+- Safety: confirmation before destructive actions; encrypted provider tokens and AI keys; GitHub OAuth
+- Creator: Shiva Saini (https://github.com/Shiva-sainiiii)
